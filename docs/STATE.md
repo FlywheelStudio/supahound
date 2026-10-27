@@ -6,8 +6,9 @@ Updated 2026-10-27.
 
 | Feature | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- |
-| Tenant isolation (storage, vault, poller) | Built and tested on a local cluster; needs a deploy target | Postgres host (Hetzner + Coolify?) | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
-| Incident engine + ZDR explainer | Built and tested with mocks and a captured HTTP body; live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
+| Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Guardbase Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
+| Incident engine + ZDR explainer | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
+| Web app: auth, onboarding, dashboard | Sign-in, workspace, overview built; OAuth connect next | Guardbase Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
 | Baseline-free detectors (2 and 4) | Code and 127 tests done; live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 
 ## Completed
@@ -24,7 +25,6 @@ From the PRD "This week" list:
 
 - Ownership refresh: read `pg_policies` through the read-only SQL endpoint into `projects.ownership`
   (without it, detector 2 has no owner columns on a live project)
-- Supabase OAuth connect flow and token refresh
-- Mark poll runs stuck in `running` (a crash after the start transaction) as `unable_to_assess`
-- Alert delivery (email, signed webhooks), weekly digest, agency dashboard
+- Web: Supabase OAuth connect + token refresh, project picker, Stripe billing, alert email, signed webhooks, team invites, Turnstile, shadcn/ui
+- Weekly digest; agency client report (V2)
 - Detectors 1, 3 and 5; posture scan

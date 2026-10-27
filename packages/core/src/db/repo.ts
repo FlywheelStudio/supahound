@@ -269,3 +269,69 @@ export async function dueProjects(schedulerPool: Pool, olderThanSeconds: number,
   );
   return res.rows.map((r) => projectScope(tenantId(r.tenant_id), r.id));
 }
+
+// Dashboard reads. Called inside withTenantForUser, so the tenant is a verified membership.
+
+export interface ProjectSummary {
+  id: ProjectId;
+  name: string;
+  supabaseRef: string;
+  paused: boolean;
+  lastPolledAt: Date | null;
+  openIncidents: number;
+  lastRunStatus: "running" | "ok" | "unable_to_assess" | null;
+}
+
+export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
+  const rows = await tx.query<{
+    id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
+    open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
+  }>(
+    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at,
+            (SELECT count(*)::int FROM guardbase.incidents i
+              WHERE i.tenant_id = p.tenant_id AND i.project_id = p.id AND i.status = 'open') AS open_incidents,
+            (SELECT r.status FROM guardbase.poll_runs r
+              WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id ORDER BY r.started_at DESC LIMIT 1) AS last_run_status
+     FROM guardbase.projects p WHERE p.tenant_id = $1 ORDER BY p.name`,
+    [tx.tenantId],
+  );
+  return rows.map((r) => ({
+    id: projectId(r.id), name: r.name, supabaseRef: r.supabase_ref, paused: r.paused,
+    lastPolledAt: r.last_polled_at, openIncidents: r.open_incidents, lastRunStatus: r.last_run_status,
+  }));
+}
+
+export interface IncidentSummary {
+  id: string;
+  projectName: string;
+  severity: Severity;
+  detectors: string[];
+  hits: number;
+  lastSeenAt: Date;
+  summary: { summary?: string } | null;
+}
+
+export async function listOpenIncidents(tx: TenantTx, limit = 50): Promise<IncidentSummary[]> {
+  const rows = await tx.query<{
+    id: string; project_name: string; severity: Severity; detectors: string[]; hits: number;
+    last_seen_at: Date; summary: { summary?: string } | null;
+  }>(
+    `SELECT i.id, p.name AS project_name, i.severity, i.detectors, i.hits, i.last_seen_at, i.summary
+     FROM guardbase.incidents i
+     JOIN guardbase.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
+     WHERE i.tenant_id = $1 AND i.status = 'open'
+     ORDER BY CASE i.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
+              i.last_seen_at DESC
+     LIMIT $2`,
+    [tx.tenantId, limit],
+  );
+  return rows.map((r) => ({
+    id: r.id, projectName: r.project_name, severity: r.severity, detectors: r.detectors, hits: r.hits,
+    lastSeenAt: r.last_seen_at, summary: r.summary,
+  }));
+}
+
+export async function countConnections(tx: TenantTx): Promise<number> {
+  const rows = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM guardbase.connections WHERE tenant_id = $1", [tx.tenantId]);
+  return rows[0]?.n ?? 0;
+}

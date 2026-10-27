@@ -42,6 +42,17 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
     expect(projects).toEqual([{ name: "Client app" }]);
   });
 
+  it("returns dashboard data for the member's workspace only", async () => {
+    const [projects, connections] = await withTenantForUser(db.app, alice, client, async (tx) => [
+      await repo.listProjects(tx),
+      await repo.countConnections(tx),
+    ] as const);
+    expect(projects.map((p) => [p.name, p.openIncidents, p.lastRunStatus])).toEqual([["Client app", 0, null]]);
+    expect(connections).toBe(1);
+    const own = await withTenantForUser(db.app, alice, agency, (tx) => repo.listProjects(tx));
+    expect(own).toEqual([]);
+  });
+
   it("refuses a non-member before the callback runs", async () => {
     let ran = false;
     await expect(withTenantForUser(db.app, bob, agency, async () => { ran = true; })).rejects.toThrow(NotAMemberError);
