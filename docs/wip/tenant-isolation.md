@@ -76,3 +76,12 @@ path may read, write, decrypt or mix one tenant's data with another's.
     incident (PRD: every alert still goes out).
   - Mutation checks: the old overlapping window, an always-true claim and a rethrown explainer
     error each fail the suite.
+- Cloudflare poller (`apps/poller`): Cron Trigger every minute lists due scopes through the
+  scheduler Hyperdrive config and enqueues one message per scope (batches of 100). The queue
+  consumer (max 20 concurrent, 3 retries, dead-letter queue) runs `pollProject` through the app
+  Hyperdrive config. Pools are created per invocation. Malformed messages are acked; crashes retry.
+- Core proven inside workerd (`@cloudflare/vitest-plugin`): vault (node:crypto), detectors and the
+  AI SDK path with ZDR on both models. Not proven: `pg` over Hyperdrive, which needs a live config.
+- Stale-run sweep: each poll first marks its own project's runs stuck in `running` for over 10
+  minutes as `unable_to_assess` / `worker_lost` (tenant-scoped, so the scheduler role stays
+  read-only).

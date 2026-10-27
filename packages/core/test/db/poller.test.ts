@@ -219,6 +219,22 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     });
   });
 
+  it("marks a run left in running by a lost worker as unable to assess", async () => {
+    behaviour[await tokenOf(agency)] = () => [];
+    await withTenant(db.app, agency.tenantId, (tx) =>
+      repo.startPollRun(tx, agency.projectId, { start: new Date(NOW.getTime() - 3_600_000), end: new Date(NOW.getTime() - 3_000_000) }),
+    );
+    await db.admin.query("UPDATE guardbase.poll_runs SET started_at = $1 WHERE tenant_id = $2", [new Date(NOW.getTime() - 3_600_000), agency.tenantId]);
+    await pollProject(agency, deps());
+    const runs = await withTenant(db.app, agency.tenantId, (tx) =>
+      tx.query<{ status: string; error_code: string | null }>("SELECT status, error_code FROM guardbase.poll_runs ORDER BY started_at"),
+    );
+    expect(runs).toEqual([
+      { status: "unable_to_assess", error_code: "worker_lost" },
+      { status: "ok", error_code: null },
+    ]);
+  });
+
   it("lets exactly one of two racing workers poll a project", async () => {
     behaviour[await tokenOf(agency)] = () => attackRows;
     const results = await Promise.all([pollProject(agency, deps()), pollProject(agency, deps())]);

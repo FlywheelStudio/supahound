@@ -98,6 +98,19 @@ export async function claimProject(tx: TenantTx, id: ProjectId, now: Date, inter
   return rows.length === 1;
 }
 
+// A run left in `running` (the worker died after the start transaction) becomes
+// "unable to assess", so the dashboard never shows a silent gap as healthy.
+export async function failStaleRuns(tx: TenantTx, id: ProjectId, now: Date, olderThanSeconds: number): Promise<number> {
+  const rows = await tx.query(
+    `UPDATE guardbase.poll_runs SET status = 'unable_to_assess', error_code = 'worker_lost', finished_at = $3
+     WHERE tenant_id = $1 AND project_id = $2 AND status = 'running'
+       AND started_at < $3::timestamptz - make_interval(secs => $4)
+     RETURNING id`,
+    [tx.tenantId, id, now, olderThanSeconds],
+  );
+  return rows.length;
+}
+
 // End of the last window that was fully assessed. The next poll starts here, so windows never
 // overlap (no double counting) and a failed poll's span is covered by the next good one.
 export async function lastAssessedUntil(tx: TenantTx, id: ProjectId): Promise<Date | null> {

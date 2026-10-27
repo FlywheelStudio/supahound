@@ -1,0 +1,104 @@
+import { dueProjects } from "@guardbase/core/db/repo";
+import { explainIncident } from "@guardbase/core/explainer/llm";
+import { queryLogs } from "@guardbase/core/logs/client";
+import { pollProject, type PollDeps, type PollOutcome } from "@guardbase/core/poller/pollProject";
+import { projectScope, type ProjectScope } from "@guardbase/core/tenancy/scope";
+import { TokenVault } from "@guardbase/core/vault/vault";
+import pg from "pg";
+
+// Cron: list due project scopes through the scheduler role (IDs only) and enqueue one message
+// per scope. Queue: poll each scope in its own tenant transactions through the app role.
+// Queues deliver at least once; pollProject's claim makes a duplicate message a no-op.
+//
+// Pools are created per invocation: Workers may not share I/O objects across requests.
+
+export interface PollMessage {
+  tenantId: string;
+  projectId: string;
+}
+
+const QUEUE_SEND_LIMIT = 100;
+
+export function parseMessage(body: unknown): ProjectScope | null {
+  if (!body || typeof body !== "object") return null;
+  const { tenantId, projectId } = body as Record<string, unknown>;
+  if (typeof tenantId !== "string" || typeof projectId !== "string") return null;
+  try {
+    return projectScope(tenantId, projectId);
+  } catch {
+    return null;
+  }
+}
+
+function log(event: string, fields: Record<string, string | number | boolean | null> = {}): void {
+  // Internal IDs and counts only. Never log error text, tokens, refs or customer data.
+  console.log(JSON.stringify({ event, ...fields }));
+}
+
+export interface PollQueue {
+  sendBatch(messages: Iterable<MessageSendRequest<PollMessage>>): Promise<unknown>;
+}
+
+export async function enqueueDue(scopes: ProjectScope[], queue: PollQueue): Promise<number> {
+  for (let i = 0; i < scopes.length; i += QUEUE_SEND_LIMIT) {
+    const chunk = scopes.slice(i, i + QUEUE_SEND_LIMIT);
+    await queue.sendBatch(chunk.map((s) => ({ body: { tenantId: s.tenantId, projectId: s.projectId } })));
+  }
+  return scopes.length;
+}
+
+export interface QueueMessageLike {
+  body: unknown;
+  ack(): void;
+  retry(): void;
+}
+
+export async function handleMessages(
+  messages: readonly QueueMessageLike[],
+  poll: (scope: ProjectScope) => Promise<PollOutcome>,
+): Promise<void> {
+  for (const msg of messages) {
+    const scope = parseMessage(msg.body);
+    if (!scope) {
+      log("poll_message_invalid");
+      msg.ack();
+      continue;
+    }
+    try {
+      const outcome = await poll(scope);
+      log("poll_done", { project_id: scope.projectId, status: outcome.status });
+      msg.ack();
+    } catch {
+      log("poll_crashed", { project_id: scope.projectId });
+      msg.retry();
+    }
+  }
+}
+
+export default {
+  async scheduled(_controller, env): Promise<void> {
+    const scheduler = new pg.Pool({ connectionString: env.HYPERDRIVE_SCHEDULER.connectionString, max: 1 });
+    try {
+      const count = await enqueueDue(await dueProjects(scheduler, 60, 1000), env.POLL_QUEUE);
+      log("polls_enqueued", { count });
+    } finally {
+      await scheduler.end();
+    }
+  },
+
+  async queue(batch, env): Promise<void> {
+    const app = new pg.Pool({ connectionString: env.HYPERDRIVE_APP.connectionString, max: 5 });
+    const deps: PollDeps = {
+      app,
+      vault: TokenVault.fromEnv({ GUARDBASE_MASTER_KEYS: env.GUARDBASE_MASTER_KEYS }),
+      queryLogs,
+      explain: (features) => explainIncident(features, { apiKey: env.AI_GATEWAY_API_KEY }),
+      env: { GUARDBASE_SOURCE_COLUMN: env.GUARDBASE_SOURCE_COLUMN },
+    };
+    try {
+      await handleMessages(batch.messages, (scope) => pollProject(scope, deps));
+    } finally {
+      await app.end();
+    }
+  },
+} satisfies ExportedHandler<Env, PollMessage>;

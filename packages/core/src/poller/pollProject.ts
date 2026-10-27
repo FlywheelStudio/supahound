@@ -40,6 +40,9 @@ export type PollOutcome =
 // the cost of never counting a request twice.
 export const LAG_SECONDS = 120;
 export const FIRST_LOOKBACK_MINUTES = 5;
+// A poll holds no transaction across its external calls, but the Supabase query, the model
+// calls (20 s timeout each) and the save fit well inside this.
+export const STALE_RUN_SECONDS = 600;
 
 const floorToMinute = (ms: number) => Math.floor(ms / 60_000) * 60_000;
 
@@ -78,6 +81,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     const project = await repo.getProject(tx, scope.projectId);
     if (!project) return { skip: "not_found" as const };
     if (project.paused) return { skip: "paused" as const };
+    await repo.failStaleRuns(tx, scope.projectId, now, STALE_RUN_SECONDS);
     const window = nextWindow(await repo.lastAssessedUntil(tx, scope.projectId), now);
     if (!window) return { skip: "nothing_new" as const };
     if (!(await repo.claimProject(tx, scope.projectId, now, deps.intervalSeconds ?? 60))) {

@@ -1,0 +1,49 @@
+// Guardbase poller (decision 008).
+//   cron  -> list due project scopes (scheduler role, IDs only) -> one queue message per scope
+//   queue -> one tenant-scoped poll per message (app role)
+// Secrets (wrangler secret put): GUARDBASE_MASTER_KEYS, AI_GATEWAY_API_KEY.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "guardbase-poller",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": { "crons": ["* * * * *"] },
+  "queues": {
+    "producers": [{ "binding": "POLL_QUEUE", "queue": "guardbase-polls" }],
+    "consumers": [
+      {
+        "queue": "guardbase-polls",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "max_concurrency": 20,
+        "dead_letter_queue": "guardbase-polls-dlq"
+      }
+    ]
+  },
+  // One Hyperdrive config per database role. Create BOTH with --caching-disabled: RLS results
+  // depend on a transaction setting, so a query cache could serve one tenant's rows to another.
+  // Point them at Supabase's direct or session connection, never the transaction pooler.
+  // Local dev: set CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP (and _SCHEDULER).
+  // The IDs below are placeholders until the Hyperdrive configs exist.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE_APP",
+      "id": "00000000000000000000000000000001"
+    },
+    {
+      "binding": "HYPERDRIVE_SCHEDULER",
+      "id": "00000000000000000000000000000002"
+    }
+  ],
+  "vars": {
+    "GUARDBASE_SOURCE_COLUMN": "source"
+  },
+  "secrets": { "required": ["GUARDBASE_MASTER_KEYS", "AI_GATEWAY_API_KEY"] },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+  }
+}

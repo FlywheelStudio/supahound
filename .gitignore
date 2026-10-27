@@ -6,3 +6,9 @@ dist/
 .claude/settings.local.json
 # Real log exports never enter git: they hold user IDs, IPs and emails.
 *.local.ndjson
+
+# Wrangler local secrets and build state
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
