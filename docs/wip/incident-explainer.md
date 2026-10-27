@@ -33,3 +33,14 @@ of one tenant.
 - Team-wide ZDR in the AI Gateway dashboard: $0.10 per 1,000 requests, a second safeguard.
 
 ## Build log
+
+- Explainer built: `features.ts` (whitelist rebuild, actor aliased), `validate.ts`, `template.ts`,
+  `llm.ts` (the only model caller). ESLint blocks model calls, the gateway factory, provider SDKs,
+  dynamic imports of them and vendor URLs everywhere else; `test/zdrGuard.test.ts` proves the
+  rule fires.
+- Wire test: `createGateway({ fetch })` captures the real HTTP bodies. Both the Haiku and the
+  Luna request carry `providerOptions.gateway.zeroDataRetention: true`.
+- A routing report that names providers without "ZDR" now discards the output (fail closed).
+  A response with no routing report is accepted and recorded as `zdrConfirmed: null`.
+- Mutation checks that fail the suite: flag removed, flag false, options not passed, routing check
+  skipped, number check skipped, actor not aliased.
