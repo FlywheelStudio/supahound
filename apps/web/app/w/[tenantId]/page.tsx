@@ -6,6 +6,7 @@ import { Checklist } from "../../../components/Checklist";
 import { withPool } from "../../../lib/db";
 import { currentStep, onboardingSteps } from "../../../lib/onboarding";
 import { requireUser } from "../../../lib/supabase";
+import { startConnect } from "./actions";
 
 const SEVERITY_STYLE: Record<string, string> = {
   critical: "bg-red-100 text-red-800",
@@ -14,7 +15,20 @@ const SEVERITY_STYLE: Record<string, string> = {
   low: "bg-slate-100 text-slate-700",
 };
 
-export default async function Workspace({ params }: { params: Promise<{ tenantId: string }> }) {
+const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
+  connected: { tone: "ok", text: "Supabase connected. Next, choose the projects to watch." },
+  connect: { tone: "error", text: "Connecting Supabase failed or the link expired. Try again." },
+  consent: { tone: "error", text: "Supabase access was not granted." },
+  role: { tone: "error", text: "Only workspace owners and admins can connect Supabase." },
+};
+
+export default async function Workspace({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ tenantId: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const user = await requireUser();
   const { tenantId } = await params;
   let tenant;
@@ -38,6 +52,8 @@ export default async function Workspace({ params }: { params: Promise<{ tenantId
     throw err;
   });
 
+  const query = await searchParams;
+  const notice = query.connected ? NOTICES.connected : query.error ? NOTICES[query.error] : undefined;
   const steps = onboardingSteps({ hasWorkspace: true, connections: data.connections, projects: data.projects.length });
   const setupLeft = currentStep(steps);
 
@@ -50,10 +66,27 @@ export default async function Workspace({ params }: { params: Promise<{ tenantId
         </form>
       </header>
 
+      {notice && (
+        <p role="status" className={`mb-6 rounded-md border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
+          {notice.text}
+        </p>
+      )}
+
       {setupLeft && (
         <section className="mb-10 rounded-md border border-slate-200 bg-white p-6">
           <h2 className="mb-4 font-semibold">Finish setup</h2>
           <Checklist steps={steps} />
+          {setupLeft.id === "connect" && data.role !== "member" && (
+            <form action={startConnect} className="mt-6">
+              <input type="hidden" name="tenantId" value={tenant} />
+              <button className="rounded-md bg-slate-950 px-4 py-2 font-medium text-white hover:bg-slate-800">
+                Connect Supabase
+              </button>
+              <p className="mt-2 text-sm text-slate-500">
+                Guardbase asks for read access to logs and database metadata only.
+              </p>
+            </form>
+          )}
         </section>
       )}
 

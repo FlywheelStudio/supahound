@@ -22,7 +22,7 @@ export function onboardingSteps(s: StepState): Step[] {
   return [
     { id: "account", title: "Sign in", detail: "Your email is your account.", done: true, available: true },
     { id: "workspace", title: "Create a workspace", detail: "One per agency or company. Invite your team later.", done: s.hasWorkspace, available: true },
-    { id: "connect", title: "Connect Supabase", detail: "Read-only access to logs and policies. No service-role key, ever.", done: s.connections > 0, available: false },
+    { id: "connect", title: "Connect Supabase", detail: "Read-only access to logs and policies. No service-role key, ever.", done: s.connections > 0, available: true },
     { id: "projects", title: "Choose projects", detail: "Pick the Supabase projects Guardbase watches.", done: s.projects > 0, available: false },
     { id: "plan", title: "Choose a plan", detail: "Free posture scans, or detection from $19 per project.", done: false, available: false },
     { id: "alerts", title: "Set up alerts", detail: "Email first; Slack and Discord webhooks optional.", done: false, available: false },

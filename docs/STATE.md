@@ -8,7 +8,7 @@ Updated 2026-10-27.
 | --- | --- | --- | --- |
 | Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Guardbase Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
 | Incident engine + ZDR explainer | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
-| Web app: auth, onboarding, dashboard | Sign-in, workspace, overview built; OAuth connect next | Guardbase Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
+| Web app: auth, onboarding, dashboard | Sign-in, workspace, overview, Supabase OAuth connect built; project picker next | Guardbase Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
 | Baseline-free detectors (2 and 4) | Code and 127 tests done; live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 
 ## Completed
@@ -25,6 +25,6 @@ From the PRD "This week" list:
 
 - Ownership refresh: read `pg_policies` through the read-only SQL endpoint into `projects.ownership`
   (without it, detector 2 has no owner columns on a live project)
-- Web: Supabase OAuth connect + token refresh, project picker, Stripe billing, alert email, signed webhooks, team invites, Turnstile, shadcn/ui
+- Web: project picker + ownership load, Stripe billing, alert email, signed webhooks, team invites, Turnstile, shadcn/ui
 - Weekly digest; agency client report (V2)
 - Detectors 1, 3 and 5; posture scan

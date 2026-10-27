@@ -14,6 +14,8 @@ import { edgeRollupSql } from "../logs/sql.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
 import type { ProjectScope } from "../tenancy/scope.js";
+import { accessTokenFor } from "../supabase/credentials.js";
+import { OAuthError, type OAuthClient } from "../supabase/oauth.js";
 import type { TokenVault } from "../vault/vault.js";
 
 // One poll of one project, entirely inside one tenant's scope. Transactions stay short and never
@@ -22,6 +24,8 @@ import type { TokenVault } from "../vault/vault.js";
 export interface PollDeps {
   app: Pool;
   vault: TokenVault;
+  // Supabase OAuth app credentials, for refreshing tokens. Null for static tokens (tests, CLI).
+  oauth?: OAuthClient | null;
   queryLogs: (query: LogsQuery, options: { token: string }) => Promise<Record<string, unknown>[]>;
   explain: (features: IncidentFeatures) => Promise<ExplainResult>;
   now?: () => Date;
@@ -62,6 +66,7 @@ export function nextWindow(lastAssessed: Date | null, now: Date): { start: Date;
 }
 
 function errorCode(err: unknown): string {
+  if (err instanceof OAuthError) return err.status === 401 || err.status === 400 ? "unauthorized" : "token_refresh_failed";
   if (err instanceof LogsApiError) {
     if (err.status === 401 || err.status === 403) return "unauthorized";
     if (err.status === 429) return "rate_limited";
@@ -88,13 +93,6 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       return { skip: "claimed_elsewhere" as const };
     }
     const runId = await repo.startPollRun(tx, scope.projectId, window);
-    let token: string;
-    try {
-      token = await repo.openConnectionToken(tx, deps.vault, project.connectionId);
-    } catch {
-      await repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: "token_unavailable" });
-      return { failed: "token_unavailable" };
-    }
     await repo.appendAudit(tx, {
       projectId: scope.projectId,
       action: "logs_query",
@@ -106,14 +104,23 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       },
     });
     return {
-      project, runId, token, window,
+      project, runId, window,
       networks: await repo.loadNetworks(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
     };
   });
   if ("skip" in loaded) return { status: "skipped", reason: loaded.skip! };
-  if ("failed" in loaded) return { status: "unable_to_assess", errorCode: loaded.failed! };
-  const { project, runId, token, window } = loaded;
+  const { project, runId, window } = loaded;
+
+  // Token: opened (and refreshed if near expiry) in its own short, row-locked transaction.
+  let token: string;
+  try {
+    token = await accessTokenFor(deps.app, deps.vault, scope.tenantId, project.connectionId, deps.oauth ?? null, now);
+  } catch (err) {
+    const code = err instanceof OAuthError ? errorCode(err) : "token_unavailable";
+    await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
+    return { status: "unable_to_assess", errorCode: code };
+  }
 
   // 2. Query Supabase outside any transaction. A failure is "unable to assess", never all-clear.
   let rows: Record<string, unknown>[];

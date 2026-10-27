@@ -8,9 +8,11 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Built: `apps/web` (Next.js App Router on Workers, vinext 1.3.1, Wrangler config). Magic-link
   sign-in, `/auth/confirm`, sign-out, the signed Send Email Hook route, onboarding step 1 (create
   workspace), workspace overview (projects, open incidents, setup checklist).
-- **Next step:** Supabase OAuth connect (`/api/supabase/connect` and callback) with state bound
-  to user + tenant, PKCE, sealed tokens and locked refresh. Then the project picker, Stripe, and
-  alert email.
+- Built: Supabase OAuth connect. "Connect Supabase" (owners and admins) → Supabase consent →
+  `/api/supabase/callback` → sealed credentials on a new connection. The poller refreshes tokens
+  under the connection's row lock.
+- **Next step:** the project picker (list the connection's projects through the Management API,
+  create `projects` rows, load ownership from `pg_policies`). Then Stripe, then alert email.
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
   need Guardbase's Supabase project and a Hyperdrive config.
 
@@ -28,6 +30,10 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Scaffolded with `--data-cache none --cdn-cache none --no-prerender`: no shared caching of pages.
 
 ## Setup (Erik)
+
+0. Register the Supabase OAuth app (PRD "This week" task) with scopes `analytics:read` and
+   `database:read`, redirect URI `<APP_URL>/api/supabase/callback`. Put the client ID in both
+   `wrangler.jsonc` files and `wrangler secret put SUPABASE_OAUTH_CLIENT_SECRET` in both Workers.
 
 1. Supabase (Guardbase project): Auth → Hooks → Send Email Hook → HTTPS,
    `https://<app>/api/auth/send-email-hook`. Copy the secret to
@@ -47,6 +53,14 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Ran the built Worker locally (`wrangler dev`): `/` and `/login` 200; `/app`, `/onboarding`,
   `/w/x` 307 → `/login` with `private, no-store`; cross-origin POST 403; unsigned hook 401; bad
   confirm link → `/login?error=link`.
+
+- OAuth: 13 core tests. PKCE S256, state parsing, authorize URL (no deprecated `scope`), Basic
+  auth token exchange, refresh rotation, errors. In Postgres: state single-use; rejected for
+  another user, a colleague in the same workspace, another tenant, or after expiry; two
+  concurrent refreshes call Supabase once and both get the new token; a failed refresh keeps the
+  stored credentials. Mutation checks: no row lock, no user binding, no single-use each fail.
+- Running Worker: callback without a session → `/login`, `private, no-store`; cross-origin
+  server-action POST → 403.
 
 ## Gotchas
 

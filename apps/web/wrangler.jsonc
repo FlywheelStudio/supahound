@@ -1,5 +1,6 @@
 // Guardbase web app (decisions 009, 010). Next.js App Router on Workers via vinext.
-// Secrets (wrangler secret put): SEND_EMAIL_HOOK_SECRET ("v1,whsec_..." from Supabase Auth hooks).
+// Secrets (wrangler secret put): SEND_EMAIL_HOOK_SECRET ("v1,whsec_..." from Supabase Auth hooks),
+// SUPABASE_OAUTH_CLIENT_SECRET, GUARDBASE_MASTER_KEYS (same keys as the poller).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "guardbase-web",
@@ -23,9 +24,11 @@
     "SUPABASE_URL": "https://YOUR-PROJECT-REF.supabase.co",
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_REPLACE_ME",
     "EMAIL_FROM_ADDRESS": "login@guardbase.example",
-    "EMAIL_FROM_NAME": "Guardbase"
+    "EMAIL_FROM_NAME": "Guardbase",
+    // Supabase OAuth app (decision 012). Redirect URI: <APP_URL>/api/supabase/callback.
+    "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID"
   },
-  "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET"] },
+  "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET", "GUARDBASE_MASTER_KEYS"] },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },

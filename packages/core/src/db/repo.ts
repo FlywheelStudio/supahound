@@ -335,3 +335,26 @@ export async function countConnections(tx: TenantTx): Promise<number> {
   const rows = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM guardbase.connections WHERE tenant_id = $1", [tx.tenantId]);
   return rows[0]?.n ?? 0;
 }
+
+// Supabase OAuth state (decision 012). Only the hash is stored; the row is bound to the user and
+// tenant that started the flow, expires after 10 minutes, and is consumed exactly once.
+export async function createOAuthState(
+  tx: TenantTx,
+  input: { userId: string; stateHash: string; codeVerifier: string; expiresAt: Date },
+): Promise<void> {
+  await tx.query(
+    `INSERT INTO guardbase.oauth_states (tenant_id, user_id, state_hash, code_verifier, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [tx.tenantId, input.userId, input.stateHash, input.codeVerifier, input.expiresAt],
+  );
+}
+
+export async function consumeOAuthState(tx: TenantTx, userId: string, stateHash: string, now: Date): Promise<string | null> {
+  const rows = await tx.query<{ code_verifier: string }>(
+    `UPDATE guardbase.oauth_states SET used_at = $4
+     WHERE tenant_id = $1 AND state_hash = $2 AND user_id = $3 AND used_at IS NULL AND expires_at > $4
+     RETURNING code_verifier`,
+    [tx.tenantId, stateHash, userId, now],
+  );
+  return rows[0]?.code_verifier ?? null;
+}

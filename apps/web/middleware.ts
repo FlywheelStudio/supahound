@@ -8,7 +8,7 @@ import { isSafeMethod, isSameOrigin, SIGNED_ROUTES } from "./lib/security";
 // 2. Refresh the Supabase session cookie.
 // 3. Never let a shared cache store a signed-in page: one user's workspace must never be
 //    served to another.
-const PRIVATE_PREFIXES = ["/app", "/w/", "/onboarding", "/auth/"];
+const PRIVATE_PREFIXES = ["/app", "/w/", "/onboarding", "/auth/", "/api/supabase/"];
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;

@@ -1,7 +1,7 @@
 // Guardbase poller (decision 008).
 //   cron  -> list due project scopes (scheduler role, IDs only) -> one queue message per scope
 //   queue -> one tenant-scoped poll per message (app role)
-// Secrets (wrangler secret put): GUARDBASE_MASTER_KEYS, AI_GATEWAY_API_KEY.
+// Secrets (wrangler secret put): GUARDBASE_MASTER_KEYS, AI_GATEWAY_API_KEY, SUPABASE_OAUTH_CLIENT_SECRET.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "guardbase-poller",
@@ -38,9 +38,12 @@
     }
   ],
   "vars": {
-    "GUARDBASE_SOURCE_COLUMN": "source"
+    "GUARDBASE_SOURCE_COLUMN": "source",
+    // Same Supabase OAuth app as the web app; used to refresh connection tokens.
+    "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID",
+    "APP_URL": "http://localhost:5173"
   },
-  "secrets": { "required": ["GUARDBASE_MASTER_KEYS", "AI_GATEWAY_API_KEY"] },
+  "secrets": { "required": ["GUARDBASE_MASTER_KEYS", "AI_GATEWAY_API_KEY", "SUPABASE_OAUTH_CLIENT_SECRET"] },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },

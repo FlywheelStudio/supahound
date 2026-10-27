@@ -92,6 +92,11 @@ export default {
       app,
       vault: TokenVault.fromEnv({ GUARDBASE_MASTER_KEYS: env.GUARDBASE_MASTER_KEYS }),
       queryLogs,
+      oauth: {
+        clientId: env.SUPABASE_OAUTH_CLIENT_ID,
+        clientSecret: env.SUPABASE_OAUTH_CLIENT_SECRET,
+        redirectUri: new URL("/api/supabase/callback", env.APP_URL).toString(),
+      },
       explain: (features) => explainIncident(features, { apiKey: env.AI_GATEWAY_API_KEY }),
       env: { GUARDBASE_SOURCE_COLUMN: env.GUARDBASE_SOURCE_COLUMN },
     };
