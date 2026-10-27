@@ -52,8 +52,13 @@ skip them where no Postgres exists; never skip them before a merge.
 
 ## Environment
 
-See `.env.example`. `SUPABASE_ACCESS_TOKEN` (analytics:read), `SUPABASE_PROJECT_REF`,
-`GUARDBASE_SOURCE_COLUMN` (`source` or `source_name`, settled by the live check).
+See `.env.example`.
+
+- CLI: `SUPABASE_ACCESS_TOKEN` (analytics:read), `SUPABASE_PROJECT_REF`, `GUARDBASE_SOURCE_COLUMN`
+  (`source` or `source_name`, settled by the live check).
+- Worker: `DATABASE_URL` (member of `guardbase_app`), `SCHEDULER_DATABASE_URL` (member of
+  `guardbase_scheduler`), `GUARDBASE_MASTER_KEYS` (versioned 32-byte keys), `AI_GATEWAY_API_KEY`
+  (Pro or Enterprise team, required for ZDR), `GUARDBASE_TICK_SECONDS`.
 
 ## Rules specific to this repo
 
