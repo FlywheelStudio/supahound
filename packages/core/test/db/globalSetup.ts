@@ -56,7 +56,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
     const tpl = new pg.Client({ host: dir, port, user: "postgres", database: "guardbase_template" });
     await tpl.connect();
     try {
-      const migration = readFileSync(fileURLToPath(new URL("../../migrations/0001_tenancy.sql", import.meta.url)), "utf8");
+      const migration = readFileSync(fileURLToPath(new URL("../../../../supabase/migrations/20261027000000_tenancy.sql", import.meta.url)), "utf8");
       await tpl.query(migration);
     } finally {
       await tpl.end();

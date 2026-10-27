@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
+import type { EnvVars } from "../config/fields.js";
 import type { ConnectionId, TenantId } from "../tenancy/scope.js";
 
 // Seals Supabase OAuth tokens at rest (PRD, Credential hygiene).
@@ -45,7 +46,7 @@ export class TokenVault {
   }
 
   // GUARDBASE_MASTER_KEYS="1:<base64 32 bytes>,2:<base64 32 bytes>". The highest version seals.
-  static fromEnv(env: NodeJS.ProcessEnv = process.env): TokenVault {
+  static fromEnv(env: EnvVars): TokenVault {
     const raw = env.GUARDBASE_MASTER_KEYS;
     if (!raw) throw new VaultError("GUARDBASE_MASTER_KEYS is not set");
     const keys = new Map<number, Buffer>();

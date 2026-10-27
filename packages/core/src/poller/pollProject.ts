@@ -12,6 +12,7 @@ import { LogsApiError, MAX_WINDOW_MS, type LogsQuery } from "../logs/client.js";
 import { normalizeRow } from "../logs/event.js";
 import { edgeRollupSql } from "../logs/sql.js";
 import { scan } from "../scan.js";
+import type { EnvVars } from "../config/fields.js";
 import type { ProjectScope } from "../tenancy/scope.js";
 import type { TokenVault } from "../vault/vault.js";
 
@@ -26,6 +27,8 @@ export interface PollDeps {
   now?: () => Date;
   // Minimum time between polls of one project. Supabase allows 10 analytics queries a minute.
   intervalSeconds?: number;
+  // Settings such as GUARDBASE_SOURCE_COLUMN (Workers: the env binding; Node: process.env).
+  env?: EnvVars;
 }
 
 export type PollOutcome =
@@ -68,7 +71,7 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<PollOutcome> {
   const now = deps.now?.() ?? new Date();
-  const sql = edgeRollupSql();
+  const sql = edgeRollupSql(deps.env ? { env: deps.env } : {});
 
   // 1. Claim, load and record intent. The audit row is written before the query runs.
   const loaded = await withTenant(deps.app, scope.tenantId, async (tx) => {

@@ -1,37 +1,26 @@
 {
-  "name": "supadog",
+  "name": "guardbase",
   "version": "0.1.0",
   "private": true,
-  "description": "Guardbase detection prototype: baseline-free detectors over Supabase edge logs",
+  "description": "Guardbase: abnormal-traffic monitoring for Supabase apps",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "scan": "tsx src/cli.ts scan",
-    "discover-keys": "tsx src/cli.ts discover-keys",
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "worker": "tsx src/worker.ts",
-    "migrate:print": "cat migrations/*.sql"
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "scan": "pnpm --filter @guardbase/core scan",
+    "discover-keys": "pnpm --filter @guardbase/core discover-keys"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.19.7",
-    "@types/pg": "^8.23.1",
     "eslint": "^10.13.0",
-    "tsx": "^4.23.15",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.72.1",
-    "vitest": "^5.0.5"
-  },
-  "dependencies": {
-    "ai": "^7.0.155",
-    "pg": "^8.23.1",
-    "zod": "^4.6.7"
+    "typescript-eslint": "^8.72.1"
   }
 }

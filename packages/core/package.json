@@ -1,0 +1,31 @@
+{
+  "name": "@guardbase/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Detectors, tenancy, vault, incident engine and ZDR explainer. Runs on Node and workerd.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "scan": "tsx src/cli.ts scan",
+    "discover-keys": "tsx src/cli.ts discover-keys",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ai": "^7.0.155",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.7",
+    "@types/pg": "^8.23.1",
+    "eslint": "^10.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

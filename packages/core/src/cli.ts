@@ -99,7 +99,7 @@ async function runScan(args: string[]): Promise<void> {
   } else {
     const { start, end } = pollWindow(new Date(), Number(values.minutes));
     const rows = await queryLogs(
-      { projectRef: values.project!, sql: edgeRollupSql(), start, end },
+      { projectRef: values.project!, sql: edgeRollupSql({ env: process.env }), start, end },
       { token: token() },
     );
     events = rows.map(normalizeRow);
@@ -125,7 +125,7 @@ async function runDiscoverKeys(args: string[]): Promise<void> {
   });
   if (!values.project) fail("--project is required");
   const { start, end } = pollWindow(new Date(), Number(values.minutes));
-  const rows = await queryLogs({ projectRef: values.project, sql: discoverKeysSql(), start, end }, { token: token() });
+  const rows = await queryLogs({ projectRef: values.project, sql: discoverKeysSql(process.env), start, end }, { token: token() });
   const present = new Map(rows.map((r) => [String(r.key), Number(r.hits)]));
 
   process.stdout.write("Configured field paths:\n");
@@ -147,8 +147,8 @@ async function main(argv: string[]): Promise<void> {
     case "discover-keys":
       return runDiscoverKeys(rest);
     case "print-sql":
-      process.stdout.write(`-- Edge rollup (Management API logs endpoint)\n${edgeRollupSql()}\n\n`);
-      process.stdout.write(`-- Key discovery (PRD task 1)\n${discoverKeysSql()}\n\n`);
+      process.stdout.write(`-- Edge rollup (Management API logs endpoint)\n${edgeRollupSql({ env: process.env })}\n\n`);
+      process.stdout.write(`-- Key discovery (PRD task 1)\n${discoverKeysSql(process.env)}\n\n`);
       process.stdout.write(`-- Ownership from RLS policies (read-only SQL)\n${POLICIES_SQL}\n`);
       return;
     default:

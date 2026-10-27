@@ -29,7 +29,10 @@ export const EDGE_FIELDS = {
 export type EdgeField = keyof typeof EDGE_FIELDS;
 
 // The API reference filters on `source`; the changelog filters on `source_name`.
-export function sourceColumn(env: NodeJS.ProcessEnv = process.env): string {
+// Env is passed in (Node: process.env; Workers: the env binding); core never reads globals.
+export type EnvVars = Readonly<Record<string, string | undefined>>;
+
+export function sourceColumn(env: EnvVars = {}): string {
   const column = env.GUARDBASE_SOURCE_COLUMN ?? "source";
   if (column !== "source" && column !== "source_name") {
     throw new Error(`GUARDBASE_SOURCE_COLUMN must be "source" or "source_name", got "${column}"`);

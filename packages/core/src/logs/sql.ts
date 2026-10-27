@@ -1,4 +1,4 @@
-import { EDGE_FIELDS, sourceColumn, type EdgeField } from "../config/fields.js";
+import { EDGE_FIELDS, sourceColumn, type EdgeField, type EnvVars } from "../config/fields.js";
 
 // ClickHouse SQL for GET /v1/projects/{ref}/analytics/endpoints/logs. The time window goes in
 // iso_timestamp_start/end, not in the SQL. Supabase rejects `SELECT *`, so every column is named.
@@ -15,7 +15,7 @@ function attr(field: EdgeField): string {
 // Only two kinds of traffic can trip the baseline-free detectors, so everything else is
 // filtered out before it leaves Supabase: PostgREST calls that carry a user subject, and
 // any call (REST, Auth admin, Storage) made with the service-role key.
-export function edgeRollupSql(options: { limit?: number; env?: NodeJS.ProcessEnv } = {}): string {
+export function edgeRollupSql(options: { limit?: number; env?: EnvVars } = {}): string {
   const limit = options.limit ?? 5000;
   const fields = Object.keys(EDGE_FIELDS) as EdgeField[];
   const columns = fields.map((f) => `  ${attr(f)} AS ${f}`).join(",\n");
@@ -38,7 +38,7 @@ LIMIT ${Math.trunc(limit)}`;
 
 // PRD task 1: lists which auth-related keys exist in edge logs, never their values,
 // so the check pulls no user IDs, emails or tokens into a terminal.
-export function discoverKeysSql(env?: NodeJS.ProcessEnv): string {
+export function discoverKeysSql(env?: EnvVars): string {
   return `SELECT
   arrayJoin(mapKeys(log_attributes)) AS key,
   count() AS hits

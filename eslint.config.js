@@ -1,12 +1,12 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
-// Zero data retention guard. src/explainer/llm.ts is the only file allowed to call a model; it
+// Zero data retention guard. packages/core/src/explainer/llm.ts is the only file allowed to call a model; it
 // forces providerOptions.gateway.zeroDataRetention on every request. Everything else is blocked
 // from the call functions, the gateway factory, provider SDKs (which skip the gateway), dynamic
 // imports of them, and hard-coded vendor endpoints.
-const ZDR_MESSAGE = "Model calls must go through src/explainer/llm.ts, which forces zero data retention.";
-export const MODEL_CALL_FILE = "src/explainer/llm.ts";
+const ZDR_MESSAGE = "Model calls must go through packages/core/src/explainer/llm.ts, which forces zero data retention.";
+export const MODEL_CALL_FILE = "packages/core/src/explainer/llm.ts";
 
 const zdrGuard = {
   files: ["**/*.{ts,tsx,mts,cts,js,mjs,cjs}"],
@@ -34,7 +34,7 @@ const zdrGuard = {
 };
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  { ignores: ["**/dist", "**/node_modules", "**/.wrangler", "**/.vinext", "**/.next", "**/worker-configuration.d.ts"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   zdrGuard,
