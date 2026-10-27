@@ -5,7 +5,13 @@ path may read, write, decrypt or mix one tenant's data with another's.
 
 ## Status — 2026-10-27
 
-- In progress. Build order: scope keys → schema + RLS → token vault → poller.
+- Built: scope keys, schema + RLS, vault, repositories, poller, scheduler, worker. 19 Postgres
+  tests (isolation + poller) pass on a throwaway Postgres 17 cluster.
+- **Next step:** pick the Postgres host, create the two login roles, apply
+  `migrations/0001_tenancy.sql`, then run `pnpm worker` against one project. Applying the
+  migration to a shared database needs Erik's approval.
+- Not built: ownership refresh from `pg_policies`, OAuth connect and token refresh, stuck-run
+  cleanup. See STATE.md backlog.
 
 ## Tenancy model
 
@@ -38,7 +44,7 @@ path may read, write, decrypt or mix one tenant's data with another's.
 ## Open questions
 
 - Does a Supabase OAuth token cover one organization? Settle when the OAuth app is registered.
-- Hosting for Postgres (Hetzner + Coolify per the PRD). Decision 004.
+- Hosting for Postgres (Hetzner + Coolify per the PRD).
 
 ## Build log
 
@@ -53,3 +59,9 @@ path may read, write, decrypt or mix one tenant's data with another's.
   not a SECURITY DEFINER function: under FORCE RLS a definer function owned by a non-superuser
   would see nothing, and column grants cannot leak other columns by construction.
 - `ON DELETE SET NULL (incident_id)` needs Postgres 15+.
+- Poller end to end (`test/db/poller.test.ts`): two tenants on the same Supabase ref with
+  different tokens. Each poll used its own token; the attacked tenant got 2 critical incidents,
+  the other none; learned networks stayed per tenant; a 429 and a crash stayed in their own
+  project; the audit log recorded the query before it ran and each model call with ZDR requested.
+- A crash after the start transaction leaves a poll run in `running`. Backlog: sweep these to
+  `unable_to_assess`.

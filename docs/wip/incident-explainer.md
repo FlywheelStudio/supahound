@@ -6,7 +6,10 @@ of one tenant.
 
 ## Status — 2026-10-27
 
-- In progress.
+- Built: incident engine (`src/incidents/engine.ts`) and explainer. Tested with mock models and
+  a captured gateway HTTP body.
+- **Next step:** one live call with an AI Gateway key on a Pro team. Check the model slugs, that
+  `reasoning: 'low'` passes through, and what `routing.planningReasoning` returns.
 
 ## Approach
 
@@ -44,3 +47,6 @@ of one tenant.
   A response with no routing report is accepted and recorded as `zdrConfirmed: null`.
 - Mutation checks that fail the suite: flag removed, flag false, options not passed, routing check
   skipped, number check skipped, actor not aliased.
+- Incident engine: one incident per actor per project, extended inside 15 minutes, severity =
+  worst finding raised one level when two detectors fire, pages on new >= high or on escalation
+  to high. Throws on any incident from another scope. 8 tests.

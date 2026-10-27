@@ -7,9 +7,7 @@ misuse) against one project.
 
 - Done: both detectors, PostgREST parser, per-command ownership from policies, log client, CLI.
   127 tests pass. Typecheck and lint clean.
-- **Next step:** run `pnpm install` here, so the repo gets its own lockfile (see Build log). Commit
-  `pnpm-lock.yaml`.
-- **Then:** run against one live Flywheel client project. Needs a token with `analytics:read` and a
+- **Next step:** run against one live Flywheel client project. Needs a token with `analytics:read` and a
   project ref from Erik. Order:
   1. `pnpm discover-keys --project <ref>`. Confirms the three unverified paths and the source column.
      Also check which key or role field fills for traffic that uses the new `sb_secret_` /
@@ -65,8 +63,8 @@ The API reference filters on `source`; the 23 Sept 2026 changelog filters on `so
   caller. Scoring in the incident engine decides.
 - **Hosting-ASN list is approximate.** 23 bundled ASNs plus an org-name regex. Cloudflare WARP
   traffic classifies as hosting.
-- **Network memory is in-process.** `ServiceRoleNetworks` resets per CLI run, so `new_network`
-  never fires from the CLI. The poller must persist it.
+- **Network memory in the CLI is in-process.** It resets per CLI run, so `new_network` never fires
+  from the CLI. The poller persists it per tenant + project.
 - **Severity is per finding.** The 15-minute per-actor score, dedup and suppression belong to the
   incident engine, which is not built.
 
@@ -74,9 +72,8 @@ The API reference filters on `source`; the 23 Sept 2026 changelog filters on `so
 
 - **No lockfile in this repo yet.** `~/pnpm-workspace.yaml` (Feb 2026) makes pnpm treat the home
   folder as the workspace root. `pnpm add` therefore wrote supadog's dependencies into
-  `~/pnpm-lock.yaml`, and the packages are linked from `~/node_modules`. This repo now has its own
-  `pnpm-workspace.yaml`. The permission classifier blocked the `pnpm install` that creates the local
-  lockfile, so that step waits on Erik.
+  `~/pnpm-lock.yaml`, and the packages were linked from `~/node_modules`. This repo now has its
+  own `pnpm-workspace.yaml`, `pnpm-lock.yaml` and store (fixed 2026-10-27).
 - **Ownership fix.** The first version merged every policy on a table. The quickstart `profiles`
   table (SELECT `true`, UPDATE owner-only) then raised critical alerts on public profile reads.
   Ownership is now per command (decision 002).
