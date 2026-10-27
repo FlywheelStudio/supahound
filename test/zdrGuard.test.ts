@@ -25,6 +25,10 @@ describe("ZDR lint guard", () => {
     expect(await zdrErrors(code, "src/poller/rogue.ts")).toBeGreaterThan(0);
   });
 
+  it.each(["src/x.mts", "src/x.cts", "src/x.tsx", "src/x.mjs"])("covers %s files too", async (filePath) => {
+    expect(await zdrErrors('import { generateText } from "ai";\nvoid generateText;', filePath)).toBeGreaterThan(0);
+  });
+
   it("allows non-calling imports from ai elsewhere", async () => {
     expect(await zdrErrors('import { Output } from "ai";\nvoid Output;', "src/poller/ok.ts")).toBe(0);
     expect(await zdrErrors('import type { LanguageModel } from "ai";\nexport type M = LanguageModel;', "src/x.ts")).toBe(0);

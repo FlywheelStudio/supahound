@@ -85,8 +85,27 @@ export async function setOwnership(tx: TenantTx, id: ProjectId, ownership: Owner
   ]);
 }
 
-export async function markPolled(tx: TenantTx, id: ProjectId, at: Date): Promise<void> {
-  await tx.query("UPDATE guardbase.projects SET last_polled_at = $3 WHERE tenant_id = $1 AND id = $2", [tx.tenantId, id, at]);
+// Claims the project for one poll. The conditional update takes the row lock, so of two workers
+// racing for the same project exactly one gets a row back; the other skips.
+export async function claimProject(tx: TenantTx, id: ProjectId, now: Date, intervalSeconds: number): Promise<boolean> {
+  const rows = await tx.query(
+    `UPDATE guardbase.projects SET last_polled_at = $3
+     WHERE tenant_id = $1 AND id = $2 AND NOT paused
+       AND (last_polled_at IS NULL OR last_polled_at <= $3::timestamptz - make_interval(secs => $4))
+     RETURNING id`,
+    [tx.tenantId, id, now, intervalSeconds],
+  );
+  return rows.length === 1;
+}
+
+// End of the last window that was fully assessed. The next poll starts here, so windows never
+// overlap (no double counting) and a failed poll's span is covered by the next good one.
+export async function lastAssessedUntil(tx: TenantTx, id: ProjectId): Promise<Date | null> {
+  const rows = await tx.query<{ until: Date | null }>(
+    "SELECT max(window_end) AS until FROM guardbase.poll_runs WHERE tenant_id = $1 AND project_id = $2 AND status = 'ok'",
+    [tx.tenantId, id],
+  );
+  return rows[0]?.until ?? null;
 }
 
 export async function loadNetworks(tx: TenantTx, id: ProjectId): Promise<number[]> {

@@ -7,7 +7,7 @@ import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
 import { LogsApiError, type LogsQuery } from "../../src/logs/client.js";
 import { ownershipFromColumns } from "../../src/ownership/ownership.js";
-import { pollProject, type PollDeps } from "../../src/poller/pollProject.js";
+import { FIRST_LOOKBACK_MINUTES, LAG_SECONDS, pollProject, type PollDeps } from "../../src/poller/pollProject.js";
 import { runDuePolls } from "../../src/poller/scheduler.js";
 import { projectScope, tenantId, type ProjectScope } from "../../src/tenancy/scope.js";
 import { ALICE, BOB, CHROME_UA } from "../helpers.js";
@@ -47,9 +47,9 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   const db = useDb();
   let agency: ProjectScope;
   let client: ProjectScope;
-  let logCalls: { token: string; ref: string }[];
+  let logCalls: { token: string; ref: string; start: Date; end: Date }[];
   let explained: IncidentFeatures[];
-  const behaviour: Record<string, () => Record<string, unknown>[]> = {};
+  const behaviour: Record<string, (q: LogsQuery) => Record<string, unknown>[]> = {};
 
   async function onboard(name: string, token: string): Promise<ProjectScope> {
     const t = tenantId(randomUUID());
@@ -68,8 +68,8 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       vault: db.vault,
       now: () => NOW,
       queryLogs: async (q: LogsQuery, o: { token: string }) => {
-        logCalls.push({ token: o.token, ref: q.projectRef });
-        return behaviour[o.token]!();
+        logCalls.push({ token: o.token, ref: q.projectRef, start: q.start, end: q.end });
+        return behaviour[o.token]!(q);
       },
       explain: async (f: IncidentFeatures): Promise<ExplainResult> => {
         explained.push(f);
@@ -145,16 +145,86 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     expect(runs).toEqual([{ status: "unable_to_assess", error_code: "rate_limited" }]);
   });
 
-  it("contains a crash to the project that crashed", async () => {
+  it("keeps findings and still alerts with template text when the explainer throws", async () => {
     behaviour[await tokenOf(agency)] = () => attackRows;
+    const r = await pollProject(agency, deps({ explain: async () => { throw new Error("model exploded"); } }));
+    expect(r).toMatchObject({ status: "ok", findings: 2, notified: 2 });
+    const incidents = await withTenant(db.app, agency.tenantId, (tx) =>
+      tx.query<{ summary_source: string }>("SELECT summary_source FROM guardbase.incidents"),
+    );
+    expect(incidents.map((i) => i.summary_source)).toEqual(["template", "template"]);
+    const audit = await withTenant(db.app, agency.tenantId, (tx) =>
+      tx.query<{ action: string }>("SELECT action FROM guardbase.audit_log WHERE action = 'model_call'"),
+    );
+    expect(audit).toHaveLength(2);
+  });
+
+  it("contains a crash to the project that crashed", async () => {
+    behaviour[await tokenOf(agency)] = () => null as unknown as Record<string, unknown>[];
     behaviour[await tokenOf(client)] = () => benignRows;
-    const results = await runDuePolls({
-      ...deps({ explain: async () => { throw new Error("model exploded"); } }),
-      scheduler: db.scheduler,
-    });
+    const results = await runDuePolls({ ...deps(), scheduler: db.scheduler });
     const byTenant = Object.fromEntries(results.map((r) => [r.scope.tenantId, r.outcome.status]));
     expect(byTenant[agency.tenantId]).toBe("crashed");
     expect(byTenant[client.tenantId]).toBe("ok");
+  });
+
+  describe("windows", () => {
+    const later = (s: number) => new Date(NOW.getTime() + s * 1000);
+    const minute = (d: Date) => d.getTime() % 60_000 === 0;
+
+    it("reads contiguous, minute-aligned windows that never overlap", async () => {
+      behaviour[await tokenOf(agency)] = () => [];
+      await pollProject(agency, deps({ now: () => NOW }));
+      await pollProject(agency, deps({ now: () => later(60) }));
+      const [w1, w2] = logCalls;
+      expect(w1!.end.getTime()).toBe(Math.floor((NOW.getTime() - LAG_SECONDS * 1000) / 60_000) * 60_000);
+      expect(w1!.end.getTime() - w1!.start.getTime()).toBe(FIRST_LOOKBACK_MINUTES * 60_000);
+      expect(w2!.start).toEqual(w1!.end);
+      expect([w1!.start, w1!.end, w2!.start, w2!.end].every(minute)).toBe(true);
+    });
+
+    it("counts each request once across consecutive polls", async () => {
+      // A fake Supabase that returns only the rows inside the requested window.
+      const timed = [-200, -150, -100, -40, -10].map((offset) => ({
+        ...attackRows[0], hits: "5",
+        first_seen: later(offset).toISOString(), last_seen: later(offset).toISOString(),
+      }));
+      behaviour[await tokenOf(agency)] = (q) =>
+        timed.filter((r) => Date.parse(r.first_seen) >= q.start.getTime() && Date.parse(r.first_seen) < q.end.getTime());
+      await pollProject(agency, deps({ now: () => NOW }));
+      await pollProject(agency, deps({ now: () => later(60) }));
+      await pollProject(agency, deps({ now: () => later(180) }));
+      const incidents = await withTenant(db.app, agency.tenantId, (tx) => repo.openIncidents(tx, agency.projectId));
+      expect(incidents).toHaveLength(1);
+      expect(incidents[0]!.hits).toBe(25);
+      expect(incidents[0]!.findingCount).toBe(5);
+    });
+
+    it("covers a failed poll's span on the next good poll", async () => {
+      let fail = false;
+      behaviour[await tokenOf(agency)] = () => { if (fail) throw new LogsApiError("boom", 503); return []; };
+      await pollProject(agency, deps({ now: () => NOW }));
+      fail = true;
+      expect(await pollProject(agency, deps({ now: () => later(60) }))).toMatchObject({ status: "unable_to_assess" });
+      fail = false;
+      await pollProject(agency, deps({ now: () => later(120) }));
+      expect(logCalls[2]!.start).toEqual(logCalls[0]!.end);
+      expect(logCalls[2]!.end.getTime()).toBeGreaterThan(logCalls[1]!.end.getTime());
+    });
+
+    it("skips when nothing new has landed since the last window", async () => {
+      behaviour[await tokenOf(agency)] = () => [];
+      await pollProject(agency, deps({ now: () => NOW }));
+      expect(await pollProject(agency, deps({ now: () => NOW, intervalSeconds: 0 }))).toEqual({ status: "skipped", reason: "nothing_new" });
+    });
+  });
+
+  it("lets exactly one of two racing workers poll a project", async () => {
+    behaviour[await tokenOf(agency)] = () => attackRows;
+    const results = await Promise.all([pollProject(agency, deps()), pollProject(agency, deps())]);
+    expect(results.map((r) => r.status).sort()).toEqual(["ok", "skipped"]);
+    expect(results.find((r) => r.status === "skipped")).toEqual({ status: "skipped", reason: "claimed_elsewhere" });
+    expect(logCalls).toHaveLength(1);
   });
 
   it("skips projects polled within the interval", async () => {

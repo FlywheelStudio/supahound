@@ -50,3 +50,4 @@ of one tenant.
 - Incident engine: one incident per actor per project, extended inside 15 minutes, severity =
   worst finding raised one level when two detectors fire, pages on new >= high or on escalation
   to high. Throws on any incident from another scope. 8 tests.
+- ZDR lint guard widened to `.tsx`, `.mts`, `.cts`, `.mjs`, `.cjs`.

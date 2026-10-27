@@ -9,8 +9,6 @@ import { pollProject, type PollDeps, type PollOutcome } from "./pollProject.js";
 
 export interface SchedulerDeps extends PollDeps {
   scheduler: Pool;
-  // Supabase allows 10 analytics queries a minute per project; one poll a minute leaves headroom.
-  intervalSeconds?: number;
   concurrency?: number;
   batchSize?: number;
 }

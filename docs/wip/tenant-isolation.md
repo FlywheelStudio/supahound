@@ -65,3 +65,14 @@ path may read, write, decrypt or mix one tenant's data with another's.
   project; the audit log recorded the query before it ran and each model call with ZDR requested.
 - A crash after the start transaction leaves a poll run in `running`. Backlog: sweep these to
   `unable_to_assess`.
+- Review fixes:
+  - Overlapping 2-minute windows counted each request twice and never re-checked a failed span.
+    Windows now start at the last `ok` run's end, end at floor(now − 120 s) to the minute
+    (Supabase rounds bounds to the minute), and are capped at 24 hours (flagged
+    `window_truncated` in the audit row). Trade-off: a log landing more than 120 s late is missed.
+  - Two workers could poll one project. `claimProject` is a conditional update that takes the row
+    lock; the loser skips with `claimed_elsewhere`.
+  - An explainer exception threw away the poll's findings. It now falls back to template text per
+    incident (PRD: every alert still goes out).
+  - Mutation checks: the old overlapping window, an always-true claim and a rethrown explainer
+    error each fail the suite.

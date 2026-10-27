@@ -9,7 +9,7 @@ const ZDR_MESSAGE = "Model calls must go through src/explainer/llm.ts, which for
 export const MODEL_CALL_FILE = "src/explainer/llm.ts";
 
 const zdrGuard = {
-  files: ["**/*.ts", "**/*.js"],
+  files: ["**/*.{ts,tsx,mts,cts,js,mjs,cjs}"],
   ignores: [MODEL_CALL_FILE],
   rules: {
     "no-restricted-imports": ["error", {
