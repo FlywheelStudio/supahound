@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+# Real log exports never enter git: they hold user IDs, IPs and emails.
+*.local.ndjson

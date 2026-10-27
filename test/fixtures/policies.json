@@ -1,0 +1,5 @@
+[
+  { "schemaname": "public", "tablename": "notes", "roles": "{authenticated}", "cmd": "ALL", "qual": "(( SELECT auth.uid() AS uid) = user_id)", "with_check": "(( SELECT auth.uid() AS uid) = user_id)" },
+  { "schemaname": "public", "tablename": "messages", "roles": "{authenticated}", "cmd": "SELECT", "qual": "((auth.uid() = sender_id) OR (auth.uid() = receiver_id))", "with_check": null },
+  { "schemaname": "public", "tablename": "projects", "roles": "{authenticated}", "cmd": "SELECT", "qual": "(team_id IN ( SELECT team_members.team_id FROM team_members WHERE (team_members.user_id = auth.uid())))", "with_check": null }
+]

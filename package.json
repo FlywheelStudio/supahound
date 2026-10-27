@@ -1,0 +1,29 @@
+{
+  "name": "supadog",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Guardbase detection prototype: baseline-free detectors over Supabase edge logs",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "scan": "tsx src/cli.ts scan",
+    "discover-keys": "tsx src/cli.ts discover-keys",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.7",
+    "eslint": "^10.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}
