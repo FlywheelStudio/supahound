@@ -1,0 +1,178 @@
+import { randomUUID } from "node:crypto";
+import { beforeEach, describe, expect, it } from "vitest";
+import * as repo from "../../src/db/repo.js";
+import { withTenant } from "../../src/db/tenant.js";
+import type { IncidentFeatures } from "../../src/explainer/features.js";
+import type { ExplainResult } from "../../src/explainer/llm.js";
+import { templateExplanation } from "../../src/explainer/template.js";
+import { LogsApiError, type LogsQuery } from "../../src/logs/client.js";
+import { ownershipFromColumns } from "../../src/ownership/ownership.js";
+import { pollProject, type PollDeps } from "../../src/poller/pollProject.js";
+import { runDuePolls } from "../../src/poller/scheduler.js";
+import { projectScope, tenantId, type ProjectScope } from "../../src/tenancy/scope.js";
+import { ALICE, BOB, CHROME_UA } from "../helpers.js";
+import { pgInfo, useDb } from "./harness.js";
+
+const SHARED_REF = "zyxwvutsrqponmlkjihg";
+const NOW = new Date("2026-10-27T12:30:00Z");
+
+const attackRows = [
+  {
+    method: "GET", path: "/rest/v1/notes", search: `?user_id=eq.${BOB}`, status: "200", contentRange: "0-49/*",
+    userAgent: "python-httpx/0.28.1", asn: "14061", asOrganization: "DigitalOcean, LLC",
+    jwtSubject: ALICE, jwtRole: "authenticated", apiKeyRole: "anon", hits: "37",
+    first_seen: "2026-10-27T12:27:00Z", last_seen: "2026-10-27T12:28:00Z",
+  },
+  {
+    method: "GET", path: "/rest/v1/notes", search: "?select=*", status: "200", contentRange: "0-99/*",
+    userAgent: CHROME_UA, asn: "7922", asOrganization: "Comcast", jwtRole: "service_role", apiKeyRole: "service_role",
+    hits: "2", first_seen: "2026-10-27T12:27:30Z", last_seen: "2026-10-27T12:27:40Z",
+  },
+];
+const benignRows = [
+  {
+    method: "GET", path: "/rest/v1/notes", search: `?user_id=eq.${BOB}`, status: "200", contentRange: "0-9/*",
+    jwtSubject: BOB, jwtRole: "authenticated", apiKeyRole: "anon", hits: "12",
+    first_seen: "2026-10-27T12:27:00Z", last_seen: "2026-10-27T12:28:00Z",
+  },
+  {
+    method: "GET", path: "/rest/v1/notes", search: "?select=*", status: "200", contentRange: "0-99/*",
+    userAgent: "node", clientInfo: "supabase-js-node/2.80.0", asn: "16509", asOrganization: "Amazon.com, Inc.",
+    jwtRole: "service_role", apiKeyRole: "service_role", hits: "60",
+    first_seen: "2026-10-27T12:27:00Z", last_seen: "2026-10-27T12:28:00Z",
+  },
+];
+
+describe.skipIf(pgInfo === null)("poller across tenants", () => {
+  const db = useDb();
+  let agency: ProjectScope;
+  let client: ProjectScope;
+  let logCalls: { token: string; ref: string }[];
+  let explained: IncidentFeatures[];
+  const behaviour: Record<string, () => Record<string, unknown>[]> = {};
+
+  async function onboard(name: string, token: string): Promise<ProjectScope> {
+    const t = tenantId(randomUUID());
+    return withTenant(db.app, t, async (tx) => {
+      await repo.createTenant(tx, name);
+      const conn = await repo.createConnection(tx, db.vault, { label: name, token });
+      const p = await repo.createProject(tx, { connectionId: conn, supabaseRef: SHARED_REF, name });
+      await repo.setOwnership(tx, p, ownershipFromColumns({ notes: ["user_id"] }));
+      return projectScope(t, p);
+    });
+  }
+
+  function deps(over: Partial<PollDeps> = {}): PollDeps {
+    return {
+      app: db.app,
+      vault: db.vault,
+      now: () => NOW,
+      queryLogs: async (q: LogsQuery, o: { token: string }) => {
+        logCalls.push({ token: o.token, ref: q.projectRef });
+        return behaviour[o.token]!();
+      },
+      explain: async (f: IncidentFeatures): Promise<ExplainResult> => {
+        explained.push(f);
+        return { explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] };
+      },
+      ...over,
+    };
+  }
+
+  beforeEach(async () => {
+    agency = await onboard("Agency", `agency-token-${randomUUID()}`);
+    client = await onboard("Client", `client-token-${randomUUID()}`);
+    logCalls = [];
+    explained = [];
+  });
+
+  const tokenOf = (s: ProjectScope) =>
+    withTenant(db.app, s.tenantId, async (tx) => repo.openConnectionToken(tx, db.vault, (await repo.getProject(tx, s.projectId))!.connectionId));
+
+  it("polls each tenant with its own token and keeps results apart", async () => {
+    behaviour[await tokenOf(agency)] = () => attackRows;
+    behaviour[await tokenOf(client)] = () => benignRows;
+
+    expect(await pollProject(agency, deps())).toMatchObject({ status: "ok", findings: 2, notified: 2 });
+    expect(await pollProject(client, deps())).toMatchObject({ status: "ok", findings: 0, notified: 0 });
+    expect(logCalls.map((c) => c.token)).toEqual([await tokenOf(agency), await tokenOf(client)]);
+
+    const agencyIncidents = await withTenant(db.app, agency.tenantId, (tx) => repo.openIncidents(tx, agency.projectId));
+    const clientIncidents = await withTenant(db.app, client.tenantId, (tx) => repo.openIncidents(tx, client.projectId));
+    expect(agencyIncidents.map((i) => i.severity).sort()).toEqual(["critical", "critical"]);
+    expect(clientIncidents).toEqual([]);
+
+    // The client's server traffic taught the client's memory only.
+    const nets = async (s: ProjectScope) => withTenant(db.app, s.tenantId, (tx) => repo.loadNetworks(tx, s.projectId));
+    expect(await nets(client)).toEqual([16509]);
+    expect(await nets(agency)).toEqual([]);
+  });
+
+  it("gives the model no IDs, refs, tokens or user agents", async () => {
+    const token = await tokenOf(agency);
+    behaviour[token] = () => attackRows;
+    await pollProject(agency, deps());
+    const text = JSON.stringify(explained);
+    expect(explained).toHaveLength(2);
+    for (const banned of [ALICE, BOB, SHARED_REF, token, agency.tenantId, agency.projectId, "Mozilla", "python-httpx", "Agency"]) {
+      expect(text).not.toContain(banned);
+    }
+  });
+
+  it("audits the logs query before it runs and every model call with ZDR requested", async () => {
+    behaviour[await tokenOf(agency)] = () => attackRows;
+    await pollProject(agency, deps());
+    const audit = await withTenant(db.app, agency.tenantId, (tx) =>
+      tx.query<{ action: string; detail: Record<string, unknown> }>("SELECT action, detail FROM guardbase.audit_log ORDER BY created_at"),
+    );
+    expect(audit.map((a) => a.action)).toEqual(["logs_query", "model_call", "model_call"]);
+    expect(audit[0]!.detail.sql_sha256).toMatch(/^[0-9a-f]{64}$/);
+    for (const a of audit.slice(1)) expect(a.detail.zero_data_retention_requested).toBe(true);
+    const clientAudit = await withTenant(db.app, client.tenantId, (tx) => tx.query("SELECT 1 FROM guardbase.audit_log"));
+    expect(clientAudit).toEqual([]);
+  });
+
+  it("reports unable to assess on a Supabase failure, never an all-clear, without touching other tenants", async () => {
+    behaviour[await tokenOf(agency)] = () => attackRows;
+    behaviour[await tokenOf(client)] = () => { throw new LogsApiError("rate limited", 429); };
+    const results = await runDuePolls({ ...deps(), scheduler: db.scheduler, concurrency: 2 });
+    const byTenant = Object.fromEntries(results.map((r) => [r.scope.tenantId, r.outcome]));
+    expect(byTenant[agency.tenantId]).toMatchObject({ status: "ok" });
+    expect(byTenant[client.tenantId]).toEqual({ status: "unable_to_assess", errorCode: "rate_limited" });
+    const runs = await withTenant(db.app, client.tenantId, (tx) =>
+      tx.query<{ status: string; error_code: string }>("SELECT status, error_code FROM guardbase.poll_runs"),
+    );
+    expect(runs).toEqual([{ status: "unable_to_assess", error_code: "rate_limited" }]);
+  });
+
+  it("contains a crash to the project that crashed", async () => {
+    behaviour[await tokenOf(agency)] = () => attackRows;
+    behaviour[await tokenOf(client)] = () => benignRows;
+    const results = await runDuePolls({
+      ...deps({ explain: async () => { throw new Error("model exploded"); } }),
+      scheduler: db.scheduler,
+    });
+    const byTenant = Object.fromEntries(results.map((r) => [r.scope.tenantId, r.outcome.status]));
+    expect(byTenant[agency.tenantId]).toBe("crashed");
+    expect(byTenant[client.tenantId]).toBe("ok");
+  });
+
+  it("skips projects polled within the interval", async () => {
+    behaviour[await tokenOf(agency)] = () => [];
+    behaviour[await tokenOf(client)] = () => [];
+    const first = await runDuePolls({ ...deps({ now: () => new Date() }), scheduler: db.scheduler });
+    const mine = (r: typeof first) => r.filter((x) => [agency.tenantId, client.tenantId].includes(x.scope.tenantId));
+    expect(mine(first)).toHaveLength(2);
+    const second = await runDuePolls({ ...deps({ now: () => new Date() }), scheduler: db.scheduler });
+    expect(mine(second)).toHaveLength(0);
+  });
+
+  it("reports a token that will not open as unable to assess", async () => {
+    await db.admin.query(
+      "UPDATE guardbase.connections SET sealed_token = (SELECT sealed_token FROM guardbase.connections WHERE tenant_id = $1) WHERE tenant_id = $2",
+      [agency.tenantId, client.tenantId],
+    );
+    expect(await pollProject(client, deps())).toEqual({ status: "unable_to_assess", errorCode: "token_unavailable" });
+    expect(logCalls).toEqual([]);
+  });
+});
