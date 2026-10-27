@@ -138,12 +138,15 @@ describe("explainIncident", () => {
     expect(prompt).toContain("actor A");
   });
 
-  it("falls back to Luna, also with ZDR, when Haiku refuses", async () => {
+  it("falls back to Grok, also with ZDR and without a reasoning setting, when Haiku refuses", async () => {
     const { factory, created } = mocks({ [PRIMARY_MODEL]: refusal(), [FALLBACK_MODEL]: result() });
     const r = await explainIncident(features, { models: factory });
     expect(r).toMatchObject({ source: "model", model: FALLBACK_MODEL });
     expect(r.attempts.map((a) => [a.model, a.outcome])).toEqual([[PRIMARY_MODEL, "refused"], [FALLBACK_MODEL, "ok"]]);
-    expect(created[FALLBACK_MODEL]!.doGenerateCalls[0]!.providerOptions?.gateway).toMatchObject({ zeroDataRetention: true });
+    const fallbackCall = created[FALLBACK_MODEL]!.doGenerateCalls[0]!;
+    expect(fallbackCall.providerOptions?.gateway).toMatchObject({ zeroDataRetention: true });
+    expect(fallbackCall.reasoning ?? "provider-default").toBe("provider-default");
+    expect(fallbackCall.temperature).toBeUndefined();
   });
 
   it("falls back on an error, and uses the template when both models fail", async () => {

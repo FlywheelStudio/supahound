@@ -1,5 +1,7 @@
 # 005: Every model call uses zero data retention
 
+> Model choice superseded by [011](011-models-haiku-and-grok.md): Luna dropped, Grok fallback. The ZDR rules stand.
+
 Date: 2026-10-27
 
 ## Context

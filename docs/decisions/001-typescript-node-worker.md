@@ -1,5 +1,7 @@
 # 001: TypeScript on Node.js 22+, no framework
 
+> Runtime superseded by [008](008-supabase-and-cloudflare-hosting.md): Cloudflare Workers, not Hetzner/Coolify. TypeScript and pnpm stand.
+
 Date: 2026-10-27
 
 ## Context

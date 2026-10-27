@@ -12,3 +12,11 @@
 | [decisions/004-tenant-isolation.md](decisions/004-tenant-isolation.md) | Postgres with forced RLS, scoped transactions, per-tenant token keys |
 | [decisions/005-zdr-only-model-calls.md](decisions/005-zdr-only-model-calls.md) | Every model call uses zero data retention through one module |
 | [decisions/006-no-cross-tenant-learning.md](decisions/006-no-cross-tenant-learning.md) | No fleet priors or other learning across tenants |
+| [decisions/007-share-patterns-not-data.md](decisions/007-share-patterns-not-data.md) | Aggregate patterns may cross tenants; data never does (supersedes 006) |
+| [decisions/008-supabase-and-cloudflare-hosting.md](decisions/008-supabase-and-cloudflare-hosting.md) | Cloudflare Workers + Supabase Postgres via Hyperdrive, caching off |
+| [decisions/009-auth-supabase-magic-link.md](decisions/009-auth-supabase-magic-link.md) | Supabase Auth magic links, emails sent by a Cloudflare Worker |
+| [decisions/010-ui-nextjs-on-workers.md](decisions/010-ui-nextjs-on-workers.md) | Next.js on Cloudflare Workers with vinext |
+| [decisions/011-models-haiku-and-grok.md](decisions/011-models-haiku-and-grok.md) | Haiku 5.5, Grok 4.20 non-reasoning fallback, Luna dropped |
+| [decisions/012-connect-with-supabase-oauth.md](decisions/012-connect-with-supabase-oauth.md) | Supabase OAuth connect with bound state, PKCE and locked refresh |
+| [decisions/013-billing-stripe.md](decisions/013-billing-stripe.md) | Stripe Checkout and webhooks, tenant set server-side |
+| [decisions/014-email-cloudflare.md](decisions/014-email-cloudflare.md) | Cloudflare Email Service for magic links, alerts and digests |

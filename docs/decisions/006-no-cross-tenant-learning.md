@@ -1,5 +1,7 @@
 # 006: No learning across tenants
 
+> Superseded by [007](007-share-patterns-not-data.md): aggregate patterns may cross tenants; data never does.
+
 Date: 2026-10-27
 
 ## Context

@@ -18,9 +18,23 @@ import { validateExplanation, type Explanation } from "./validate.js";
 //
 // One call explains one incident of one tenant. Nothing here batches incidents.
 
+// Primary: Haiku 5.5 ($0.10 / $0.50 per million tokens). Fallback, used only when Haiku refuses
+// or fails: Grok 4.20 non-reasoning ($1.25 / $2.50), a different vendor so its safety
+// classifiers are independent. Both list "Zero data retention: available" on the gateway's
+// model page (checked 2026-10-27). Decision 011.
 export const PRIMARY_MODEL = "anthropic/claude-haiku-5.5";
-export const FALLBACK_MODEL = "openai/gpt-6-luna";
-const MODELS = [PRIMARY_MODEL, FALLBACK_MODEL] as const;
+export const FALLBACK_MODEL = "spacexai/grok-4.20-non-reasoning";
+
+interface ModelSettings {
+  id: string;
+  // Only for models that reason. Haiku 5.5 takes low effort; Grok non-reasoning takes none.
+  reasoning?: "low";
+}
+
+const MODELS: readonly ModelSettings[] = [
+  { id: PRIMARY_MODEL, reasoning: "low" },
+  { id: FALLBACK_MODEL },
+];
 
 // Frozen, and applied last, so no caller and no future edit of a call site can drop ZDR.
 const ZDR_PROVIDER_OPTIONS = Object.freeze({
@@ -93,15 +107,20 @@ interface ModelCall {
   detail?: string;
 }
 
-async function callModel(model: LanguageModel, features: IncidentFeatures, timeoutMs: number): Promise<ModelCall> {
+async function callModel(
+  model: LanguageModel,
+  settings: ModelSettings,
+  features: IncidentFeatures,
+  timeoutMs: number,
+): Promise<ModelCall> {
   try {
     const result = await generateText({
       model,
       system: SYSTEM,
       prompt: JSON.stringify(features),
       output: Output.object({ schema: ExplanationSchema }),
-      // No temperature: Haiku 5.5 rejects non-default sampling. Low effort suits extraction.
-      reasoning: "low",
+      // No temperature: Haiku 5.5 rejects non-default sampling.
+      ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
       // Thinking tokens count toward the cap, so leave headroom.
       maxOutputTokens: 4000,
       maxRetries: 1,
@@ -124,8 +143,9 @@ export async function explainIncident(features: IncidentFeatures, options: Expla
   const factory = modelFactory(options);
   const attempts: ExplainResult["attempts"] = [];
 
-  for (const id of MODELS) {
-    const call = await callModel(factory(id), features, options.timeoutMs ?? 20_000);
+  for (const settings of MODELS) {
+    const id = settings.id;
+    const call = await callModel(factory(id), settings, features, options.timeoutMs ?? 20_000);
     if (call.outcome !== "ok" || !call.explanation) {
       attempts.push({ model: id, outcome: call.outcome, ...(call.detail ? { detail: call.detail } : {}) });
       continue;
