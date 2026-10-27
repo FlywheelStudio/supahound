@@ -6,7 +6,7 @@ Updated 2026-10-27.
 
 | Feature | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- |
-| Baseline-free detectors (2 and 4) | Code and 109 tests done; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
+| Baseline-free detectors (2 and 4) | Code and 127 tests done; `pnpm install` for a local lockfile, then live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 
 ## Completed
 

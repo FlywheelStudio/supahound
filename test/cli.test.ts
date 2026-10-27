@@ -17,10 +17,11 @@ function cli(...args: string[]) {
 
 describe("loadOwnership", () => {
   it("accepts a static map or pg_policies rows", () => {
-    expect(loadOwnership({ notes: ["user_id"] })).toEqual({ notes: ["user_id"] });
+    const all = { SELECT: ["user_id"], UPDATE: ["user_id"], DELETE: ["user_id"] };
+    expect(loadOwnership({ notes: ["user_id"] })).toEqual({ notes: all });
     expect(
       loadOwnership([{ schemaname: "public", tablename: "notes", roles: "{authenticated}", qual: "(auth.uid() = user_id)" }]),
-    ).toEqual({ notes: ["user_id"] });
+    ).toEqual({ notes: all });
     expect(() => loadOwnership({ notes: "user_id" })).toThrow(/array of column names/);
   });
 });
@@ -31,7 +32,7 @@ describe("supadog scan --file (happy path, end to end)", () => {
 
   it("exits 0 and reports a summary", () => {
     expect(r.code).toBe(0);
-    expect(r.stderr).toContain("6 request templates, 2 owned tables, 2 findings");
+    expect(r.stderr).toContain("7 request templates, 3 owned tables, 2 findings");
   });
 
   it("finds the cross-tenant read and the browser holding the service key, most severe first", () => {
@@ -44,7 +45,7 @@ describe("supadog scan --file (happy path, end to end)", () => {
   });
 
   it("stays quiet on own-row reads, membership tables and a server-side service key", () => {
-    expect(findings.some((f) => f.evidence.table === "projects" || f.evidence.table === "messages")).toBe(false);
+    expect(findings.some((f) => ["projects", "messages", "profiles"].includes(String(f.evidence.table)))).toBe(false);
     expect(findings.some((f) => f.evidence.asn === 16509)).toBe(false);
   });
 });

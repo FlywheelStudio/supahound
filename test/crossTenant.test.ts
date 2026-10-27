@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { detectCrossTenant, outcomeOf } from "../src/detectors/crossTenant.js";
-import type { OwnershipMap } from "../src/ownership/ownership.js";
+import { ownershipFromColumns, ownershipFromPolicies } from "../src/ownership/ownership.js";
 import { ALICE, BOB, CAROL, event, serviceEvent } from "./helpers.js";
 
-const OWNERSHIP: OwnershipMap = {
+const OWNERSHIP = ownershipFromColumns({
   notes: ["user_id"],
   orders: ["user_id"],
   profiles: ["id"],
   messages: ["receiver_id", "sender_id"],
-};
+});
 
 const run = (search: string, overrides = {}) =>
   detectCrossTenant(event({ search, ...overrides }), OWNERSHIP);
@@ -107,7 +107,7 @@ describe("detectCrossTenant: alerts", () => {
     expect(f.evidence).toMatchObject({ table: "orders", column: "user_id" });
   });
 
-  it("flags a profile lookup by another user's id", () => {
+  it("flags a profile lookup by another user's id when profile reads are owner-only", () => {
     expect(run(`id=eq.${BOB}`, { path: "/rest/v1/profiles" })!.severity).toBe("critical");
   });
 
@@ -145,5 +145,56 @@ describe("outcomeOf", () => {
   it("puts the outcome and row count in the evidence", () => {
     const f = run(`user_id=eq.${BOB}`, { contentRange: "0-49/*" })!;
     expect(f.evidence).toMatchObject({ outcome: "rows_returned", rowsReturned: 50 });
+  });
+});
+
+// Ownership comes from the policies for the request's command, as Postgres stores them.
+describe("detectCrossTenant with policy-derived ownership", () => {
+  const policy = (tablename: string, cmd: string, qual: string, permissive = "PERMISSIVE") => ({
+    schemaname: "public", tablename, permissive, roles: "{public}", cmd, qual,
+  });
+
+  // Supabase quickstart: anyone may view profiles, only the owner may update.
+  const quickstart = ownershipFromPolicies([
+    policy("profiles", "SELECT", "true"),
+    policy("profiles", "UPDATE", "(( SELECT auth.uid() AS uid) = id)"),
+  ]);
+
+  it("does not flag reading another user's public profile", () => {
+    expect(detectCrossTenant(event({ path: "/rest/v1/profiles", search: `id=eq.${BOB}` }), quickstart)).toBeNull();
+  });
+
+  it("flags updating another user's profile as critical", () => {
+    const f = detectCrossTenant(event({ method: "PATCH", path: "/rest/v1/profiles", search: `id=eq.${BOB}` }), quickstart);
+    expect(f).toMatchObject({ severity: "critical", evidence: { method: "PATCH", column: "id" } });
+  });
+
+  it("does not flag reads on an is_public OR owner table", () => {
+    const map = ownershipFromPolicies([policy("posts", "SELECT", "((is_public = true) OR (auth.uid() = user_id))")]);
+    expect(detectCrossTenant(event({ path: "/rest/v1/posts", search: `user_id=eq.${BOB}` }), map)).toBeNull();
+  });
+
+  it("flags reads when a restrictive owner policy sits beside a permissive true", () => {
+    const map = ownershipFromPolicies([
+      policy("notes", "SELECT", "true"),
+      policy("notes", "ALL", "(auth.uid() = user_id)", "RESTRICTIVE"),
+    ]);
+    expect(detectCrossTenant(event({ path: "/rest/v1/notes", search: `user_id=eq.${BOB}` }), map)!.severity).toBe("critical");
+  });
+
+  it("ignores POST, which inserts rows instead of selecting them", () => {
+    expect(run(`user_id=eq.${BOB}`, { method: "POST" })).toBeNull();
+  });
+
+  it("uses read ownership for embedded resources even on a write", () => {
+    const map = ownershipFromPolicies([
+      policy("profiles", "UPDATE", "(auth.uid() = id)"),
+      policy("orders", "SELECT", "true"),
+    ]);
+    const f = detectCrossTenant(
+      event({ method: "PATCH", path: "/rest/v1/profiles", search: `id=eq.${ALICE}&orders.user_id=eq.${BOB}` }),
+      map,
+    );
+    expect(f).toBeNull();
   });
 });

@@ -5,7 +5,13 @@ import { EDGE_FIELDS, type EdgeField } from "./config/fields.js";
 import { pollWindow, queryLogs } from "./logs/client.js";
 import { normalizeRow, type EdgeEvent } from "./logs/event.js";
 import { discoverKeysSql, edgeRollupSql } from "./logs/sql.js";
-import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap, type PolicyRow } from "./ownership/ownership.js";
+import {
+  ownershipFromColumns,
+  ownershipFromPolicies,
+  POLICIES_SQL,
+  type OwnershipMap,
+  type PolicyRow,
+} from "./ownership/ownership.js";
 import { ServiceRoleNetworks } from "./detectors/serviceRole.js";
 import { scan } from "./scan.js";
 
@@ -41,14 +47,14 @@ function readJson(path: string): unknown {
 export function loadOwnership(data: unknown): OwnershipMap {
   if (Array.isArray(data)) return ownershipFromPolicies(data as PolicyRow[]);
   if (data !== null && typeof data === "object") {
-    const map: OwnershipMap = {};
+    const columns: Record<string, string[]> = {};
     for (const [table, cols] of Object.entries(data)) {
       if (!Array.isArray(cols) || !cols.every((c) => typeof c === "string")) {
         throw new Error(`Ownership for "${table}" must be an array of column names`);
       }
-      map[table] = cols;
+      columns[table] = cols;
     }
-    return map;
+    return ownershipFromColumns(columns);
   }
   throw new Error("Ownership file must be a JSON object or an array of pg_policies rows");
 }

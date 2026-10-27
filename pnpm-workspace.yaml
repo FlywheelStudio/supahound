@@ -1,0 +1,3 @@
+# Own workspace root, so pnpm does not adopt ~/pnpm-workspace.yaml and write the lockfile there.
+packages:
+  - "."

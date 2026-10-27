@@ -1,6 +1,6 @@
 import { effectiveRole, rowsReturned, type EdgeEvent } from "../logs/event.js";
 import { parseRequest, type Condition } from "../postgrest/query.js";
-import type { OwnershipMap } from "../ownership/ownership.js";
+import { commandForMethod, type OwnershipMap } from "../ownership/ownership.js";
 import { fingerprint, maxSeverity, type Finding, type Severity } from "./finding.js";
 
 // Detector 2: a signed-in user filters an ownership column by someone else's ID.
@@ -64,31 +64,37 @@ export function detectCrossTenant(event: EdgeEvent, ownership: OwnershipMap): Fi
   if (subject === null || role === "service_role" || role === "anon") return null;
 
   const parsed = parseRequest(event.path, event.search);
-  if (parsed.table === null) return null;
+  const command = commandForMethod(event.method);
+  if (parsed.table === null || command === null) return null;
 
-  const mismatches: { table: string; column: string; kind: MismatchKind; foreign: string[] }[] = [];
+  // Owner columns for this request: the method's command on the base table; embedded
+  // resources are always reads.
+  const owners = (table: string, embedded: boolean): string[] =>
+    ownership[table]?.[embedded ? "SELECT" : command] ?? [];
+
+  const mismatches: { table: string; column: string; kind: MismatchKind; foreign: string[]; shape: number }[] = [];
   const pinnedTables = new Set<string>();
 
   for (const cond of parsed.conditions) {
     const table = cond.embed ?? parsed.table;
-    if (!ownership[table]?.includes(cond.column)) continue;
+    const cols = owners(table, cond.embed !== null);
+    if (!cols.includes(cond.column)) continue;
     const c = classify(cond, subject);
     if (c === null) continue;
     if (c.kind === "self") {
       if (cond.conjunctive) pinnedTables.add(table);
       continue;
     }
-    mismatches.push({ table, column: cond.column, kind: c.kind, foreign: c.foreign });
+    mismatches.push({ table, column: cond.column, kind: c.kind, foreign: c.foreign, shape: cols.length });
   }
 
   // On a table with several owner columns (sender_id, receiver_id), filtering by the other
   // party is normal once one owner column is pinned to the caller.
-  const live = mismatches.filter((m) => !((ownership[m.table]?.length ?? 0) > 1 && pinnedTables.has(m.table)));
+  const live = mismatches.filter((m) => !(m.shape > 1 && pinnedTables.has(m.table)));
   if (live.length === 0) return null;
 
   const severities: Severity[] = live.map((m) => {
-    const multiParty = (ownership[m.table]?.length ?? 0) > 1;
-    if (!multiParty) return "critical";
+    if (m.shape === 1) return "critical";
     return BROAD_KINDS.has(m.kind) ? "high" : "medium";
   });
   const first = live[0]!;
@@ -106,7 +112,7 @@ export function detectCrossTenant(event: EdgeEvent, ownership: OwnershipMap): Fi
     evidence: {
       table: first.table,
       column: first.column,
-      tableShape: (ownership[first.table]?.length ?? 0) > 1 ? "multi_party" : "single_owner",
+      tableShape: first.shape > 1 ? "multi_party" : "single_owner",
       method: event.method,
       status: event.status,
       outcome,
