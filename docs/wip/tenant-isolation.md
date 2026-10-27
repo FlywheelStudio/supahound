@@ -41,3 +41,15 @@ path may read, write, decrypt or mix one tenant's data with another's.
 - Hosting for Postgres (Hetzner + Coolify per the PRD). Decision 004.
 
 ## Build log
+
+- Scope keys: `ServiceRoleNetworks` was keyed by Supabase ref. Two tenants watching one Supabase
+  project would have shared learned networks, so one tenant's traffic could silence the other's
+  `new_network` alert. Now keyed by tenant + Guardbase project (commit 237ca10).
+- Schema + RLS (`migrations/0001_tenancy.sql`), `withTenant`, repositories, token vault. 12
+  Postgres tests run as a non-superuser role on a throwaway cluster (Postgres 17, Unix socket).
+  Mutation checks: a permissive leak policy, FORCE removed, `nullif` removed, a single-column FK,
+  and a writable audit log each fail the suite.
+- The scheduler uses column grants (tenant_id, id, paused, last_polled_at) plus a read policy,
+  not a SECURITY DEFINER function: under FORCE RLS a definer function owned by a non-superuser
+  would see nothing, and column grants cannot leak other columns by construction.
+- `ON DELETE SET NULL (incident_id)` needs Postgres 15+.
