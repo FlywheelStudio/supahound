@@ -67,8 +67,8 @@ Local values go in `.dev.vars` (git-ignored). Hyperdrive local strings:
 - Field paths change only in `packages/core/src/config/fields.ts`.
 - **Never cross tenant data.** Touch tenant tables only through `withTenant`. Every new table gets
   `tenant_id`, forced RLS and a `(tenant_id, id)` foreign key; the isolation test fails otherwise.
-  Key every cache and map by `scopeKey`, never by Supabase ref. No learning across tenants
-  (decision 006).
+  Key every cache and map by `scopeKey`, never by Supabase ref. Only aggregate patterns may cross
+  tenants, never data, under the limits in decision 007.
 - **Every model call uses ZDR.** Only `packages/core/src/explainer/llm.ts` may call a model; ESLint enforces it.
   Never add BYOK keys, prompt caching, tools or raw log text to a model call (decision 005).
 - **Workers never share I/O across requests.** Create `pg` pools per invocation. Never enable
