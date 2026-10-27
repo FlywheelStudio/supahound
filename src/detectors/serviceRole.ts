@@ -1,35 +1,42 @@
 import { effectiveRole, type EdgeEvent } from "../logs/event.js";
 import { tableFromPath } from "../postgrest/query.js";
 import { classifyCaller, classifyNetwork } from "../network/classify.js";
-import { maxSeverity, type Finding, type Severity } from "./finding.js";
+import { scopeKey, type ProjectScope } from "../tenancy/scope.js";
+import { maxSeverity, safeIdentifier, type Finding, type Severity } from "./finding.js";
 
 // Detector 4: the service-role key used from a browser, a mobile app, a non-hosting network,
 // or a hosting network the project has not used before.
 // Baseline-free: the caller and network checks need no history. Only `new_network` needs
 // the seen-set below, which is light state, not a statistical baseline.
 
-// Hosting ASNs each project's service key has been seen from. In memory for the prototype;
-// the poller will persist it next to the rollups.
+// Hosting ASNs each project's service key has been seen from, keyed by tenant + Guardbase
+// project ID. Never by Supabase ref: two tenants can watch the same Supabase project.
+// The poller loads it from and saves it to the database around each poll.
 export class ServiceRoleNetworks {
   private readonly seen = new Map<string, Set<number>>();
 
-  isSeeded(projectRef: string): boolean {
-    return this.seen.has(projectRef);
+  isSeeded(scope: ProjectScope): boolean {
+    return this.seen.has(scopeKey(scope));
   }
 
-  has(projectRef: string, asn: number): boolean {
-    return this.seen.get(projectRef)?.has(asn) ?? false;
+  has(scope: ProjectScope, asn: number): boolean {
+    return this.seen.get(scopeKey(scope))?.has(asn) ?? false;
   }
 
-  learn(projectRef: string, asns: Iterable<number>): void {
-    const set = this.seen.get(projectRef) ?? new Set<number>();
+  learn(scope: ProjectScope, asns: Iterable<number>): void {
+    const key = scopeKey(scope);
+    const set = this.seen.get(key) ?? new Set<number>();
     for (const asn of asns) set.add(asn);
-    this.seen.set(projectRef, set);
+    this.seen.set(key, set);
+  }
+
+  known(scope: ProjectScope): number[] {
+    return [...(this.seen.get(scopeKey(scope)) ?? [])].sort((a, b) => a - b);
   }
 }
 
 export interface ServiceRoleContext {
-  projectRef: string;
+  scope: ProjectScope;
   networks: ServiceRoleNetworks;
   // Networks the customer declared as their own servers. Silences network signals only:
   // a browser holding the service key is a leak wherever it sits.
@@ -49,7 +56,7 @@ type Signal = keyof typeof SIGNAL_SEVERITY;
 // Processes one poll's events. On a project's first poll, hosting networks are learned
 // without a `new_network` signal; every other signal fires from the first poll.
 export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleContext): Finding[] {
-  const seeding = !ctx.networks.isSeeded(ctx.projectRef);
+  const seeding = !ctx.networks.isSeeded(ctx.scope);
   const findings: Finding[] = [];
   const learned = new Set<number>();
 
@@ -65,7 +72,7 @@ export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleCon
     if (caller.callerClass === "mobile_app") signals.push("mobile_app_caller");
     if (caller.callerClass === "manual_tool") signals.push("manual_tool");
     if (!expected && network === "other") signals.push("non_hosting_network");
-    if (!expected && !seeding && network === "hosting" && event.asn !== null && !ctx.networks.has(ctx.projectRef, event.asn)) {
+    if (!expected && !seeding && network === "hosting" && event.asn !== null && !ctx.networks.has(ctx.scope, event.asn)) {
       signals.push("new_network");
     }
 
@@ -91,12 +98,12 @@ export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleCon
         asn: event.asn,
         expectedNetwork: expected,
         method: event.method,
-        table: tableFromPath(event.path),
+        table: safeIdentifier(tableFromPath(event.path)),
         status: event.status,
       },
     });
   }
 
-  ctx.networks.learn(ctx.projectRef, learned);
+  ctx.networks.learn(ctx.scope, learned);
   return findings;
 }

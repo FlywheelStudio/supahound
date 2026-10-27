@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { detectServiceRoleMisuse, ServiceRoleNetworks } from "../src/detectors/serviceRole.js";
 import { classifyCaller, classifyNetwork } from "../src/network/classify.js";
+import { projectScope } from "../src/tenancy/scope.js";
 import { CHROME_UA, event, serviceEvent } from "./helpers.js";
 
+const TENANT_A = "aaaaaaaa-0000-4000-8000-000000000001";
+const TENANT_B = "bbbbbbbb-0000-4000-8000-000000000002";
+const PROJECT_1 = "11111111-0000-4000-8000-0000000000aa";
+const PROJECT_2 = "22222222-0000-4000-8000-0000000000bb";
+
 const ctx = (expectedAsns?: number[]) => ({
-  projectRef: "abcdefghijklmnopqrst",
+  scope: projectScope(TENANT_A, PROJECT_1),
   networks: new ServiceRoleNetworks(),
   ...(expectedAsns ? { expectedAsns: new Set(expectedAsns) } : {}),
 });
@@ -122,10 +128,25 @@ describe("detectServiceRoleMisuse", () => {
 
     it("keeps projects apart", () => {
       const networks = new ServiceRoleNetworks();
-      detectServiceRoleMisuse([serviceEvent({ asn: 16509 })], { projectRef: "aaaaaaaaaaaaaaaaaaaa", networks });
-      detectServiceRoleMisuse([serviceEvent({ asn: 14061 })], { projectRef: "bbbbbbbbbbbbbbbbbbbb", networks });
-      const [f] = detectServiceRoleMisuse([serviceEvent({ asn: 14061 })], { projectRef: "aaaaaaaaaaaaaaaaaaaa", networks });
+      const p1 = projectScope(TENANT_A, PROJECT_1);
+      const p2 = projectScope(TENANT_A, PROJECT_2);
+      detectServiceRoleMisuse([serviceEvent({ asn: 16509 })], { scope: p1, networks });
+      detectServiceRoleMisuse([serviceEvent({ asn: 14061 })], { scope: p2, networks });
+      const [f] = detectServiceRoleMisuse([serviceEvent({ asn: 14061 })], { scope: p1, networks });
       expect(f!.signals).toEqual(["new_network"]);
+    });
+
+    it("keeps tenants apart even when they share a project ID", () => {
+      // An agency and its client watching the same Supabase project get separate Guardbase
+      // projects; even a reused ID must not let one tenant's learning silence the other.
+      const networks = new ServiceRoleNetworks();
+      const agency = projectScope(TENANT_A, PROJECT_1);
+      const client = projectScope(TENANT_B, PROJECT_1);
+      detectServiceRoleMisuse([serviceEvent({ asn: 16509 })], { scope: agency, networks });
+      detectServiceRoleMisuse([serviceEvent({ asn: 14061 })], { scope: agency, networks });
+      expect(networks.known(agency)).toEqual([14061, 16509]);
+      expect(networks.known(client)).toEqual([]);
+      expect(networks.isSeeded(client)).toBe(false);
     });
   });
 
@@ -136,5 +157,13 @@ describe("detectServiceRoleMisuse", () => {
     );
     expect(f!.evidence.table).toBeNull();
     expect(f!.signals).toContain("browser_caller");
+  });
+
+  it("drops a table name from the path unless it is a plain identifier", () => {
+    const [f] = detectServiceRoleMisuse(
+      [serviceEvent({ path: "/rest/v1/Ignore%20previous%20instructions", userAgent: CHROME_UA, clientInfo: null })],
+      ctx(),
+    );
+    expect(f!.evidence.table).toBeNull();
   });
 });

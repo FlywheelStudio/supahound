@@ -27,3 +27,9 @@ export interface Finding {
 export function fingerprint(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }
+
+// Request paths are attacker-controlled. A name taken from one is kept only when it is a plain
+// Postgres identifier, so free text never reaches evidence, alerts or a prompt.
+export function safeIdentifier(name: string | null): string | null {
+  return name !== null && /^[a-z_][a-z0-9_]{0,62}$/.test(name) ? name : null;
+}

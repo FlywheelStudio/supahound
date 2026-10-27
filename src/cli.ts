@@ -14,6 +14,9 @@ import {
 } from "./ownership/ownership.js";
 import { ServiceRoleNetworks } from "./detectors/serviceRole.js";
 import { scan } from "./scan.js";
+import { projectScope } from "./tenancy/scope.js";
+
+const LOCAL_SCOPE = projectScope("00000000-0000-4000-8000-000000000000", "00000000-0000-4000-8000-000000000001");
 
 const USAGE = `Usage:
   supadog scan --ownership <file> (--file <events.ndjson> | --project <ref> [--minutes 15])
@@ -103,7 +106,8 @@ async function runScan(args: string[]): Promise<void> {
   }
 
   const findings = scan(events, {
-    projectRef: values.project ?? "local-file",
+    // The CLI scans one project at a time, outside any tenant's storage.
+    scope: LOCAL_SCOPE,
     networks: new ServiceRoleNetworks(),
     ownership,
     expectedAsns: parseAsns(values["expected-asns"]),

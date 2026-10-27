@@ -6,7 +6,9 @@ Updated 2026-10-27.
 
 | Feature | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- |
-| Baseline-free detectors (2 and 4) | Code and 127 tests done; `pnpm install` for a local lockfile, then live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
+| Tenant isolation (storage, vault, poller) | Scope keys, schema + RLS | None | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
+| Incident engine + ZDR explainer | Not started | AI Gateway key for a live check | [wip/incident-explainer.md](wip/incident-explainer.md) |
+| Baseline-free detectors (2 and 4) | Code and 127 tests done; live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 
 ## Completed
 

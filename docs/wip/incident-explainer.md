@@ -1,0 +1,35 @@
+# WIP: Incident engine and LLM explainer (ZDR only)
+
+Goal: group findings into incidents (per actor, 15-minute window) and write each incident's plain
+summary with an LLM. Every model call uses zero data retention (ZDR). One call covers one incident
+of one tenant.
+
+## Status — 2026-10-27
+
+- In progress.
+
+## Approach
+
+- Incident engine: pure function over open incidents + new findings. Key = tenant + project + actor.
+  Never merges across projects.
+- Explainer: AI SDK 7 through Vercel AI Gateway. Primary `anthropic/claude-haiku-5.5`, fallback
+  `openai/gpt-6-luna`, then template text. `reasoning: 'low'`, no temperature.
+- ZDR choke point: `src/explainer/llm.ts` is the only module allowed to import model calls.
+  ESLint `no-restricted-imports` enforces it. The module sets
+  `providerOptions.gateway.zeroDataRetention = true` after merging, so nothing overrides it.
+  A test captures the HTTP body sent to the gateway and checks the flag on both models.
+- Prompt input: structured features only. Actor IDs become aliases ("actor A"). No user agents,
+  query values, emails or IPs. Output validated against the evidence; on mismatch, template text.
+
+## Verify on the first live call
+
+- Model slugs: `anthropic/claude-haiku-5.5` and `openai/gpt-6-luna` come from the installed gateway
+  types (`@ai-sdk/gateway@4.0.128`). The PRD's `claude-haiku-5-5` is wrong for the gateway.
+- `routing.planningReasoning` shows "ZDR requested". Recorded as `zdrConfirmed`.
+
+## For Erik to decide
+
+- OpenAI's gateway ZDR row reads "ZDR with safety retention".
+- Team-wide ZDR in the AI Gateway dashboard: $0.10 per 1,000 requests, a second safeguard.
+
+## Build log
