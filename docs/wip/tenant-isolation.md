@@ -81,7 +81,12 @@ path may read, write, decrypt or mix one tenant's data with another's.
   consumer (max 20 concurrent, 3 retries, dead-letter queue) runs `pollProject` through the app
   Hyperdrive config. Pools are created per invocation. Malformed messages are acked; crashes retry.
 - Core proven inside workerd (`@cloudflare/vitest-plugin`): vault (node:crypto), detectors and the
-  AI SDK path with ZDR on both models. Not proven: `pg` over Hyperdrive, which needs a live config.
+  AI SDK path with ZDR on both models.
+- `pg` over Hyperdrive proven locally (2026-10-27): a TCP Postgres 17 with the migrations, the two
+  login roles, one seeded tenant. `wrangler dev --test-scheduled` + `/__scheduled`: the cron read
+  the due project through the scheduler role and enqueued 1 message; the consumer ran
+  `withTenant`, opened the sealed token in workerd, wrote the audit row, called Supabase's real
+  logs API with a fake token, got 401 and recorded `unable_to_assess` / `unauthorized`.
 - Stale-run sweep: each poll first marks its own project's runs stuck in `running` for over 10
   minutes as `unable_to_assess` / `worker_lost` (tenant-scoped, so the scheduler role stays
   read-only).

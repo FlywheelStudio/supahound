@@ -40,7 +40,11 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
    `wrangler secret put SEND_EMAIL_HOOK_SECRET`.
 2. Auth → URL configuration: site URL = `APP_URL`; add `<APP_URL>/auth/confirm` to redirect URLs.
 3. Cloudflare: `wrangler email sending enable <domain>`; set `EMAIL_FROM_ADDRESS` on that domain.
-4. Hyperdrive: `wrangler hyperdrive create guardbase-app --caching-disabled --connection-string ...`
+4. Supabase → Settings → JWT keys: use asymmetric signing keys, so `getClaims()` verifies locally
+   instead of calling the Auth server on every request (the middleware runs it on every route).
+5. Supabase → Settings → API → Exposed schemas: `guardbase` must NOT be listed. All access goes
+   through the Workers with the `guardbase_app` role.
+6. Hyperdrive: `wrangler hyperdrive create guardbase-app --caching-disabled --connection-string ...`
    (Supabase direct or session connection, `guardbase_app` login role). Put the ID in both
    `wrangler.jsonc` files.
 
@@ -54,6 +58,8 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
   `/w/x` 307 → `/login` with `private, no-store`; cross-origin POST 403; unsigned hook 401; bad
   confirm link → `/login?error=link`.
 
+- OAuth callback (`lib/connect.ts`): 9 tests over no session, malformed state, missing code,
+  unknown state, non-member, failed exchange and replay. Exchanging before consuming fails 3.
 - OAuth: 13 core tests. PKCE S256, state parsing, authorize URL (no deprecated `scope`), Basic
   auth token exchange, refresh rotation, errors. In Postgres: state single-use; rejected for
   another user, a colleague in the same workspace, another tenant, or after expiry; two
