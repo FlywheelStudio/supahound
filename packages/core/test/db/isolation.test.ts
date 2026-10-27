@@ -11,6 +11,7 @@ const SHARED_REF = "abcdefghijklmnopqrst";
 
 const TABLES = [
   "tenants", "connections", "projects", "service_role_networks", "poll_runs", "incidents", "findings", "audit_log",
+  "memberships",
 ] as const;
 
 interface Seeded {
@@ -43,6 +44,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       }]);
       await repo.saveNetworks(tx, project, [16509]);
       await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
+      await tx.query("INSERT INTO guardbase.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
       return { tenant, connection, project, run, incident };
     });
   }

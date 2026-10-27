@@ -85,3 +85,8 @@ path may read, write, decrypt or mix one tenant's data with another's.
 - Stale-run sweep: each poll first marks its own project's runs stuck in `running` for over 10
   minutes as `unable_to_assess` / `worker_lost` (tenant-scoped, so the scheduler role stays
   read-only).
+- Users (migration `20261027010000_memberships.sql`, `src/db/user.ts`): memberships link Supabase
+  Auth users to tenants. `withTenantForUser` sets both settings and refuses a non-member before
+  the callback runs. With only a user set, RLS shows that user's memberships and the names of
+  their workspaces, nothing else. Mutation checks: an open memberships policy, an open tenant-name
+  policy and a removed membership check each fail the suite.

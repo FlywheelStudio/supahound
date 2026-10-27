@@ -8,6 +8,9 @@ type Brand<T, B extends string> = T & { readonly [brand]: B };
 export type TenantId = Brand<string, "TenantId">;
 export type ConnectionId = Brand<string, "ConnectionId">;
 export type ProjectId = Brand<string, "ProjectId">;
+// A Supabase Auth user ID. Build one only from a verified JWT (see verifiedUserId), never from
+// request input.
+export type UserId = Brand<string, "UserId">;
 
 export interface ProjectScope {
   readonly tenantId: TenantId;
@@ -25,6 +28,7 @@ function uuid<B extends string>(value: string, label: B): Brand<string, B> {
 export const tenantId = (v: string): TenantId => uuid(v, "TenantId");
 export const connectionId = (v: string): ConnectionId => uuid(v, "ConnectionId");
 export const projectId = (v: string): ProjectId => uuid(v, "ProjectId");
+export const verifiedUserId = (v: string): UserId => uuid(v, "UserId");
 
 export function projectScope(tenant: string, project: string): ProjectScope {
   return Object.freeze({ tenantId: tenantId(tenant), projectId: projectId(project) });
