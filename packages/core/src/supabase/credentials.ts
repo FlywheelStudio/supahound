@@ -20,7 +20,7 @@ export async function accessTokenFor(
 ): Promise<string> {
   return withTenant(pool, tenant, async (tx) => {
     const rows = await tx.query<{ sealed_token: Buffer }>(
-      "SELECT sealed_token FROM guardbase.connections WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+      "SELECT sealed_token FROM supahound.connections WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
       [tenant, connection],
     );
     const row = rows[0];
@@ -32,7 +32,7 @@ export async function accessTokenFor(
     const next = await refreshCredentials(client, creds, now);
     const sealed = vault.seal(JSON.stringify(next), binding);
     await tx.query(
-      "UPDATE guardbase.connections SET sealed_token = $3, key_version = $4, updated_at = $5 WHERE tenant_id = $1 AND id = $2",
+      "UPDATE supahound.connections SET sealed_token = $3, key_version = $4, updated_at = $5 WHERE tenant_id = $1 AND id = $2",
       [tenant, connection, sealed, vault.keyVersionOf(sealed), now],
     );
     return next.accessToken;

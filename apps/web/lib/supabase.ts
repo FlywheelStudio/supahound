@@ -1,4 +1,4 @@
-import { verifiedUserId, type UserId } from "@guardbase/core/tenancy/scope";
+import { verifiedUserId, type UserId } from "@supahound/core/tenancy/scope";
 import { createServerClient } from "@supabase/ssr";
 import { env } from "cloudflare:workers";
 import { cookies } from "next/headers";

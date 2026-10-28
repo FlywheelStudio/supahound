@@ -9,7 +9,7 @@ import { maxSeverity, safeIdentifier, type Finding, type Severity } from "./find
 // Baseline-free: the caller and network checks need no history. Only `new_network` needs
 // the seen-set below, which is light state, not a statistical baseline.
 
-// Hosting ASNs each project's service key has been seen from, keyed by tenant + Guardbase
+// Hosting ASNs each project's service key has been seen from, keyed by tenant + Supahound
 // project ID. Never by Supabase ref: two tenants can watch the same Supabase project.
 // The poller loads it from and saves it to the database around each poll.
 export class ServiceRoleNetworks {

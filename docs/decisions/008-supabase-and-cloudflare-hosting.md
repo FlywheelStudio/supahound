@@ -1,4 +1,4 @@
-# 008: Guardbase runs on Cloudflare, with its database on Supabase
+# 008: Supahound runs on Cloudflare, with its database on Supabase
 
 Date: 2026-10-27 · Supersedes the runtime part of [001](001-typescript-node-worker.md)
 
@@ -8,8 +8,8 @@ Erik: Supabase hosts and runs the project's data; everything else runs on Cloudf
 
 ## Decision
 
-- Postgres: a Supabase project, schema `guardbase`, kept OFF the Data API exposed-schemas list.
-  All reads and writes go through Workers with the `guardbase_app` and `guardbase_scheduler` roles.
+- Postgres: a Supabase project, schema `supahound`, kept OFF the Data API exposed-schemas list.
+  All reads and writes go through Workers with the `supahound_app` and `supahound_scheduler` roles.
 - Workers reach Postgres through Hyperdrive, one config per role, pointed at Supabase's direct or
   session connection (not the transaction pooler). **Hyperdrive query caching is disabled on every
   config**: RLS results depend on a session setting, so a cache keyed on SQL text could serve one

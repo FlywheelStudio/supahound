@@ -14,7 +14,7 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - **Next step:** the project picker (list the connection's projects through the Management API,
   create `projects` rows, load ownership from `pg_policies`). Then Stripe, then alert email.
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
-  need Guardbase's Supabase project and a Hyperdrive config.
+  need Supahound's Supabase project and a Hyperdrive config.
 
 ## How it works
 
@@ -35,17 +35,17 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
    `database:read`, redirect URI `<APP_URL>/api/supabase/callback`. Put the client ID in both
    `wrangler.jsonc` files and `wrangler secret put SUPABASE_OAUTH_CLIENT_SECRET` in both Workers.
 
-1. Supabase (Guardbase project): Auth → Hooks → Send Email Hook → HTTPS,
+1. Supabase (Supahound project): Auth → Hooks → Send Email Hook → HTTPS,
    `https://<app>/api/auth/send-email-hook`. Copy the secret to
    `wrangler secret put SEND_EMAIL_HOOK_SECRET`.
 2. Auth → URL configuration: site URL = `APP_URL`; add `<APP_URL>/auth/confirm` to redirect URLs.
 3. Cloudflare: `wrangler email sending enable <domain>`; set `EMAIL_FROM_ADDRESS` on that domain.
 4. Supabase → Settings → JWT keys: use asymmetric signing keys, so `getClaims()` verifies locally
    instead of calling the Auth server on every request (the middleware runs it on every route).
-5. Supabase → Settings → API → Exposed schemas: `guardbase` must NOT be listed. All access goes
-   through the Workers with the `guardbase_app` role.
-6. Hyperdrive: `wrangler hyperdrive create guardbase-app --caching-disabled --connection-string ...`
-   (Supabase direct or session connection, `guardbase_app` login role). Put the ID in both
+5. Supabase → Settings → API → Exposed schemas: `supahound` must NOT be listed. All access goes
+   through the Workers with the `supahound_app` role.
+6. Hyperdrive: `wrangler hyperdrive create supahound-app --caching-disabled --connection-string ...`
+   (Supabase direct or session connection, `supahound_app` login role). Put the ID in both
    `wrangler.jsonc` files.
 
 ## Verification log

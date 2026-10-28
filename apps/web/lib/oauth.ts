@@ -1,5 +1,5 @@
-import type { OAuthClient } from "@guardbase/core/supabase/oauth";
-import { TokenVault } from "@guardbase/core/vault/vault";
+import type { OAuthClient } from "@supahound/core/supabase/oauth";
+import { TokenVault } from "@supahound/core/vault/vault";
 import { env } from "cloudflare:workers";
 
 export function oauthClient(): OAuthClient {
@@ -11,5 +11,5 @@ export function oauthClient(): OAuthClient {
 }
 
 export function vault(): TokenVault {
-  return TokenVault.fromEnv({ GUARDBASE_MASTER_KEYS: env.GUARDBASE_MASTER_KEYS });
+  return TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: env.SUPAHOUND_MASTER_KEYS });
 }

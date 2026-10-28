@@ -44,7 +44,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       }]);
       await repo.saveNetworks(tx, project, [16509]);
       await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
-      await tx.query("INSERT INTO guardbase.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
+      await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
       await repo.createOAuthState(tx, {
         userId: randomUUID(), stateHash: randomUUID().replace(/-/g, "").padEnd(64, "0"),
         codeVerifier: "v".repeat(64), expiresAt: new Date(Date.now() + 600_000),
@@ -60,12 +60,12 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
 
   it("runs the app and scheduler as roles that cannot bypass RLS and own nothing", async () => {
     const roles = await db.admin.query(
-      "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname IN ('app_user', 'scheduler_user', 'guardbase_app', 'guardbase_scheduler')",
+      "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname IN ('app_user', 'scheduler_user', 'supahound_app', 'supahound_scheduler')",
     );
     expect(roles.rows).toHaveLength(4);
     for (const r of roles.rows) expect([r.rolsuper, r.rolbypassrls]).toEqual([false, false]);
     const owned = await db.admin.query(
-      "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'guardbase' AND tableowner IN ('app_user', 'scheduler_user', 'guardbase_app', 'guardbase_scheduler')",
+      "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'supahound' AND tableowner IN ('app_user', 'scheduler_user', 'supahound_app', 'supahound_scheduler')",
     );
     expect(owned.rows[0].n).toBe(0);
   });
@@ -75,7 +75,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
              (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)::int AS policies
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'guardbase' AND c.relkind = 'r'`);
+      WHERE n.nspname = 'supahound' AND c.relkind = 'r'`);
     expect(res.rows.map((r) => r.relname).sort()).toEqual([...TABLES].sort());
     for (const r of res.rows) {
       expect([r.relname, r.relrowsecurity, r.relforcerowsecurity, r.policies > 0]).toEqual([r.relname, true, true, true]);
@@ -88,7 +88,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       await withTenant(db.app, seeded[me].tenant, async (tx) => {
         for (const table of TABLES) {
           const rows = await tx.query<{ t: string }>(
-            `SELECT ${table === "tenants" ? "id" : "tenant_id"}::text AS t FROM guardbase.${table}`,
+            `SELECT ${table === "tenants" ? "id" : "tenant_id"}::text AS t FROM supahound.${table}`,
           );
           expect(rows.length, table).toBeGreaterThan(0);
           expect(rows.every((r) => r.t === seeded[me].tenant), table).toBe(true);
@@ -102,7 +102,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     const client = await db.app.connect();
     try {
       for (const table of TABLES) {
-        const res = await client.query(`SELECT count(*)::int AS n FROM guardbase.${table}`);
+        const res = await client.query(`SELECT count(*)::int AS n FROM supahound.${table}`);
         expect(res.rows[0].n, table).toBe(0);
       }
       await client.query("BEGIN");
@@ -110,7 +110,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       await client.query("COMMIT");
       // The setting is now '' on this session; the policy must still match nothing.
       for (const table of TABLES) {
-        const res = await client.query(`SELECT count(*)::int AS n FROM guardbase.${table}`);
+        const res = await client.query(`SELECT count(*)::int AS n FROM supahound.${table}`);
         expect(res.rows[0].n, table).toBe(0);
       }
     } finally {
@@ -121,18 +121,18 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   it("rejects writes that carry another tenant's ID", async () => {
     await expect(
       withTenant(db.app, seeded.a.tenant, (tx) =>
-        tx.query("INSERT INTO guardbase.audit_log (tenant_id, action, detail) VALUES ($1, 'logs_query', '{}')", [seeded.b.tenant]),
+        tx.query("INSERT INTO supahound.audit_log (tenant_id, action, detail) VALUES ($1, 'logs_query', '{}')", [seeded.b.tenant]),
       ),
     ).rejects.toThrow(/row-level security/);
   });
 
   it("cannot update or delete another tenant's rows, even naming them by ID", async () => {
     await withTenant(db.app, seeded.a.tenant, async (tx) => {
-      const upd = await tx.query("UPDATE guardbase.projects SET name = 'pwned' WHERE id = $1 RETURNING id", [seeded.b.project]);
-      const del = await tx.query("DELETE FROM guardbase.incidents WHERE id = $1 RETURNING id", [seeded.b.incident]);
+      const upd = await tx.query("UPDATE supahound.projects SET name = 'pwned' WHERE id = $1 RETURNING id", [seeded.b.project]);
+      const del = await tx.query("DELETE FROM supahound.incidents WHERE id = $1 RETURNING id", [seeded.b.incident]);
       expect([upd.length, del.length]).toEqual([0, 0]);
     });
-    const still = await db.admin.query("SELECT name FROM guardbase.projects WHERE id = $1", [seeded.b.project]);
+    const still = await db.admin.query("SELECT name FROM supahound.projects WHERE id = $1", [seeded.b.project]);
     expect(still.rows[0].name).toBe("Client app");
   });
 
@@ -140,7 +140,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     const tryInsert = (project: string, run: string, incident: string | null) =>
       withTenant(db.app, seeded.a.tenant, (tx) =>
         tx.query(
-          `INSERT INTO guardbase.findings (tenant_id, project_id, poll_run_id, incident_id, detector, severity, actor, signals, evidence, hits, first_seen, last_seen)
+          `INSERT INTO supahound.findings (tenant_id, project_id, poll_run_id, incident_id, detector, severity, actor, signals, evidence, hits, first_seen, last_seen)
            VALUES ($1, $2, $3, $4, 'cross_tenant', 'high', 'user:x', '{}', '{}', 1, now(), now())`,
           [seeded.a.tenant, project, run, incident],
         ),
@@ -151,7 +151,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   });
 
   it("allows the same Supabase project under two tenants, once per tenant", async () => {
-    const refs = await db.admin.query("SELECT count(*)::int AS n FROM guardbase.projects WHERE supabase_ref = $1", [SHARED_REF]);
+    const refs = await db.admin.query("SELECT count(*)::int AS n FROM supahound.projects WHERE supabase_ref = $1", [SHARED_REF]);
     expect(refs.rows[0].n).toBe(2);
     await expect(
       withTenant(db.app, seeded.a.tenant, (tx) =>
@@ -161,7 +161,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   });
 
   it("keeps the audit log append-only for the app", async () => {
-    for (const sql of ["UPDATE guardbase.audit_log SET detail = '{}'", "DELETE FROM guardbase.audit_log"]) {
+    for (const sql of ["UPDATE supahound.audit_log SET detail = '{}'", "DELETE FROM supahound.audit_log"]) {
       await expect(withTenant(db.app, seeded.a.tenant, (tx) => tx.query(sql))).rejects.toThrow(/permission denied/);
     }
   });
@@ -169,10 +169,10 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   it("lets the scheduler see project IDs for every tenant and nothing else", async () => {
     const due = await repo.dueProjects(db.scheduler, 60, 100);
     expect(due.map((s) => s.tenantId).sort()).toEqual([seeded.a.tenant, seeded.b.tenant].sort());
-    await expect(db.scheduler.query("SELECT supabase_ref FROM guardbase.projects")).rejects.toThrow(/permission denied/);
-    await expect(db.scheduler.query("SELECT * FROM guardbase.projects")).rejects.toThrow(/permission denied/);
+    await expect(db.scheduler.query("SELECT supabase_ref FROM supahound.projects")).rejects.toThrow(/permission denied/);
+    await expect(db.scheduler.query("SELECT * FROM supahound.projects")).rejects.toThrow(/permission denied/);
     for (const table of TABLES.filter((t) => t !== "projects")) {
-      await expect(db.scheduler.query(`SELECT 1 FROM guardbase.${table}`), table).rejects.toThrow(/permission denied/);
+      await expect(db.scheduler.query(`SELECT 1 FROM supahound.${table}`), table).rejects.toThrow(/permission denied/);
     }
   });
 
@@ -184,7 +184,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     ).rejects.toThrow(/not found for this tenant/);
     // Simulate a bug or an attacker with database access that copies A's sealed token into B's row.
     await db.admin.query(
-      "UPDATE guardbase.connections SET sealed_token = (SELECT sealed_token FROM guardbase.connections WHERE id = $1) WHERE id = $2",
+      "UPDATE supahound.connections SET sealed_token = (SELECT sealed_token FROM supahound.connections WHERE id = $1) WHERE id = $2",
       [seeded.a.connection, seeded.b.connection],
     );
     await expect(
@@ -201,7 +201,7 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
-    const res = await db.admin.query("SELECT count(*)::int AS n FROM guardbase.audit_log WHERE detail->>'marker' = 'rolled-back'");
+    const res = await db.admin.query("SELECT count(*)::int AS n FROM supahound.audit_log WHERE detail->>'marker' = 'rolled-back'");
     expect(res.rows[0].n).toBe(0);
     await expect(leaked!.query("SELECT 1")).rejects.toThrow(/closed/);
   });

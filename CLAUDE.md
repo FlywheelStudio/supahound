@@ -1,13 +1,15 @@
-# supadog
+# Supahound
 
-**Guardbase**: abnormal-traffic monitoring for Supabase apps. Customers connect their Supabase
+Repository folder: `supadog` (decision 015).
+
+**Supahound**: abnormal-traffic monitoring for Supabase apps. Customers connect their Supabase
 org (OAuth, read-only); a Cloudflare poller reads each project's edge logs, runs the detectors,
 groups findings into incidents and writes summaries with a ZDR-only model; a Next.js app on
 Workers handles sign-in (Supabase Auth magic links), onboarding and the dashboard.
-Backend: Guardbase's own Supabase Postgres (schema `guardbase`, forced RLS, reached through
+Backend: Supahound's own Supabase Postgres (schema `supahound`, forced RLS, reached through
 Hyperdrive with caching off). Everything else runs on Cloudflare (decision 008).
 
-Product spec: [Guardbase PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc).
+Product spec: [Supahound PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc, still titled Guardbase).
 
 ## Commands
 
@@ -22,16 +24,16 @@ pnpm -r build                  # poller: wrangler dry run; web: vite build
 
 pnpm scan --file test/fixtures/events.ndjson --ownership test/fixtures/policies.json   # core CLI
 pnpm discover-keys --project <ref>        # PRD task 1: which auth fields exist in edge logs
-pnpm --filter @guardbase/web dev          # web app (needs .dev.vars, see apps/web/wrangler.jsonc)
-pnpm --filter @guardbase/poller dev       # poller Worker
-pnpm --filter @guardbase/<app> types      # regenerate Worker binding types after config changes
+pnpm --filter @supahound/web dev          # web app (needs .dev.vars, see apps/web/wrangler.jsonc)
+pnpm --filter @supahound/poller dev       # poller Worker
+pnpm --filter @supahound/<app> types      # regenerate Worker binding types after config changes
 ```
 
 Use `pnpm -r test`, not `pnpm -s test`: silent mode hides the child packages' summaries.
 
 The Postgres tests start a throwaway cluster on a Unix socket and apply every file in
-`supabase/migrations/` in order. They look for `initdb` in `GUARDBASE_PG_BIN`, then
-`/opt/homebrew/opt/postgresql@17/bin`. `GUARDBASE_SKIP_DB_TESTS=1` skips them where no Postgres
+`supabase/migrations/` in order. They look for `initdb` in `SUPAHOUND_PG_BIN`, then
+`/opt/homebrew/opt/postgresql@17/bin`. `SUPAHOUND_SKIP_DB_TESTS=1` skips them where no Postgres
 exists; never skip them before a merge.
 
 ## Codebase map
@@ -63,7 +65,7 @@ Local values go in `.dev.vars` (git-ignored). Hyperdrive local strings:
 - Never commit real log rows. They hold user IDs, IPs and emails. Name local exports `*.local.ndjson`
   (git-ignored).
 - Detector evidence carries structured features only: enums, counts, ASNs, fingerprints. No raw user
-  agents or query values (PRD, Security of Guardbase itself).
+  agents or query values (PRD, Security of Supahound itself).
 - Field paths change only in `packages/core/src/config/fields.ts`.
 - **Never cross tenant data.** Touch tenant tables only through `withTenant`. Every new table gets
   `tenant_id`, forced RLS and a `(tenant_id, id)` foreign key; the isolation test fails otherwise.

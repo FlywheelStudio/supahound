@@ -19,10 +19,10 @@ import { projectScope } from "./tenancy/scope.js";
 const LOCAL_SCOPE = projectScope("00000000-0000-4000-8000-000000000000", "00000000-0000-4000-8000-000000000001");
 
 const USAGE = `Usage:
-  supadog scan --ownership <file> (--file <events.ndjson> | --project <ref> [--minutes 15])
+  supahound scan --ownership <file> (--file <events.ndjson> | --project <ref> [--minutes 15])
                [--expected-asns 16509,24940]
-  supadog discover-keys --project <ref> [--minutes 60]
-  supadog print-sql
+  supahound discover-keys --project <ref> [--minutes 60]
+  supahound print-sql
 
 --ownership takes a JSON object {"table": ["owner_col", ...]} or a JSON array of pg_policies rows
 (run the SQL from print-sql). Live calls read SUPABASE_ACCESS_TOKEN (analytics:read) from the env or .env.`;

@@ -1,9 +1,9 @@
-import { dueProjects } from "@guardbase/core/db/repo";
-import { explainIncident } from "@guardbase/core/explainer/llm";
-import { queryLogs } from "@guardbase/core/logs/client";
-import { pollProject, type PollDeps, type PollOutcome } from "@guardbase/core/poller/pollProject";
-import { projectScope, type ProjectScope } from "@guardbase/core/tenancy/scope";
-import { TokenVault } from "@guardbase/core/vault/vault";
+import { dueProjects } from "@supahound/core/db/repo";
+import { explainIncident } from "@supahound/core/explainer/llm";
+import { queryLogs } from "@supahound/core/logs/client";
+import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
+import { projectScope, type ProjectScope } from "@supahound/core/tenancy/scope";
+import { TokenVault } from "@supahound/core/vault/vault";
 import pg from "pg";
 
 // Cron: list due project scopes through the scheduler role (IDs only) and enqueue one message
@@ -90,7 +90,7 @@ export default {
     const app = new pg.Pool({ connectionString: env.HYPERDRIVE_APP.connectionString, max: 5 });
     const deps: PollDeps = {
       app,
-      vault: TokenVault.fromEnv({ GUARDBASE_MASTER_KEYS: env.GUARDBASE_MASTER_KEYS }),
+      vault: TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: env.SUPAHOUND_MASTER_KEYS }),
       queryLogs,
       oauth: {
         clientId: env.SUPABASE_OAUTH_CLIENT_ID,
@@ -98,7 +98,7 @@ export default {
         redirectUri: new URL("/api/supabase/callback", env.APP_URL).toString(),
       },
       explain: (features) => explainIncident(features, { apiKey: env.AI_GATEWAY_API_KEY }),
-      env: { GUARDBASE_SOURCE_COLUMN: env.GUARDBASE_SOURCE_COLUMN },
+      env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
     };
     try {
       await handleMessages(batch.messages, (scope) => pollProject(scope, deps));

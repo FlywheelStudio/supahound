@@ -1,6 +1,6 @@
 # WIP: Tenant isolation (multi-tenant storage, vault, poller)
 
-Goal: Guardbase runs many tenants (agencies, builders), each with many Supabase projects. No code
+Goal: Supahound runs many tenants (agencies, builders), each with many Supabase projects. No code
 path may read, write, decrypt or mix one tenant's data with another's.
 
 ## Status — 2026-10-27
@@ -15,7 +15,7 @@ path may read, write, decrypt or mix one tenant's data with another's.
 
 ## Tenancy model
 
-- **Tenant** = one Guardbase account (an agency or a builder).
+- **Tenant** = one Supahound account (an agency or a builder).
 - **Connection** = one Supabase OAuth grant held by a tenant. Tokens live here, not per project:
   the Supabase docs do not say whether a token covers one organization or named projects, and a
   refresh may rotate it.
@@ -32,7 +32,7 @@ path may read, write, decrypt or mix one tenant's data with another's.
    transaction. Repositories accept only that handle.
 3. Token vault: AES-256-GCM, key derived per tenant (HKDF), AAD bound to tenant + connection. A
    ciphertext copied to another tenant's row fails to decrypt.
-4. In-memory state (service-role networks) is keyed by Guardbase project ID, never Supabase ref.
+4. In-memory state (service-role networks) is keyed by Supahound project ID, never Supabase ref.
 5. The scheduler reads IDs only, through one hardened SECURITY DEFINER function.
 6. External calls (Supabase, AI Gateway) never run inside a transaction.
 
@@ -50,7 +50,7 @@ path may read, write, decrypt or mix one tenant's data with another's.
 
 - Scope keys: `ServiceRoleNetworks` was keyed by Supabase ref. Two tenants watching one Supabase
   project would have shared learned networks, so one tenant's traffic could silence the other's
-  `new_network` alert. Now keyed by tenant + Guardbase project (commit 237ca10).
+  `new_network` alert. Now keyed by tenant + Supahound project (commit 237ca10).
 - Schema + RLS (`migrations/0001_tenancy.sql`), `withTenant`, repositories, token vault. 12
   Postgres tests run as a non-superuser role on a throwaway cluster (Postgres 17, Unix socket).
   Mutation checks: a permissive leak policy, FORCE removed, `nullif` removed, a single-column FK,

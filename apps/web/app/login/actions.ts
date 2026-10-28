@@ -16,6 +16,6 @@ export async function sendMagicLink(formData: FormData): Promise<void> {
     options: { emailRedirectTo: new URL("/auth/confirm", env.APP_URL).toString() },
   });
   // Same response whether or not the address has an account, so the form cannot be used to
-  // discover who uses Guardbase. Supabase rate-limits sends per address and per project.
+  // discover who uses Supahound. Supabase rate-limits sends per address and per project.
   redirect(error?.status === 429 ? "/login?error=rate" : "/login?sent=1");
 }

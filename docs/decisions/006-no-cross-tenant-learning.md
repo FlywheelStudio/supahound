@@ -7,7 +7,7 @@ Date: 2026-10-27
 ## Context
 
 The PRD's Baselines section lists "Fleet priors: patterns learned across all connected projects
-cover the cold start." Erik's rule is that Guardbase never crosses client data.
+cover the cold start." Erik's rule is that Supahound never crosses client data.
 
 ## Decision
 

@@ -1,4 +1,4 @@
-import { listWorkspaces } from "@guardbase/core/db/user";
+import { listWorkspaces } from "@supahound/core/db/user";
 import { redirect } from "next/navigation";
 import { Checklist } from "../../components/Checklist";
 import { withPool } from "../../lib/db";

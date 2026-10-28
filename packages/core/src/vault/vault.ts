@@ -17,7 +17,7 @@ const FORMAT = 0x01;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = 1 + 2 + IV_BYTES + TAG_BYTES;
-const INFO = Buffer.from("guardbase/connection-token/v1");
+const INFO = Buffer.from("supahound/connection-token/v1");
 
 export class VaultError extends Error {
   constructor(message: string) {
@@ -45,10 +45,10 @@ export class TokenVault {
     this.currentVersion = Math.max(...masterKeys.keys());
   }
 
-  // GUARDBASE_MASTER_KEYS="1:<base64 32 bytes>,2:<base64 32 bytes>". The highest version seals.
+  // SUPAHOUND_MASTER_KEYS="1:<base64 32 bytes>,2:<base64 32 bytes>". The highest version seals.
   static fromEnv(env: EnvVars): TokenVault {
-    const raw = env.GUARDBASE_MASTER_KEYS;
-    if (!raw) throw new VaultError("GUARDBASE_MASTER_KEYS is not set");
+    const raw = env.SUPAHOUND_MASTER_KEYS;
+    if (!raw) throw new VaultError("SUPAHOUND_MASTER_KEYS is not set");
     const keys = new Map<number, Buffer>();
     for (const part of raw.split(",")) {
       const [v, b64] = part.trim().split(":");
@@ -64,7 +64,7 @@ export class TokenVault {
   }
 
   private static aad(binding: TokenBinding, version: number): Buffer {
-    return Buffer.from(`guardbase:connection-token:${binding.tenantId}:${binding.connectionId}:${version}`);
+    return Buffer.from(`supahound:connection-token:${binding.tenantId}:${binding.connectionId}:${version}`);
   }
 
   seal(plaintext: string, binding: TokenBinding): Buffer {

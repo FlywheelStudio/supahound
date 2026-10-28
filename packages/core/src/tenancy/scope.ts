@@ -1,4 +1,4 @@
-// Tenant and project identity. Every piece of state Guardbase keeps is keyed by a ProjectScope,
+// Tenant and project identity. Every piece of state Supahound keeps is keyed by a ProjectScope,
 // never by a Supabase project ref: the same ref can belong to two tenants (an agency and its
 // client), and their data must never meet.
 

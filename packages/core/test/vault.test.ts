@@ -61,8 +61,8 @@ describe("TokenVault", () => {
   it("rejects bad configuration", () => {
     expect(() => vault({})).toThrow(/No master keys/);
     expect(() => vault({ 1: randomBytes(16) })).toThrow(/32 bytes/);
-    expect(() => TokenVault.fromEnv({})).toThrow(/GUARDBASE_MASTER_KEYS/);
-    const fromEnv = TokenVault.fromEnv({ GUARDBASE_MASTER_KEYS: `1:${key1.toString("base64")}` });
+    expect(() => TokenVault.fromEnv({})).toThrow(/SUPAHOUND_MASTER_KEYS/);
+    const fromEnv = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: `1:${key1.toString("base64")}` });
     expect(fromEnv.currentVersion).toBe(1);
   });
 });

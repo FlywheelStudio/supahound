@@ -1,6 +1,6 @@
-import { consumeOAuthState, createConnection } from "@guardbase/core/db/repo";
-import { NotAMemberError, withTenantForUser } from "@guardbase/core/db/user";
-import { exchangeCode } from "@guardbase/core/supabase/oauth";
+import { consumeOAuthState, createConnection } from "@supahound/core/db/repo";
+import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { exchangeCode } from "@supahound/core/supabase/oauth";
 import { NextResponse, type NextRequest } from "next/server";
 import { handleOAuthCallback } from "../../../../lib/connect";
 import { withPool } from "../../../../lib/db";

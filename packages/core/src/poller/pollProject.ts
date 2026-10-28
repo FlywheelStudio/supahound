@@ -31,7 +31,7 @@ export interface PollDeps {
   now?: () => Date;
   // Minimum time between polls of one project. Supabase allows 10 analytics queries a minute.
   intervalSeconds?: number;
-  // Settings such as GUARDBASE_SOURCE_COLUMN (Workers: the env binding; Node: process.env).
+  // Settings such as SUPAHOUND_SOURCE_COLUMN (Workers: the env binding; Node: process.env).
   env?: EnvVars;
 }
 

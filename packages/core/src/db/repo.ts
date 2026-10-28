@@ -10,7 +10,7 @@ import type { TenantTx } from "./tenant.js";
 // so a missing or broken RLS policy still cannot widen a query (defence in depth).
 
 export async function createTenant(tx: TenantTx, name: string): Promise<void> {
-  await tx.query("INSERT INTO guardbase.tenants (id, name) VALUES ($1, $2)", [tx.tenantId, name]);
+  await tx.query("INSERT INTO supahound.tenants (id, name) VALUES ($1, $2)", [tx.tenantId, name]);
 }
 
 export async function createConnection(
@@ -21,7 +21,7 @@ export async function createConnection(
   const id = connectionId(randomUUID());
   const sealed = vault.seal(input.token, { tenantId: tx.tenantId, connectionId: id });
   await tx.query(
-    `INSERT INTO guardbase.connections (id, tenant_id, label, sealed_token, key_version)
+    `INSERT INTO supahound.connections (id, tenant_id, label, sealed_token, key_version)
      VALUES ($1, $2, $3, $4, $5)`,
     [id, tx.tenantId, input.label, sealed, vault.keyVersionOf(sealed)],
   );
@@ -30,7 +30,7 @@ export async function createConnection(
 
 export async function openConnectionToken(tx: TenantTx, vault: TokenVault, id: ConnectionId): Promise<string> {
   const rows = await tx.query<{ sealed_token: Buffer }>(
-    "SELECT sealed_token FROM guardbase.connections WHERE tenant_id = $1 AND id = $2",
+    "SELECT sealed_token FROM supahound.connections WHERE tenant_id = $1 AND id = $2",
     [tx.tenantId, id],
   );
   const row = rows[0];
@@ -43,7 +43,7 @@ export async function createProject(
   input: { connectionId: ConnectionId; supabaseRef: string; name: string },
 ): Promise<ProjectId> {
   const rows = await tx.query<{ id: string }>(
-    `INSERT INTO guardbase.projects (tenant_id, connection_id, supabase_ref, name)
+    `INSERT INTO supahound.projects (tenant_id, connection_id, supabase_ref, name)
      VALUES ($1, $2, $3, $4) RETURNING id`,
     [tx.tenantId, input.connectionId, input.supabaseRef, input.name],
   );
@@ -64,7 +64,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
     connection_id: string; supabase_ref: string; ownership: OwnershipMap; expected_asns: number[]; paused: boolean;
   }>(
     `SELECT connection_id, supabase_ref, ownership, expected_asns, paused
-     FROM guardbase.projects WHERE tenant_id = $1 AND id = $2`,
+     FROM supahound.projects WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, id],
   );
   const r = rows[0];
@@ -80,7 +80,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
 }
 
 export async function setOwnership(tx: TenantTx, id: ProjectId, ownership: OwnershipMap): Promise<void> {
-  await tx.query("UPDATE guardbase.projects SET ownership = $3 WHERE tenant_id = $1 AND id = $2", [
+  await tx.query("UPDATE supahound.projects SET ownership = $3 WHERE tenant_id = $1 AND id = $2", [
     tx.tenantId, id, JSON.stringify(ownership),
   ]);
 }
@@ -89,7 +89,7 @@ export async function setOwnership(tx: TenantTx, id: ProjectId, ownership: Owner
 // racing for the same project exactly one gets a row back; the other skips.
 export async function claimProject(tx: TenantTx, id: ProjectId, now: Date, intervalSeconds: number): Promise<boolean> {
   const rows = await tx.query(
-    `UPDATE guardbase.projects SET last_polled_at = $3
+    `UPDATE supahound.projects SET last_polled_at = $3
      WHERE tenant_id = $1 AND id = $2 AND NOT paused
        AND (last_polled_at IS NULL OR last_polled_at <= $3::timestamptz - make_interval(secs => $4))
      RETURNING id`,
@@ -102,7 +102,7 @@ export async function claimProject(tx: TenantTx, id: ProjectId, now: Date, inter
 // "unable to assess", so the dashboard never shows a silent gap as healthy.
 export async function failStaleRuns(tx: TenantTx, id: ProjectId, now: Date, olderThanSeconds: number): Promise<number> {
   const rows = await tx.query(
-    `UPDATE guardbase.poll_runs SET status = 'unable_to_assess', error_code = 'worker_lost', finished_at = $3
+    `UPDATE supahound.poll_runs SET status = 'unable_to_assess', error_code = 'worker_lost', finished_at = $3
      WHERE tenant_id = $1 AND project_id = $2 AND status = 'running'
        AND started_at < $3::timestamptz - make_interval(secs => $4)
      RETURNING id`,
@@ -115,7 +115,7 @@ export async function failStaleRuns(tx: TenantTx, id: ProjectId, now: Date, olde
 // overlap (no double counting) and a failed poll's span is covered by the next good one.
 export async function lastAssessedUntil(tx: TenantTx, id: ProjectId): Promise<Date | null> {
   const rows = await tx.query<{ until: Date | null }>(
-    "SELECT max(window_end) AS until FROM guardbase.poll_runs WHERE tenant_id = $1 AND project_id = $2 AND status = 'ok'",
+    "SELECT max(window_end) AS until FROM supahound.poll_runs WHERE tenant_id = $1 AND project_id = $2 AND status = 'ok'",
     [tx.tenantId, id],
   );
   return rows[0]?.until ?? null;
@@ -123,7 +123,7 @@ export async function lastAssessedUntil(tx: TenantTx, id: ProjectId): Promise<Da
 
 export async function loadNetworks(tx: TenantTx, id: ProjectId): Promise<number[]> {
   const rows = await tx.query<{ asn: number }>(
-    "SELECT asn FROM guardbase.service_role_networks WHERE tenant_id = $1 AND project_id = $2 ORDER BY asn",
+    "SELECT asn FROM supahound.service_role_networks WHERE tenant_id = $1 AND project_id = $2 ORDER BY asn",
     [tx.tenantId, id],
   );
   return rows.map((r) => r.asn);
@@ -132,7 +132,7 @@ export async function loadNetworks(tx: TenantTx, id: ProjectId): Promise<number[
 export async function saveNetworks(tx: TenantTx, id: ProjectId, asns: number[]): Promise<void> {
   if (asns.length === 0) return;
   await tx.query(
-    `INSERT INTO guardbase.service_role_networks (tenant_id, project_id, asn)
+    `INSERT INTO supahound.service_role_networks (tenant_id, project_id, asn)
      SELECT $1, $2, unnest($3::integer[]) ON CONFLICT DO NOTHING`,
     [tx.tenantId, id, asns],
   );
@@ -140,7 +140,7 @@ export async function saveNetworks(tx: TenantTx, id: ProjectId, asns: number[]):
 
 export async function startPollRun(tx: TenantTx, id: ProjectId, window: { start: Date; end: Date }): Promise<string> {
   const rows = await tx.query<{ id: string }>(
-    `INSERT INTO guardbase.poll_runs (tenant_id, project_id, window_start, window_end)
+    `INSERT INTO supahound.poll_runs (tenant_id, project_id, window_start, window_end)
      VALUES ($1, $2, $3, $4) RETURNING id`,
     [tx.tenantId, id, window.start, window.end],
   );
@@ -153,7 +153,7 @@ export async function finishPollRun(
   result: { status: "ok" | "unable_to_assess"; errorCode?: string; templates?: number; findings?: number },
 ): Promise<void> {
   await tx.query(
-    `UPDATE guardbase.poll_runs
+    `UPDATE supahound.poll_runs
      SET status = $3, error_code = $4, templates = $5, findings = $6, finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null],
@@ -168,7 +168,7 @@ export async function insertFindings(
 ): Promise<void> {
   for (const f of findings) {
     await tx.query(
-      `INSERT INTO guardbase.findings
+      `INSERT INTO supahound.findings
          (tenant_id, project_id, poll_run_id, incident_id, detector, severity, actor, signals, evidence, hits, first_seen, last_seen)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [tx.tenantId, id, runId, f.incidentId, f.detector, f.severity, f.actor, f.signals, JSON.stringify(f.evidence),
@@ -195,7 +195,7 @@ export async function openIncidents(tx: TenantTx, id: ProjectId): Promise<Incide
     finding_count: number; hits: number; opened_at: Date; last_seen_at: Date;
   }>(
     `SELECT id, actor, severity, detectors, signals, finding_count, hits, opened_at, last_seen_at
-     FROM guardbase.incidents WHERE tenant_id = $1 AND project_id = $2 AND status = 'open'`,
+     FROM supahound.incidents WHERE tenant_id = $1 AND project_id = $2 AND status = 'open'`,
     [tx.tenantId, id],
   );
   return rows.map((r) => ({
@@ -212,7 +212,7 @@ export async function upsertIncident(
 ): Promise<string> {
   if (incident.id === null) {
     const rows = await tx.query<{ id: string }>(
-      `INSERT INTO guardbase.incidents
+      `INSERT INTO supahound.incidents
          (tenant_id, project_id, actor, status, severity, detectors, signals, finding_count, hits, opened_at, last_seen_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
       [tx.tenantId, id, incident.actor, incident.status, incident.severity, incident.detectors, incident.signals,
@@ -221,7 +221,7 @@ export async function upsertIncident(
     return rows[0]!.id;
   }
   await tx.query(
-    `UPDATE guardbase.incidents
+    `UPDATE supahound.incidents
      SET status = $4, severity = $5, detectors = $6, signals = $7, finding_count = $8, hits = $9,
          last_seen_at = $10, updated_at = now()
      WHERE tenant_id = $1 AND project_id = $2 AND id = $3`,
@@ -238,7 +238,7 @@ export async function setIncidentSummary(
   source: "model" | "template",
 ): Promise<void> {
   await tx.query(
-    `UPDATE guardbase.incidents SET summary = $3, summary_source = $4, updated_at = now()
+    `UPDATE supahound.incidents SET summary = $3, summary_source = $4, updated_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, incidentId, JSON.stringify(summary), source],
   );
@@ -251,17 +251,17 @@ export async function appendAudit(
   entry: { projectId: ProjectId | null; action: AuditAction; detail: Record<string, string | number | boolean | null> },
 ): Promise<void> {
   await tx.query(
-    "INSERT INTO guardbase.audit_log (tenant_id, project_id, action, detail) VALUES ($1, $2, $3, $4)",
+    "INSERT INTO supahound.audit_log (tenant_id, project_id, action, detail) VALUES ($1, $2, $3, $4)",
     [tx.tenantId, entry.projectId, entry.action, JSON.stringify(entry.detail)],
   );
 }
 
-// Scheduler path. Runs on a pool that logs in as a member of guardbase_scheduler, which can read
+// Scheduler path. Runs on a pool that logs in as a member of supahound_scheduler, which can read
 // project IDs and poll times and nothing else. Returns scopes only; each job then opens its own
 // tenant transaction.
 export async function dueProjects(schedulerPool: Pool, olderThanSeconds: number, limit: number): Promise<ProjectScope[]> {
   const res = await schedulerPool.query<{ tenant_id: string; id: string }>(
-    `SELECT tenant_id, id FROM guardbase.projects
+    `SELECT tenant_id, id FROM supahound.projects
      WHERE NOT paused AND (last_polled_at IS NULL OR last_polled_at < now() - make_interval(secs => $1))
      ORDER BY last_polled_at NULLS FIRST
      LIMIT $2`,
@@ -288,11 +288,11 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
   }>(
     `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at,
-            (SELECT count(*)::int FROM guardbase.incidents i
+            (SELECT count(*)::int FROM supahound.incidents i
               WHERE i.tenant_id = p.tenant_id AND i.project_id = p.id AND i.status = 'open') AS open_incidents,
-            (SELECT r.status FROM guardbase.poll_runs r
+            (SELECT r.status FROM supahound.poll_runs r
               WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id ORDER BY r.started_at DESC LIMIT 1) AS last_run_status
-     FROM guardbase.projects p WHERE p.tenant_id = $1 ORDER BY p.name`,
+     FROM supahound.projects p WHERE p.tenant_id = $1 ORDER BY p.name`,
     [tx.tenantId],
   );
   return rows.map((r) => ({
@@ -317,8 +317,8 @@ export async function listOpenIncidents(tx: TenantTx, limit = 50): Promise<Incid
     last_seen_at: Date; summary: { summary?: string } | null;
   }>(
     `SELECT i.id, p.name AS project_name, i.severity, i.detectors, i.hits, i.last_seen_at, i.summary
-     FROM guardbase.incidents i
-     JOIN guardbase.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
+     FROM supahound.incidents i
+     JOIN supahound.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
      WHERE i.tenant_id = $1 AND i.status = 'open'
      ORDER BY CASE i.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
               i.last_seen_at DESC
@@ -332,7 +332,7 @@ export async function listOpenIncidents(tx: TenantTx, limit = 50): Promise<Incid
 }
 
 export async function countConnections(tx: TenantTx): Promise<number> {
-  const rows = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM guardbase.connections WHERE tenant_id = $1", [tx.tenantId]);
+  const rows = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM supahound.connections WHERE tenant_id = $1", [tx.tenantId]);
   return rows[0]?.n ?? 0;
 }
 
@@ -343,7 +343,7 @@ export async function createOAuthState(
   input: { userId: string; stateHash: string; codeVerifier: string; expiresAt: Date },
 ): Promise<void> {
   await tx.query(
-    `INSERT INTO guardbase.oauth_states (tenant_id, user_id, state_hash, code_verifier, expires_at)
+    `INSERT INTO supahound.oauth_states (tenant_id, user_id, state_hash, code_verifier, expires_at)
      VALUES ($1, $2, $3, $4, $5)`,
     [tx.tenantId, input.userId, input.stateHash, input.codeVerifier, input.expiresAt],
   );
@@ -351,7 +351,7 @@ export async function createOAuthState(
 
 export async function consumeOAuthState(tx: TenantTx, userId: string, stateHash: string, now: Date): Promise<string | null> {
   const rows = await tx.query<{ code_verifier: string }>(
-    `UPDATE guardbase.oauth_states SET used_at = $4
+    `UPDATE supahound.oauth_states SET used_at = $4
      WHERE tenant_id = $1 AND state_hash = $2 AND user_id = $3 AND used_at IS NULL AND expires_at > $4
      RETURNING code_verifier`,
     [tx.tenantId, stateHash, userId, now],

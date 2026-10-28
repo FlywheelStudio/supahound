@@ -4,7 +4,7 @@ Date: 2026-10-27
 
 ## Decision
 
-- Onboarding has a "Connect Supabase" button. Guardbase asks for `analytics:read` and
+- Onboarding has a "Connect Supabase" button. Supahound asks for `analytics:read` and
   `database:read` only.
 - The OAuth `state` is stored server-side, single-use, bound to the session user and tenant, with
   PKCE. The callback rejects a state whose user or tenant does not match the session, so nobody can

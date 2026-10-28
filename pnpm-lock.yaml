@@ -26,7 +26,7 @@ importers:
 
   apps/poller:
     dependencies:
-      '@guardbase/core':
+      '@supahound/core':
         specifier: workspace:*
         version: link:../../packages/core
       pg:
@@ -54,15 +54,15 @@ importers:
 
   apps/web:
     dependencies:
-      '@guardbase/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@supabase/ssr':
         specifier: ^0.12.7
         version: 0.12.7(@supabase/supabase-js@2.118.0)
       '@supabase/supabase-js':
         specifier: ^2.118.0
         version: 2.118.0
+      '@supahound/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@vinext/cloudflare':
         specifier: ^1.2.1
         version: 1.2.1(@cloudflare/vite-plugin@1.65.0(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15))(workerd@1.20261023.1)(wrangler@4.154.0(@types/node@22.20.5)))(vinext@1.3.1(@types/node@22.20.5)(@vitejs/plugin-react@6.1.2(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)))(@vitejs/plugin-rsc@0.5.38(react-dom@19.3.1(react@19.3.1))(react-server-dom-webpack@19.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(webpack@5.112.2(esbuild@0.28.2)))(react@19.3.1)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)))(react-dom@19.3.1(react@19.3.1))(react-server-dom-webpack@19.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(webpack@5.112.2(esbuild@0.28.2)))(react@19.3.1)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)))

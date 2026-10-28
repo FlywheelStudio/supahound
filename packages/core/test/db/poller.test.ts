@@ -123,12 +123,12 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     behaviour[await tokenOf(agency)] = () => attackRows;
     await pollProject(agency, deps());
     const audit = await withTenant(db.app, agency.tenantId, (tx) =>
-      tx.query<{ action: string; detail: Record<string, unknown> }>("SELECT action, detail FROM guardbase.audit_log ORDER BY created_at"),
+      tx.query<{ action: string; detail: Record<string, unknown> }>("SELECT action, detail FROM supahound.audit_log ORDER BY created_at"),
     );
     expect(audit.map((a) => a.action)).toEqual(["logs_query", "model_call", "model_call"]);
     expect(audit[0]!.detail.sql_sha256).toMatch(/^[0-9a-f]{64}$/);
     for (const a of audit.slice(1)) expect(a.detail.zero_data_retention_requested).toBe(true);
-    const clientAudit = await withTenant(db.app, client.tenantId, (tx) => tx.query("SELECT 1 FROM guardbase.audit_log"));
+    const clientAudit = await withTenant(db.app, client.tenantId, (tx) => tx.query("SELECT 1 FROM supahound.audit_log"));
     expect(clientAudit).toEqual([]);
   });
 
@@ -140,7 +140,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     expect(byTenant[agency.tenantId]).toMatchObject({ status: "ok" });
     expect(byTenant[client.tenantId]).toEqual({ status: "unable_to_assess", errorCode: "rate_limited" });
     const runs = await withTenant(db.app, client.tenantId, (tx) =>
-      tx.query<{ status: string; error_code: string }>("SELECT status, error_code FROM guardbase.poll_runs"),
+      tx.query<{ status: string; error_code: string }>("SELECT status, error_code FROM supahound.poll_runs"),
     );
     expect(runs).toEqual([{ status: "unable_to_assess", error_code: "rate_limited" }]);
   });
@@ -150,11 +150,11 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     const r = await pollProject(agency, deps({ explain: async () => { throw new Error("model exploded"); } }));
     expect(r).toMatchObject({ status: "ok", findings: 2, notified: 2 });
     const incidents = await withTenant(db.app, agency.tenantId, (tx) =>
-      tx.query<{ summary_source: string }>("SELECT summary_source FROM guardbase.incidents"),
+      tx.query<{ summary_source: string }>("SELECT summary_source FROM supahound.incidents"),
     );
     expect(incidents.map((i) => i.summary_source)).toEqual(["template", "template"]);
     const audit = await withTenant(db.app, agency.tenantId, (tx) =>
-      tx.query<{ action: string }>("SELECT action FROM guardbase.audit_log WHERE action = 'model_call'"),
+      tx.query<{ action: string }>("SELECT action FROM supahound.audit_log WHERE action = 'model_call'"),
     );
     expect(audit).toHaveLength(2);
   });
@@ -224,10 +224,10 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     await withTenant(db.app, agency.tenantId, (tx) =>
       repo.startPollRun(tx, agency.projectId, { start: new Date(NOW.getTime() - 3_600_000), end: new Date(NOW.getTime() - 3_000_000) }),
     );
-    await db.admin.query("UPDATE guardbase.poll_runs SET started_at = $1 WHERE tenant_id = $2", [new Date(NOW.getTime() - 3_600_000), agency.tenantId]);
+    await db.admin.query("UPDATE supahound.poll_runs SET started_at = $1 WHERE tenant_id = $2", [new Date(NOW.getTime() - 3_600_000), agency.tenantId]);
     await pollProject(agency, deps());
     const runs = await withTenant(db.app, agency.tenantId, (tx) =>
-      tx.query<{ status: string; error_code: string | null }>("SELECT status, error_code FROM guardbase.poll_runs ORDER BY started_at"),
+      tx.query<{ status: string; error_code: string | null }>("SELECT status, error_code FROM supahound.poll_runs ORDER BY started_at"),
     );
     expect(runs).toEqual([
       { status: "unable_to_assess", error_code: "worker_lost" },
@@ -255,7 +255,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
 
   it("reports a token that will not open as unable to assess", async () => {
     await db.admin.query(
-      "UPDATE guardbase.connections SET sealed_token = (SELECT sealed_token FROM guardbase.connections WHERE tenant_id = $1) WHERE tenant_id = $2",
+      "UPDATE supahound.connections SET sealed_token = (SELECT sealed_token FROM supahound.connections WHERE tenant_id = $1) WHERE tenant_id = $2",
       [agency.tenantId, client.tenantId],
     );
     expect(await pollProject(client, deps())).toEqual({ status: "unable_to_assess", errorCode: "token_unavailable" });

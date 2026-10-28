@@ -1,6 +1,6 @@
-import type { Credentials } from "@guardbase/core/supabase/oauth";
-import { sha256Hex, tenantFromState } from "@guardbase/core/supabase/oauth";
-import type { TenantId, UserId } from "@guardbase/core/tenancy/scope";
+import type { Credentials } from "@supahound/core/supabase/oauth";
+import { sha256Hex, tenantFromState } from "@supahound/core/supabase/oauth";
+import type { TenantId, UserId } from "@supahound/core/tenancy/scope";
 
 // The Supabase OAuth callback, as a pure function so every branch is testable (decision 012).
 // Order matters: the state is consumed (single-use, bound to user + tenant) BEFORE the code is

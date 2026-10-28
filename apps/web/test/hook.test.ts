@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { handleSendEmailHook, type HookDeps } from "../lib/email/hook";
 
 const SECRET = `v1,whsec_${randomBytes(32).toString("base64")}`;
-const APP = "https://app.guardbase.example";
+const APP = "https://app.supahound.example";
 
 function signed(payload: unknown, secret = SECRET, at = new Date()): { body: string; headers: Headers } {
   const body = JSON.stringify(payload);
@@ -27,7 +27,7 @@ const payload = (type = "magiclink", over: Record<string, unknown> = {}) => ({
 
 function deps(sent: unknown[] = []): HookDeps {
   return {
-    secret: SECRET, appUrl: APP, from: { email: "login@guardbase.example", name: "Guardbase" },
+    secret: SECRET, appUrl: APP, from: { email: "login@supahound.example", name: "Supahound" },
     send: async (m) => { sent.push(m); return { messageId: "m1" }; },
   };
 }

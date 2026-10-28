@@ -4,7 +4,7 @@ import { INCIDENT_WINDOW_MINUTES, type Incident } from "../incidents/incident.js
 // The only data a model ever sees: one incident of one tenant, reduced to enums, counts, ASNs
 // and schema identifiers. No user IDs (the actor becomes "actor A"), no user agents, no query
 // values, no IPs, no emails, no project refs, no tenant or project names (PRD, Security of
-// Guardbase itself). Every field is rebuilt from a whitelist, never copied as free text.
+// Supahound itself). Every field is rebuilt from a whitelist, never copied as free text.
 
 export interface IncidentFeatures {
   actor: "actor A";

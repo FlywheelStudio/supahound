@@ -1,5 +1,5 @@
 {
-  "name": "@guardbase/poller",
+  "name": "@supahound/poller",
   "version": "0.1.0",
   "private": true,
   "description": "Cloudflare Worker: cron scheduler and queue consumer that polls customer projects",
@@ -12,7 +12,7 @@
     "build": "wrangler deploy --dry-run --outdir dist"
   },
   "dependencies": {
-    "@guardbase/core": "workspace:*",
+    "@supahound/core": "workspace:*",
     "pg": "^8.23.1"
   },
   "devDependencies": {

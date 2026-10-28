@@ -24,7 +24,7 @@ declare module "vitest" {
 
 function pgBin(): string | null {
   const candidates = [
-    process.env.GUARDBASE_PG_BIN,
+    process.env.SUPAHOUND_PG_BIN,
     "/opt/homebrew/opt/postgresql@17/bin",
     "/usr/lib/postgresql/17/bin",
     "/opt/homebrew/opt/postgresql@16/bin",
@@ -36,14 +36,14 @@ function pgBin(): string | null {
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
   const bin = pgBin();
   if (!bin) {
-    if (process.env.GUARDBASE_SKIP_DB_TESTS === "1") {
+    if (process.env.SUPAHOUND_SKIP_DB_TESTS === "1") {
       project.provide("pg", null);
       return async () => undefined;
     }
-    throw new Error("No Postgres 16+ found for the database tests. Set GUARDBASE_PG_BIN, or GUARDBASE_SKIP_DB_TESTS=1 to skip them.");
+    throw new Error("No Postgres 16+ found for the database tests. Set SUPAHOUND_PG_BIN, or SUPAHOUND_SKIP_DB_TESTS=1 to skip them.");
   }
 
-  const dir = mkdtempSync(join(tmpdir(), "guardbase-pg-"));
+  const dir = mkdtempSync(join(tmpdir(), "supahound-pg-"));
   const data = join(dir, "data");
   const port = 54000 + Math.floor(Math.random() * 1000);
   execFileSync(join(bin, "initdb"), ["-D", data, "-U", "postgres", "--auth=trust", "-E", "UTF8", "--no-instructions"], { stdio: "ignore" });
@@ -52,8 +52,8 @@ export default async function setup(project: TestProject): Promise<() => Promise
   const admin = new pg.Client({ host: dir, port, user: "postgres", database: "postgres" });
   await admin.connect();
   try {
-    await admin.query("CREATE DATABASE guardbase_template");
-    const tpl = new pg.Client({ host: dir, port, user: "postgres", database: "guardbase_template" });
+    await admin.query("CREATE DATABASE supahound_template");
+    const tpl = new pg.Client({ host: dir, port, user: "postgres", database: "supahound_template" });
     await tpl.connect();
     try {
       const dir = fileURLToPath(new URL("../../../../supabase/migrations/", import.meta.url));
@@ -63,13 +63,13 @@ export default async function setup(project: TestProject): Promise<() => Promise
     } finally {
       await tpl.end();
     }
-    await admin.query("CREATE ROLE app_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE guardbase_app");
-    await admin.query("CREATE ROLE scheduler_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE guardbase_scheduler");
+    await admin.query("CREATE ROLE app_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_app");
+    await admin.query("CREATE ROLE scheduler_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_scheduler");
   } finally {
     await admin.end();
   }
 
-  project.provide("pg", { host: dir, port, template: "guardbase_template" });
+  project.provide("pg", { host: dir, port, template: "supahound_template" });
   return async () => {
     execFileSync(join(bin, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { stdio: "ignore" });
     rmSync(dir, { recursive: true, force: true });

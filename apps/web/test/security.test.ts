@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { currentStep, onboardingSteps } from "../lib/onboarding";
 import { escapeHtml, isSafeMethod, isSameOrigin, safeNext } from "../lib/security";
 
-const APP = "https://app.guardbase.example";
+const APP = "https://app.supahound.example";
 const req = (origin?: string) => new Request(`${APP}/x`, { method: "POST", headers: origin ? { origin } : {} });
 
 describe("origin check", () => {
   it("accepts only the app's own origin on state-changing requests", () => {
     expect(isSameOrigin(req(APP), APP)).toBe(true);
     expect(isSameOrigin(req("https://evil.example"), APP)).toBe(false);
-    expect(isSameOrigin(req("https://app.guardbase.example.evil.example"), APP)).toBe(false);
+    expect(isSameOrigin(req("https://app.supahound.example.evil.example"), APP)).toBe(false);
     expect(isSameOrigin(req("null"), APP)).toBe(false);
     expect(isSameOrigin(req(), APP)).toBe(false);
     expect(["GET", "HEAD", "OPTIONS"].every(isSafeMethod)).toBe(true);

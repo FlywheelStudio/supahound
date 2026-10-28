@@ -1,11 +1,11 @@
-import { buildFeatures } from "@guardbase/core/explainer/features";
-import { explainIncident, FALLBACK_MODEL, PRIMARY_MODEL } from "@guardbase/core/explainer/llm";
-import { normalizeRow } from "@guardbase/core/logs/event";
-import { ownershipFromColumns } from "@guardbase/core/ownership/ownership";
-import { ServiceRoleNetworks } from "@guardbase/core/detectors/serviceRole";
-import { scan } from "@guardbase/core/scan";
-import { connectionId, projectScope, tenantId } from "@guardbase/core/tenancy/scope";
-import { TokenVault, VaultError } from "@guardbase/core/vault/vault";
+import { buildFeatures } from "@supahound/core/explainer/features";
+import { explainIncident, FALLBACK_MODEL, PRIMARY_MODEL } from "@supahound/core/explainer/llm";
+import { normalizeRow } from "@supahound/core/logs/event";
+import { ownershipFromColumns } from "@supahound/core/ownership/ownership";
+import { ServiceRoleNetworks } from "@supahound/core/detectors/serviceRole";
+import { scan } from "@supahound/core/scan";
+import { connectionId, projectScope, tenantId } from "@supahound/core/tenancy/scope";
+import { TokenVault, VaultError } from "@supahound/core/vault/vault";
 import { MockLanguageModelV4 } from "ai/test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ const BOB = "22222222-2222-4222-8222-222222222222";
 
 describe("core inside workerd", () => {
   it("seals and opens tokens with node:crypto, and refuses another tenant", () => {
-    const vault = TokenVault.fromEnv({ GUARDBASE_MASTER_KEYS: env.GUARDBASE_MASTER_KEYS });
+    const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: env.SUPAHOUND_MASTER_KEYS });
     const binding = { tenantId: SCOPE.tenantId, connectionId: connectionId("c0000000-0000-4000-8000-000000000001") };
     const sealed = vault.seal("token", binding);
     expect(vault.open(sealed, binding)).toBe("token");

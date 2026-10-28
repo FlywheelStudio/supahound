@@ -10,7 +10,7 @@ Erik: "we can share patterns, but no data." Behavioral detectors (V2) need cold-
 
 A **pattern** may cross tenants only if all of these hold:
 
-- It is an aggregate count or distribution over Guardbase's own enum classes (signal, caller class,
+- It is an aggregate count or distribution over Supahound's own enum classes (signal, caller class,
   network type, HTTP method, outcome, hour of week, severity).
 - It holds no table, column, schema, project, actor, IP, ASN-to-tenant link, query value or text.
 - It carries no per-tenant attribution, and is published only when at least 10 tenants contribute.

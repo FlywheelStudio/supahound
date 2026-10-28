@@ -46,7 +46,7 @@ export async function listWorkspaces(pool: Pool, user: UserId): Promise<Workspac
   return transaction(pool, { "app.user_id": user }, async (client) => {
     const res = await client.query<{ tenant_id: string; name: string; role: Role }>(
       `SELECT m.tenant_id, t.name, m.role
-       FROM guardbase.memberships m JOIN guardbase.tenants t ON t.id = m.tenant_id
+       FROM supahound.memberships m JOIN supahound.tenants t ON t.id = m.tenant_id
        WHERE m.user_id = $1 ORDER BY t.name`,
       [user],
     );
@@ -58,8 +58,8 @@ export async function listWorkspaces(pool: Pool, user: UserId): Promise<Workspac
 export async function createWorkspace(pool: Pool, user: UserId, name: string): Promise<TenantId> {
   const id = tenantId(randomUUID());
   await transaction(pool, { "app.tenant_id": id, "app.user_id": user }, async (client) => {
-    await client.query("INSERT INTO guardbase.tenants (id, name) VALUES ($1, $2)", [id, name]);
-    await client.query("INSERT INTO guardbase.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [id, user]);
+    await client.query("INSERT INTO supahound.tenants (id, name) VALUES ($1, $2)", [id, name]);
+    await client.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [id, user]);
   });
   return id;
 }
@@ -73,7 +73,7 @@ export async function withTenantForUser<T>(
 ): Promise<T> {
   return transaction(pool, { "app.tenant_id": tenant, "app.user_id": user }, async (client) => {
     const res = await client.query<{ role: Role }>(
-      "SELECT role FROM guardbase.memberships WHERE tenant_id = $1 AND user_id = $2",
+      "SELECT role FROM supahound.memberships WHERE tenant_id = $1 AND user_id = $2",
       [tenant, user],
     );
     const role = res.rows[0]?.role;

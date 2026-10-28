@@ -6,9 +6,9 @@ Updated 2026-10-27.
 
 | Feature | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- |
-| Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Guardbase Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
+| Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Supahound Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
 | Incident engine + ZDR explainer | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
-| Web app: auth, onboarding, dashboard | Sign-in, workspace, overview, Supabase OAuth connect built; project picker next | Guardbase Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
+| Web app: auth, onboarding, dashboard | Sign-in, workspace, overview, Supabase OAuth connect built; project picker next | Supahound Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
 | Baseline-free detectors (2 and 4) | Code and 127 tests done; live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 
 ## Completed

@@ -1,5 +1,5 @@
 {
-  "name": "@guardbase/core",
+  "name": "@supahound/core",
   "version": "0.1.0",
   "private": true,
   "description": "Detectors, tenancy, vault, incident engine and ZDR explainer. Runs on Node and workerd.",

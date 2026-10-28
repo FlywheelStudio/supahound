@@ -16,8 +16,8 @@ describe("fields", () => {
 
   it("accepts only the two documented source columns", () => {
     expect(sourceColumn({})).toBe("source");
-    expect(sourceColumn({ GUARDBASE_SOURCE_COLUMN: "source_name" })).toBe("source_name");
-    expect(() => sourceColumn({ GUARDBASE_SOURCE_COLUMN: "1=1; --" })).toThrow();
+    expect(sourceColumn({ SUPAHOUND_SOURCE_COLUMN: "source_name" })).toBe("source_name");
+    expect(() => sourceColumn({ SUPAHOUND_SOURCE_COLUMN: "1=1; --" })).toThrow();
   });
 });
 
@@ -37,7 +37,7 @@ describe("edgeRollupSql", () => {
   });
 
   it("uses the configured source column", () => {
-    expect(edgeRollupSql({ env: { GUARDBASE_SOURCE_COLUMN: "source_name" } })).toContain("source_name = 'edge_logs'");
+    expect(edgeRollupSql({ env: { SUPAHOUND_SOURCE_COLUMN: "source_name" } })).toContain("source_name = 'edge_logs'");
   });
 });
 

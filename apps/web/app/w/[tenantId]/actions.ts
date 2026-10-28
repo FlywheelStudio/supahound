@@ -1,9 +1,9 @@
 "use server";
 
-import { createOAuthState } from "@guardbase/core/db/repo";
-import { NotAMemberError, withTenantForUser } from "@guardbase/core/db/user";
-import { authorizeUrl, newState, pkcePair, sha256Hex, STATE_TTL_SECONDS } from "@guardbase/core/supabase/oauth";
-import { tenantId as parseTenantId } from "@guardbase/core/tenancy/scope";
+import { createOAuthState } from "@supahound/core/db/repo";
+import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { authorizeUrl, newState, pkcePair, sha256Hex, STATE_TTL_SECONDS } from "@supahound/core/supabase/oauth";
+import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { notFound, redirect } from "next/navigation";
 import { withPool } from "../../../lib/db";
 import { oauthClient } from "../../../lib/oauth";

@@ -1,5 +1,5 @@
-import { newState, sha256Hex, type Credentials } from "@guardbase/core/supabase/oauth";
-import { tenantId, verifiedUserId } from "@guardbase/core/tenancy/scope";
+import { newState, sha256Hex, type Credentials } from "@supahound/core/supabase/oauth";
+import { tenantId, verifiedUserId } from "@supahound/core/tenancy/scope";
 import { describe, expect, it } from "vitest";
 import { handleOAuthCallback, type CallbackDeps } from "../lib/connect";
 

@@ -4,11 +4,11 @@ Date: 2026-10-27
 
 ## Decision
 
-- Supabase Auth (on Guardbase's own Supabase project) issues magic links and sessions.
+- Supabase Auth (on Supahound's own Supabase project) issues magic links and sessions.
 - Supabase's Send Email Hook calls a Cloudflare Worker, which verifies the hook signature and
   sends the email through Cloudflare Email Service.
 - Server code trusts a user ID only from a verified Supabase JWT, never from request input.
-- Users join tenants through `guardbase.memberships`; every request checks membership inside the
+- Users join tenants through `supahound.memberships`; every request checks membership inside the
   same transaction that reads tenant data.
 - V2/V3: more OAuth sign-in providers, possibly "Sign in with Supabase". Configuration only.
 

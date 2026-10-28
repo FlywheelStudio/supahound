@@ -26,7 +26,7 @@ describe("loadOwnership", () => {
   });
 });
 
-describe("supadog scan --file (happy path, end to end)", () => {
+describe("supahound scan --file (happy path, end to end)", () => {
   const r = cli("scan", "--file", "test/fixtures/events.ndjson", "--ownership", "test/fixtures/policies.json");
   const findings = r.stdout.trim().split("\n").map((l) => JSON.parse(l) as Finding);
 
@@ -50,7 +50,7 @@ describe("supadog scan --file (happy path, end to end)", () => {
   });
 });
 
-describe("supadog CLI errors", () => {
+describe("supahound CLI errors", () => {
   it("exits 2 with usage on a bad command line", () => {
     expect(cli("scan").code).toBe(2);
     expect(cli("nope").stderr).toContain("Unknown command");

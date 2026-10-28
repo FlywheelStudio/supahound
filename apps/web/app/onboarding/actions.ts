@@ -1,6 +1,6 @@
 "use server";
 
-import { createWorkspace, listWorkspaces } from "@guardbase/core/db/user";
+import { createWorkspace, listWorkspaces } from "@supahound/core/db/user";
 import { redirect } from "next/navigation";
 import { withPool } from "../../lib/db";
 import { requireUser } from "../../lib/supabase";

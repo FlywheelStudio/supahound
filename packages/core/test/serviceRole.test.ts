@@ -137,7 +137,7 @@ describe("detectServiceRoleMisuse", () => {
     });
 
     it("keeps tenants apart even when they share a project ID", () => {
-      // An agency and its client watching the same Supabase project get separate Guardbase
+      // An agency and its client watching the same Supabase project get separate Supahound
       // projects; even a reused ID must not let one tenant's learning silence the other.
       const networks = new ServiceRoleNetworks();
       const agency = projectScope(TENANT_A, PROJECT_1);

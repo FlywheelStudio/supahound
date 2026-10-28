@@ -51,7 +51,7 @@ describe.skipIf(pgInfo === null)("Supabase OAuth connect", () => {
     // Another member of the same workspace cannot finish the owner's flow either.
     const colleague = verifiedUserId(randomUUID());
     await withTenantForUser(db.app, owner, victim, (tx) =>
-      tx.query("INSERT INTO guardbase.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [victim, colleague]),
+      tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [victim, colleague]),
     );
     const ownersState = await startFlow();
     expect(await consume(colleague, victim, ownersState)).toBeNull();

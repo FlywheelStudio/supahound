@@ -33,9 +33,9 @@ export type EdgeField = keyof typeof EDGE_FIELDS;
 export type EnvVars = Readonly<Record<string, string | undefined>>;
 
 export function sourceColumn(env: EnvVars = {}): string {
-  const column = env.GUARDBASE_SOURCE_COLUMN ?? "source";
+  const column = env.SUPAHOUND_SOURCE_COLUMN ?? "source";
   if (column !== "source" && column !== "source_name") {
-    throw new Error(`GUARDBASE_SOURCE_COLUMN must be "source" or "source_name", got "${column}"`);
+    throw new Error(`SUPAHOUND_SOURCE_COLUMN must be "source" or "source_name", got "${column}"`);
   }
   return column;
 }

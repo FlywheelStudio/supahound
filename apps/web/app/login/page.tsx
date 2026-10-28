@@ -15,7 +15,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
-      <h1 className="text-2xl font-semibold">Sign in to Guardbase</h1>
+      <h1 className="text-2xl font-semibold">Sign in to Supahound</h1>
       {params.sent ? (
         <p className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
           Check your email for a sign-in link. It works once and expires in 1 hour.

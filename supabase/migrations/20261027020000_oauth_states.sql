@@ -6,9 +6,9 @@
 
 BEGIN;
 
-CREATE TABLE guardbase.oauth_states (
+CREATE TABLE supahound.oauth_states (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL REFERENCES guardbase.tenants (id) ON DELETE CASCADE,
+  tenant_id uuid NOT NULL REFERENCES supahound.tenants (id) ON DELETE CASCADE,
   user_id uuid NOT NULL,
   state_hash text NOT NULL UNIQUE CHECK (state_hash ~ '^[0-9a-f]{64}$'),
   -- PKCE verifier: single-use, useless without the authorization code, gone after 10 minutes.
@@ -17,14 +17,14 @@ CREATE TABLE guardbase.oauth_states (
   expires_at timestamptz NOT NULL,
   used_at timestamptz
 );
-CREATE INDEX oauth_states_tenant_idx ON guardbase.oauth_states (tenant_id, created_at DESC);
+CREATE INDEX oauth_states_tenant_idx ON supahound.oauth_states (tenant_id, created_at DESC);
 
-ALTER TABLE guardbase.oauth_states ENABLE ROW LEVEL SECURITY;
-ALTER TABLE guardbase.oauth_states FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON guardbase.oauth_states TO guardbase_app
-  USING (tenant_id = (SELECT guardbase.current_tenant()))
-  WITH CHECK (tenant_id = (SELECT guardbase.current_tenant()));
+ALTER TABLE supahound.oauth_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE supahound.oauth_states FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON supahound.oauth_states TO supahound_app
+  USING (tenant_id = (SELECT supahound.current_tenant()))
+  WITH CHECK (tenant_id = (SELECT supahound.current_tenant()));
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON guardbase.oauth_states TO guardbase_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON supahound.oauth_states TO supahound_app;
 
 COMMIT;

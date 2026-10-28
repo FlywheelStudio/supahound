@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Guardbase",
+  title: "Supahound",
   description: "Know when someone is abusing your Supabase app, with a fix you can paste.",
 };
 

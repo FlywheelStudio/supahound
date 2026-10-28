@@ -37,6 +37,6 @@ export function templateExplanation(f: IncidentFeatures): Explanation {
     steps.push("Remove the service-role key from any client-side code.");
   }
 
-  parts.push(`Guardbase saw ${f.hits} request(s) over ${f.durationMinutes} minute(s).`);
+  parts.push(`Supahound saw ${f.hits} request(s) over ${f.durationMinutes} minute(s).`);
   return { summary: parts.join(" "), likelyImpact: impact, nextSteps: steps.slice(0, 5) };
 }

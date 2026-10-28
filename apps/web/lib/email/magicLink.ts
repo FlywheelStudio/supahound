@@ -27,10 +27,10 @@ export interface RenderedEmail {
 export function renderSignInEmail(link: string): RenderedEmail {
   const safe = escapeHtml(link);
   return {
-    subject: "Your Guardbase sign-in link",
-    text: `Sign in to Guardbase:\n\n${link}\n\nThe link works once and expires in 1 hour. If you did not ask for it, ignore this email.`,
+    subject: "Your Supahound sign-in link",
+    text: `Sign in to Supahound:\n\n${link}\n\nThe link works once and expires in 1 hour. If you did not ask for it, ignore this email.`,
     html: `<!doctype html><html><body style="font-family:system-ui,sans-serif;color:#0f172a">
-<p>Sign in to Guardbase:</p>
+<p>Sign in to Supahound:</p>
 <p><a href="${safe}" style="display:inline-block;padding:10px 16px;background:#0f172a;color:#fff;border-radius:6px;text-decoration:none">Sign in</a></p>
 <p style="color:#475569;font-size:13px">The link works once and expires in 1 hour. If you did not ask for it, ignore this email.</p>
 </body></html>`,

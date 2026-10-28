@@ -1,6 +1,6 @@
-import { countConnections, listOpenIncidents, listProjects } from "@guardbase/core/db/repo";
-import { NotAMemberError, withTenantForUser } from "@guardbase/core/db/user";
-import { tenantId as parseTenantId } from "@guardbase/core/tenancy/scope";
+import { countConnections, listOpenIncidents, listProjects } from "@supahound/core/db/repo";
+import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { notFound } from "next/navigation";
 import { Checklist } from "../../../components/Checklist";
 import { withPool } from "../../../lib/db";
@@ -83,7 +83,7 @@ export default async function Workspace({
                 Connect Supabase
               </button>
               <p className="mt-2 text-sm text-slate-500">
-                Guardbase asks for read access to logs and database metadata only.
+                Supahound asks for read access to logs and database metadata only.
               </p>
             </form>
           )}

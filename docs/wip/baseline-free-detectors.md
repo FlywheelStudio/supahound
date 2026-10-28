@@ -14,7 +14,7 @@ misuse) against one project.
      `sb_publishable_` keys. On those projects `request.sb.jwt.apikey.payload.role` may be empty.
      The rollup SQL would then drop all service traffic, and detector 4 would report zero findings,
      which reads as an all-clear.
-  2. Fix `src/config/fields.ts` if a path differs. Set `GUARDBASE_SOURCE_COLUMN` if `source` fails.
+  2. Fix `src/config/fields.ts` if a path differs. Set `SUPAHOUND_SOURCE_COLUMN` if `source` fails.
   3. Export the project's `pg_policies` rows (SQL from `print-sql`) to `ownership.local.json`.
   4. `pnpm scan --project <ref> --ownership ownership.local.json --minutes 60`. Review every finding.
 - After the live run: write `docs/features/baseline-free-detectors.md`, delete this file, and move

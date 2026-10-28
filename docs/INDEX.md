@@ -21,3 +21,4 @@
 | [decisions/012-connect-with-supabase-oauth.md](decisions/012-connect-with-supabase-oauth.md) | Supabase OAuth connect with bound state, PKCE and locked refresh |
 | [decisions/013-billing-stripe.md](decisions/013-billing-stripe.md) | Stripe Checkout and webhooks, tenant set server-side |
 | [decisions/014-email-cloudflare.md](decisions/014-email-cloudflare.md) | Cloudflare Email Service for magic links, alerts and digests |
+| [decisions/015-name-supahound.md](decisions/015-name-supahound.md) | The product is named Supahound; every identifier follows |

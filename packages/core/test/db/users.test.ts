@@ -18,7 +18,7 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
     client = await createWorkspace(db.app, bob, "Client Co");
     // Alice also joins the client's workspace as a member.
     await withTenantForUser(db.app, bob, client, (tx) =>
-      tx.query("INSERT INTO guardbase.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [client, alice]),
+      tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [client, alice]),
     );
     await withTenantForUser(db.app, bob, client, async (tx) => {
       const conn = await repo.createConnection(tx, db.vault, { label: "Client org", token: "client-token" });
@@ -38,7 +38,7 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
   it("lets a member into a workspace and keeps the role", async () => {
     const role = await withTenantForUser(db.app, alice, client, async (_tx, r) => r);
     expect(role).toBe("member");
-    const projects = await withTenantForUser(db.app, alice, client, (tx) => tx.query("SELECT name FROM guardbase.projects"));
+    const projects = await withTenantForUser(db.app, alice, client, (tx) => tx.query("SELECT name FROM supahound.projects"));
     expect(projects).toEqual([{ name: "Client app" }]);
   });
 
@@ -66,13 +66,13 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
       await client2.query("BEGIN");
       await client2.query("SELECT set_config('app.user_id', $1, true)", [alice]);
       for (const table of ["projects", "connections", "incidents", "findings", "audit_log", "poll_runs"]) {
-        const r = await client2.query(`SELECT count(*)::int AS n FROM guardbase.${table}`);
+        const r = await client2.query(`SELECT count(*)::int AS n FROM supahound.${table}`);
         expect(r.rows[0].n, table).toBe(0);
       }
       // Tenant names and own memberships only.
-      const tenants = await client2.query("SELECT name FROM guardbase.tenants ORDER BY name");
+      const tenants = await client2.query("SELECT name FROM supahound.tenants ORDER BY name");
       expect(tenants.rows.map((r) => r.name)).toEqual(["Client Co", "Flywheel Studio"]);
-      const members = await client2.query("SELECT user_id FROM guardbase.memberships");
+      const members = await client2.query("SELECT user_id FROM supahound.memberships");
       expect(members.rows.every((r) => r.user_id === alice)).toBe(true);
       await client2.query("COMMIT");
     } finally {
@@ -86,7 +86,7 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
       try {
         await c.query("BEGIN");
         await c.query("SELECT set_config('app.user_id', $1, true)", [user]);
-        const r = await c.query("SELECT name FROM guardbase.tenants ORDER BY name");
+        const r = await c.query("SELECT name FROM supahound.tenants ORDER BY name");
         expect(r.rows.map((x) => x.name)).toEqual(expected);
       } finally {
         await c.query("ROLLBACK");
@@ -101,7 +101,7 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
       await c.query("BEGIN");
       await c.query("SELECT set_config('app.user_id', $1, true)", [mallory]);
       await expect(
-        c.query("INSERT INTO guardbase.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [client, mallory]),
+        c.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [client, mallory]),
       ).rejects.toThrow(/row-level security/);
     } finally {
       await c.query("ROLLBACK");

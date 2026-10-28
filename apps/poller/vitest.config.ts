@@ -7,7 +7,7 @@ const UNUSED_DB = "postgres://test:test@127.0.0.1:1/test";
 process.env.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP ??= UNUSED_DB;
 process.env.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_SCHEDULER ??= UNUSED_DB;
 // Test-only secrets: an all-zero master key and a dummy gateway key that never reaches a network.
-process.env.GUARDBASE_MASTER_KEYS ??= "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+process.env.SUPAHOUND_MASTER_KEYS ??= "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 process.env.AI_GATEWAY_API_KEY ??= "test-key";
 process.env.SUPABASE_OAUTH_CLIENT_SECRET ??= "test-secret";
 

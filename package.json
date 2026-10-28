@@ -1,8 +1,8 @@
 {
-  "name": "guardbase",
+  "name": "supahound",
   "version": "0.1.0",
   "private": true,
-  "description": "Guardbase: abnormal-traffic monitoring for Supabase apps",
+  "description": "Supahound: abnormal-traffic monitoring for Supabase apps",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -13,8 +13,8 @@
     "lint": "eslint .",
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
-    "scan": "pnpm --filter @guardbase/core scan",
-    "discover-keys": "pnpm --filter @guardbase/core discover-keys"
+    "scan": "pnpm --filter @supahound/core scan",
+    "discover-keys": "pnpm --filter @supahound/core discover-keys"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
