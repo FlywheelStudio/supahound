@@ -3,6 +3,7 @@
 | Doc | Description |
 | --- | --- |
 | [STATE.md](STATE.md) | In progress, completed and backlog |
+| [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
 | [wip/tenant-isolation.md](wip/tenant-isolation.md) | Multi-tenant storage, RLS, token vault, poller |
@@ -22,3 +23,4 @@
 | [decisions/013-billing-stripe.md](decisions/013-billing-stripe.md) | Stripe Checkout and webhooks, tenant set server-side |
 | [decisions/014-email-cloudflare.md](decisions/014-email-cloudflare.md) | Cloudflare Email Service for magic links, alerts and digests |
 | [decisions/015-name-supahound.md](decisions/015-name-supahound.md) | The product is named Supahound; every identifier follows |
+| [decisions/016-scan-funnel.md](decisions/016-scan-funnel.md) | hackme.si scan funnel: shared tenancy, DNS-TXT + scope-lock gates, passive first |

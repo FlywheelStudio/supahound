@@ -1,11 +1,12 @@
 # State
 
-Updated 2026-10-27.
+Updated 2026-11-08.
 
 ## In progress
 
 | Feature | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- |
+| Scan funnel (hackme.si) | Authorization backbone built (DNS-TXT verify, scope guard, 5-table data model, 283 tests pass); repositories + passive checks + web funnel next | None for the next code step; legal review before any active-scan milestone | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Supahound Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
 | Incident engine + ZDR explainer | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Web app: auth, onboarding, dashboard | Sign-in, workspace, overview, Supabase OAuth connect built; project picker next | Supahound Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
