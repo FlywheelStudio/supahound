@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { env } from "cloudflare:workers";
 import { NextResponse, type NextRequest } from "next/server";
-import { isSafeMethod, isSameOrigin, SIGNED_ROUTES } from "./lib/security";
+import { isPublicMarketingPath, isSafeMethod, isSameOrigin, SIGNED_ROUTES } from "./lib/security";
 
 // 1. Reject cross-origin state changes (CSRF). Signed server-to-server routes are exempt and
 //    verify their own signatures.
@@ -18,6 +18,13 @@ export async function middleware(request: NextRequest) {
     return new NextResponse("Forbidden", { status: 403 });
   }
   if (signed) return NextResponse.next();
+
+  // 4. Public marketing pages: no session refresh, and a shared cache may keep them.
+  if (isSafeMethod(request.method) && isPublicMarketingPath(path)) {
+    const response = NextResponse.next();
+    response.headers.set("Cache-Control", "public, max-age=300, s-maxage=3600");
+    return response;
+  }
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {

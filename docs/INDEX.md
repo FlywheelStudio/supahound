@@ -4,6 +4,7 @@
 | --- | --- |
 | [STATE.md](STATE.md) | In progress, completed and backlog |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
+| [wip/marketing-site.md](wip/marketing-site.md) | Marketing site: pages, SEO/AEO, content model, build log |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
 | [wip/tenant-isolation.md](wip/tenant-isolation.md) | Multi-tenant storage, RLS, token vault, poller |
 | [wip/incident-explainer.md](wip/incident-explainer.md) | Incident engine and ZDR-only LLM explainer |
@@ -22,3 +23,4 @@
 | [decisions/013-billing-stripe.md](decisions/013-billing-stripe.md) | Stripe Checkout and webhooks, tenant set server-side |
 | [decisions/014-email-cloudflare.md](decisions/014-email-cloudflare.md) | Cloudflare Email Service for magic links, alerts and digests |
 | [decisions/015-name-supahound.md](decisions/015-name-supahound.md) | The product is named Supahound; every identifier follows |
+| [decisions/017-marketing-site.md](decisions/017-marketing-site.md) | Marketing site in the web app on supahound.com; public-path middleware allowlist |
