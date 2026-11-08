@@ -1,0 +1,28 @@
+name: Bug
+description: Something does not work as the PRD, a decision or a feature doc says.
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what should happen
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Synthetic data only. Never paste real log rows, user IDs, IPs or emails.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected. Say if tenant isolation or ZDR is involved.
+  - type: checkboxes
+    id: test
+    attributes:
+      label: Fix
+      options:
+        - label: A test that fails before the fix and passes after it

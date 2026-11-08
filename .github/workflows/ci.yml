@@ -41,6 +41,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - name: Test (unit, Postgres, workerd)
+        env:
+          NO_COLOR: "1"
         run: |
           test -z "${SUPAHOUND_SKIP_DB_TESTS:-}" || { echo "DB tests must run in CI"; exit 1; }
           set -o pipefail

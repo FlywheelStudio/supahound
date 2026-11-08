@@ -1,0 +1,31 @@
+name: UAT scenario
+description: A user acceptance scenario to automate or run by hand.
+labels: ["type:uat"]
+body:
+  - type: input
+    id: id
+    attributes:
+      label: Scenario ID
+      description: Next free ID in docs/testing.md (UAT-Dn for detection, UAT-Wn for the web app).
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario
+      value: |
+        Given ...
+        When ...
+        Then ...
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How it runs
+      options:
+        - Automated (core UAT suite, Postgres)
+        - Automated (Playwright E2E)
+        - Manual (needs a live service)
+    validations:
+      required: true

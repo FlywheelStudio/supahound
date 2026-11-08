@@ -1,0 +1,38 @@
+name: Feature
+description: A product capability. One issue = one branch = one pull request.
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What the user can do when this ships. One or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Testable statements. Each one becomes a test (unit, Postgres, E2E or UAT).
+      value: |
+        - [ ] Given ..., when ..., then ...
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Approach and files expected to change
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      description: PRD section, decision records, WIP doc.
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of done
+      options:
+        - label: Code passes `pnpm typecheck` and `pnpm lint`
+        - label: Tests written and passing (`pnpm -r test`, and `pnpm e2e` if the web app changed)
+        - label: "`docs/features/<slug>.md` written; WIP doc deleted"
+        - label: STATE.md and INDEX.md updated
