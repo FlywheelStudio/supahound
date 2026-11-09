@@ -35,10 +35,9 @@ branches. Stale branches stayed open.
 ## Consequences
 
 - `docs/WORKFLOW.md` describes the loop. `CLAUDE.md` points to it.
-- Branch protection on `develop` and `main` (required CI checks) is the next step. It waits on
-  Erik's approval.
-- The default branch is still `main`. Until Erik makes `develop` the default, issues close by hand
-  after a merge into `develop`, and the Claude Action and Dependabot read their config from `main`
-  (`docs/WORKFLOW.md`).
+- `develop` is the default branch, so `Closes #n` closes issues on merge, and the Claude Action and
+  Dependabot run from `develop`.
+- Branch protection on `develop` and `main`: PR required, the three CI checks required, no approval
+  (Erik is the only reviewer), no force pushes or deletion, admins included. Approved 2026-11-09.
 - Decision numbers 016–018 are taken by open branches (scan funnel, marketing site). If those
   merge in another order, the numbers stay as they are; no renumbering.
