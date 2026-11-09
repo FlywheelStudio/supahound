@@ -19,6 +19,9 @@ flowchart LR
 | [Private beta](https://github.com/FlywheelStudio/supahound/milestone/3) | 2027-01-31 | 3–5 outside agencies and about 20 builders; digest and agency dashboard live | 3 agencies ready to pay |
 | [Paid launch](https://github.com/FlywheelStudio/supahound/milestone/4) | 2027-03-31 | Pricing live on V1; V2 starts | — |
 
+The [Scan funnel](https://github.com/FlywheelStudio/supahound/milestone/5) milestone (hackme.si, decision 016) is outside the PRD phases.
+Its gate: legal review before any active-scan work.
+
 ## V1 scope and status
 
 | V1 item (PRD) | Status | Issue |

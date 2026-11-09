@@ -30,7 +30,7 @@ uses the three-branch model below instead of a main-only flow.
   Give issues labels (`type:*`, `area:*`, `priority:*`, `needs-erik`) and a milestone (roadmap phase).
 - **CI must be green:** typecheck, lint, `pnpm -r test` (Postgres never skipped), build, `pnpm e2e`.
 - **Never add a new service without asking.** Stay on the stack in the decision records.
-- Decision numbers 016–018 are taken by open branches; check every branch before you number a new one.
+- Before you number a new decision, check `docs/decisions/` and every open branch; another session may hold the next number.
 
 ## Commands
 

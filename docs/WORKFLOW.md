@@ -38,8 +38,8 @@ Three long-lived kinds, and no more:
 `dependabot.yml` from it. GitHub deletes a branch when its PR merges.
 
 **Branch protection is not enforced.** GitHub Free allows neither branch protection nor rulesets on
-a private repo. Until Erik upgrades to GitHub Team or makes the repo public, the rule holds by
-convention: never push to `develop` or `main` directly, merge only through a PR with green CI, and
+a private repo. On 2026-11-09 Erik chose to keep the repo private on GitHub Free, so the rule holds
+by convention: never push to `develop` or `main` directly, merge only through a PR with green CI, and
 never force-push either branch.
 
 Dependabot opens grouped minor and patch updates only. Plan a major upgrade as an issue.
@@ -59,6 +59,7 @@ The labeler workflow adds `area:*` labels to PRs from the paths they change.
 ## Milestones
 
 One per roadmap phase: Validate, Dogfood V1, Private beta, Paid launch. See [ROADMAP.md](ROADMAP.md).
+One more, Scan funnel, holds the hackme.si work (decision 016). It is not a PRD phase.
 
 ## Automation
 
