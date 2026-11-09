@@ -1,22 +1,22 @@
 // The one source of public URLs and site-wide facts (decision 017). Never use APP_URL here.
+import type { FeatureId } from "./features";
 
 export const SITE_URL = "https://supahound.com";
 export const SITE_NAME = "Supahound";
 export const SITE_TAGLINE = "Know when someone is abusing your Supabase app.";
 export const SITE_DESCRIPTION =
   "Supahound watches your Supabase logs for cross-tenant reads, leaked service keys and scraping, and gives you a fix you can paste. Read-only.";
-export const SITE_UPDATED = "2026-11-08";
+export const SITE_UPDATED = "2026-11-09";
 
 export const SIGN_UP_PATH = "/login?signup=1";
 export const SIGN_IN_PATH = "/login";
-// Confirm this inbox exists before launch.
 export const CONTACT_EMAIL = "hello@flywheel.so";
 
 export const MAKER = { name: "Flywheel", legalName: "Flywheel Studio LLC", url: "https://flywheel.so" } as const;
 export const LEGAL = {
   entity: "Flywheel Studio LLC",
   state: "Texas",
-  email: "legal@flywheel.so",
+  email: CONTACT_EMAIL,
   effective: "2026-11-08",
 } as const;
 
@@ -27,7 +27,7 @@ export type Plan = {
   priceLabel: string;
   unit: string;
   blurb: string;
-  features: string[];
+  features: { text: string; feature?: FeatureId }[];
   cta: string;
   highlight?: boolean;
 };
@@ -42,10 +42,11 @@ export const PLANS: Plan[] = [
     unit: "forever",
     blurb: "See if you are exposed.",
     features: [
-      "Daily posture scan for up to 3 projects",
-      "RLS coverage, Security Advisor findings, exposed tables and views",
-      "Email alerts and a weekly digest",
-      "No credit card",
+      { text: "Daily posture scan for up to 3 projects", feature: "postureScan" },
+      { text: "RLS coverage, Security Advisor findings, exposed tables and views", feature: "postureScan" },
+      { text: "Email alerts", feature: "emailAlerts" },
+      { text: "Weekly digest", feature: "weeklyDigest" },
+      { text: "No credit card" },
     ],
     cta: "Start free",
   },
@@ -57,14 +58,17 @@ export const PLANS: Plan[] = [
     unit: "per project / month",
     blurb: "Know when you are attacked, within minutes.",
     features: [
-      "Everything in Free",
-      "All runtime detectors, polled every 1–2 minutes",
-      "Cross-tenant reads, service-key misuse, credential stuffing, scraping, tampering",
-      "Plain-English incidents with a fix you can paste",
-      "Email and signed webhook alerts (Slack, Discord)",
-      "30-day incident history",
+      { text: "Everything in Free" },
+      { text: "Cross-tenant read detection, polled every 1–2 minutes", feature: "crossTenant" },
+      { text: "Service-key misuse detection", feature: "serviceKey" },
+      { text: "Credential stuffing detection", feature: "credentialStuffing" },
+      { text: "Scraping and bulk-read detection", feature: "unusualQueries" },
+      { text: "Database tampering detection", feature: "sensitiveWrites" },
+      { text: "Plain-English incidents with a fix you can paste", feature: "incidentSummaries" },
+      { text: "Signed webhook alerts (Slack, Discord)", feature: "webhookAlerts" },
+      { text: "30-day incident history", feature: "incidentHistory" },
     ],
-    cta: "Start with Builder",
+    cta: "Get early access",
     highlight: true,
   },
   {
@@ -75,12 +79,12 @@ export const PLANS: Plan[] = [
     unit: "per project / month, 10-project minimum",
     blurb: "Watch every client app from one place.",
     features: [
-      "Everything in Builder",
-      "Multi-project dashboard",
-      "Client reports",
-      "Lower rates at 25+ projects",
+      { text: "Everything in Builder" },
+      { text: "Multi-project dashboard", feature: "agencyDashboard" },
+      { text: "Client reports", feature: "clientReports" },
+      { text: "Lower rates at 25+ projects", feature: "paidPlans" },
     ],
-    cta: "Start with Agency",
+    cta: "Get early access",
   },
 ];
 

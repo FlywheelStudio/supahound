@@ -1,5 +1,5 @@
 // Privacy policy and terms. Every claim here must match the code and the decision records
-// (004, 005, 007, 011, 012, 013, 014, 016, 018). Needs a lawyer's review before launch.
+// (004, 005, 007, 011, 012, 013, 014, 016, 018). Data promises ship through issue #43.
 import { LEGAL, MAKER } from "./site";
 import type { Section } from "./types";
 

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Breadcrumbs, Cta, FaqList, PageHead } from "../../../components/marketing/Blocks";
 import { JsonLd } from "../../../components/marketing/JsonLd";
+import { Soon } from "../../../components/marketing/Soon";
+import type { FeatureId } from "../../../content/features";
 import { CONTACT_EMAIL, PLANS, SIGN_UP_PATH, SITE_UPDATED } from "../../../content/site";
 import type { Faq } from "../../../content/types";
 import { breadcrumbLd, faqLd, pageMetadata, softwareLd } from "../../../lib/seo";
@@ -14,16 +16,16 @@ export const metadata = pageMetadata({
   path: PATH,
 });
 
-const MATRIX: [string, string, string, string][] = [
-  ["Projects", "Up to 3", "Per project", "10 minimum"],
-  ["Posture scan (RLS, Security Advisor, exposed tables)", "Daily", "Daily", "Daily"],
-  ["Runtime detectors (cross-tenant, service key, stuffing, scraping, tampering)", "—", "Every 1–2 minutes", "Every 1–2 minutes"],
-  ["Plain-English incident with a paste-ready fix", "—", "Yes", "Yes"],
-  ["Email alerts", "Yes", "Yes", "Yes"],
-  ["Signed webhook alerts (Slack, Discord)", "—", "Yes", "Yes"],
-  ["Weekly digest", "Yes", "Yes", "Yes"],
-  ["Incident history", "—", "30 days", "30 days"],
-  ["Multi-project dashboard and client reports", "—", "—", "Yes"],
+const MATRIX: [string, string, string, string, FeatureId?][] = [
+  ["Projects", "Up to 3", "Per project", "10 minimum", "paidPlans"],
+  ["Posture scan (RLS, Security Advisor, exposed tables)", "Daily", "Daily", "Daily", "postureScan"],
+  ["Runtime detectors (cross-tenant reads, service key, credential stuffing, scraping, tampering)", "—", "Every 1–2 minutes", "Every 1–2 minutes", "crossTenant"],
+  ["Plain-English incident with a paste-ready fix", "—", "Yes", "Yes", "incidentSummaries"],
+  ["Email alerts", "Yes", "Yes", "Yes", "emailAlerts"],
+  ["Signed webhook alerts (Slack, Discord)", "—", "Yes", "Yes", "webhookAlerts"],
+  ["Weekly digest", "Yes", "Yes", "Yes", "weeklyDigest"],
+  ["Incident history", "—", "30 days", "30 days", "incidentHistory"],
+  ["Multi-project dashboard and client reports", "—", "—", "Yes", "agencyDashboard"],
 ];
 
 const FAQS: Faq[] = [
@@ -44,7 +46,7 @@ export default function Pricing() {
       <Breadcrumbs items={crumbs} />
       <PageHead
         h1="Supahound pricing"
-        intro="The posture scan is free for up to 3 Supabase projects. Runtime detection, which catches attacks while they happen, costs $29 per project per month. Agencies pay $19 per project per month with a 10-project minimum."
+        intro="The posture scan will be free for up to 3 Supabase projects. Runtime detection, which catches attacks while they happen, will cost $29 per project per month, and agencies will pay $19 per project per month with a 10-project minimum. Supahound is in early access: sign up free now, and features marked Coming soon switch on as they ship."
         updated={SITE_UPDATED}
       />
 
@@ -55,7 +57,7 @@ export default function Pricing() {
             <p className="mt-1 text-sm text-slate-600">{p.blurb}</p>
             <p className="mt-4"><span className="text-4xl font-semibold">{p.priceLabel}</span> <span className="text-sm text-slate-600">{p.unit}</span></p>
             <ul className="mt-6 flex-1 space-y-2 text-sm text-slate-700">
-              {p.features.map((f) => <li key={f} className="flex gap-2"><span aria-hidden className="text-emerald-600">✓</span>{f}</li>)}
+              {p.features.map((f) => <li key={f.text} className="flex gap-2"><span aria-hidden className="text-emerald-600">✓</span><span>{f.text}<Soon id={f.feature} /></span></li>)}
             </ul>
             <Link href={`${SIGN_UP_PATH}&plan=${p.id}`} className={`mt-6 rounded-md px-4 py-2 text-center font-medium ${p.highlight ? "bg-slate-950 text-white hover:bg-slate-800" : "border border-slate-300 hover:border-slate-500"}`}>{p.cta}</Link>
           </li>
@@ -71,8 +73,8 @@ export default function Pricing() {
               <tr><th className="p-3 font-semibold">Feature</th>{PLANS.map((p) => <th key={p.id} className="p-3 font-semibold">{p.name}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {MATRIX.map(([f, ...cells]) => (
-                <tr key={f}><th scope="row" className="p-3 font-normal text-slate-700">{f}</th>{cells.map((c, i) => <td key={i} className="p-3">{c}</td>)}</tr>
+              {MATRIX.map(([f, a, b, c, id]) => (
+                <tr key={f}><th scope="row" className="p-3 font-normal text-slate-700">{f}<Soon id={id} /></th>{[a, b, c].map((v, i) => <td key={i} className="p-3">{v}</td>)}</tr>
               ))}
             </tbody>
           </table>

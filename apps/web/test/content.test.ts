@@ -141,3 +141,23 @@ function readSources(dir: string): string[] {
     .filter((f) => /\.(ts|tsx)$/.test(f))
     .map((f) => readFileSync(join(dir, f), "utf8"));
 }
+
+describe("coming-soon registry (decision 021)", () => {
+  it("ties every feature that is not live to at least one issue", async () => {
+    const { FEATURES } = await import("../content/features");
+    for (const [id, f] of Object.entries(FEATURES)) {
+      if (f.status === "soon") expect(f.issues.length, id).toBeGreaterThan(0);
+    }
+  });
+
+  it("tags every plan line that names a product capability", () => {
+    const untagged = PLANS.flatMap((p) => p.features.filter((f) => !f.feature).map((f) => f.text));
+    expect(untagged.sort()).toEqual(["Everything in Builder", "Everything in Free", "No credit card"].sort());
+  });
+
+  it("uses one contact address and no legal@ inbox", () => {
+    const all = [...readSources(join(__dirname, "../content")), ...readSources(join(__dirname, "../app/(marketing)"))].join("\n");
+    expect(all).not.toContain("legal@");
+    expect(JSON.stringify(PRIVACY) + JSON.stringify(TERMS)).toContain("hello@flywheel.so");
+  });
+});
