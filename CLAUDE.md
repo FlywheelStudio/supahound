@@ -1,6 +1,6 @@
 # Supahound
 
-Repository folder: `supadog` (decision 015).
+Repository: [FlywheelStudio/supahound](https://github.com/FlywheelStudio/supahound) (private). Renamed from Guardbase (decision 015).
 
 **Supahound**: abnormal-traffic monitoring for Supabase apps. Customers connect their Supabase
 org (OAuth, read-only); a Cloudflare poller reads each project's edge logs, runs the detectors,
@@ -9,7 +9,7 @@ Workers handles sign-in (Supabase Auth magic links), onboarding and the dashboar
 Backend: Supahound's own Supabase Postgres (schema `supahound`, forced RLS, reached through
 Hyperdrive with caching off). Everything else runs on Cloudflare (decision 008).
 
-Product spec: [Supahound PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc, still titled Guardbase).
+Product spec: [Supahound PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc).
 
 ## Commands
 

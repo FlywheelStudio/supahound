@@ -14,8 +14,14 @@ Nothing is deployed and no credentials are sealed. Later, the rename would need 
 migration, new Worker and queue names, and a re-seal of every token: the vault's key-derivation
 label and AAD (additional authenticated data) both contain the name.
 
-## Not renamed
+## Everything else
 
-- The repository folder is still `supadog`. Renaming it moves the Claude Code project history and
-  memory, so Erik renames it when he wants to.
-- The PRD (Claude Doc) still says Guardbase. Older decision records now use the new name.
+On 2026-10-31 Erik asked to rename everything:
+
+- The GitHub repository is `FlywheelStudio/supahound` (private), and the local folder is
+  `Development/supahound` (it was `supadog`).
+- The PRD (Claude Doc) is titled "Supahound PRD". Its naming row now notes that Supabase's catalog
+  bars only the word "Supabase", and that its Branding Guidelines, not yet checked, may limit
+  "Supa" names.
+- Older decision records use the new name. Commit messages written before the rename keep the old
+  one; rewriting published history is not worth it.
