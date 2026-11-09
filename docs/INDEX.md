@@ -7,9 +7,9 @@
 | [ROADMAP.md](ROADMAP.md) | Phases, gates, milestones, V1 scope status with issue links |
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
+| [features/marketing-site.md](features/marketing-site.md) | Marketing site: pages, content model, SEO/AEO, middleware allowlist, Coming soon registry, tests |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
-| [wip/marketing-site.md](wip/marketing-site.md) | Marketing site: pages, SEO/AEO, content model, build log |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
 | [wip/tenant-isolation.md](wip/tenant-isolation.md) | Multi-tenant storage, RLS, token vault, poller |
 | [wip/incident-explainer.md](wip/incident-explainer.md) | Incident engine and ZDR-only LLM explainer |

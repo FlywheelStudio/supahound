@@ -8,7 +8,6 @@ This file tracks only what is in progress and what is done.
 
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
-| Marketing site (supahound.com) | #34, #40 | 62 pages merged (#34); Coming soon registry (decision 021) in PR for #40 | None; data controls are #43 | [wip/marketing-site.md](wip/marketing-site.md) |
 | Scan funnel (hackme.si) | #33 | Authorization backbone built (DNS-TXT verify, scope guard, 5-table data model); repositories + passive checks + web funnel next | Legal review before any active-scan milestone | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
@@ -20,8 +19,9 @@ This file tracks only what is in progress and what is done.
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
 | GitHub workflow: CI, templates, labels, milestones, issues, E2E + UAT, project docs (chore, no feature doc) | #2 | 2026-11-09, PR #1 into `develop` | [WORKFLOW.md](WORKFLOW.md), [TESTING.md](TESTING.md), decisions 019 and 020 |
+| Marketing site (supahound.com): 62 pages, SEO/AEO, Coming soon registry | #34, #40 | 2026-11-09, PRs #45 and #53 into `develop` | [features/marketing-site.md](features/marketing-site.md), decisions 017 and 021 |
 
-No product feature is complete yet. A feature moves here when its feature doc exists in `docs/features/`.
+A feature moves here when its feature doc exists in `docs/features/`.
 
 ## Next up (Validate milestone, gate: log fields confirmed)
 
