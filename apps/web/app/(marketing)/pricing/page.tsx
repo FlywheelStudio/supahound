@@ -57,7 +57,7 @@ export default function Pricing() {
             <ul className="mt-6 flex-1 space-y-2 text-sm text-slate-700">
               {p.features.map((f) => <li key={f} className="flex gap-2"><span aria-hidden className="text-emerald-600">✓</span>{f}</li>)}
             </ul>
-            <Link href={`${SIGN_UP_PATH}?plan=${p.id}`} className={`mt-6 rounded-md px-4 py-2 text-center font-medium ${p.highlight ? "bg-slate-950 text-white hover:bg-slate-800" : "border border-slate-300 hover:border-slate-500"}`}>{p.cta}</Link>
+            <Link href={`${SIGN_UP_PATH}&plan=${p.id}`} className={`mt-6 rounded-md px-4 py-2 text-center font-medium ${p.highlight ? "bg-slate-950 text-white hover:bg-slate-800" : "border border-slate-300 hover:border-slate-500"}`}>{p.cta}</Link>
           </li>
         ))}
       </ul>

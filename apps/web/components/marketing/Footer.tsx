@@ -2,7 +2,7 @@ import Link from "next/link";
 import { MAKER } from "../../content/site";
 
 const COLUMNS = [
-  { title: "Product", links: [["/pricing", "Pricing"], ["/hack-me", "Free scan (hack me)"], ["/platforms/supabase", "Supabase monitoring"], ["/login", "Sign up"]] },
+  { title: "Product", links: [["/pricing", "Pricing"], ["/hack-me", "Free scan (hack me)"], ["/platforms/supabase", "Supabase monitoring"], ["/login?signup=1", "Sign up"]] },
   { title: "Learn", links: [["/guides", "Platform guides"], ["/guides/postgres", "Postgres best practices"], ["/compare", "Comparisons"], ["/platforms", "All platforms"]] },
   { title: "Legal", links: [["/privacy", "Privacy policy"], ["/terms", "Terms and conditions"]] },
 ] as const;

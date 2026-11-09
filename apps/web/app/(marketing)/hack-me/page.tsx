@@ -49,7 +49,7 @@ export default function HackMe() {
         updated={SITE_UPDATED}
       />
       <div className="mt-8 flex flex-wrap items-center gap-3">
-        <Link href={`${SIGN_UP_PATH}?next=/hack-me`} className="rounded-md bg-slate-950 px-5 py-2.5 font-medium text-white hover:bg-slate-800">Create a free account to scan</Link>
+        <Link href={SIGN_UP_PATH} className="rounded-md bg-slate-950 px-5 py-2.5 font-medium text-white hover:bg-slate-800">Create a free account to scan</Link>
         <p className="text-sm text-slate-600">The scan is in development. Create your account now and the scan shows up in it at launch.</p>
       </div>
 

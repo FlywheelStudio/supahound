@@ -7,7 +7,8 @@ export const SITE_DESCRIPTION =
   "Supahound watches your Supabase logs for cross-tenant reads, leaked service keys and scraping, and gives you a fix you can paste. Read-only.";
 export const SITE_UPDATED = "2026-11-08";
 
-export const SIGN_UP_PATH = "/login";
+export const SIGN_UP_PATH = "/login?signup=1";
+export const SIGN_IN_PATH = "/login";
 // Confirm this inbox exists before launch.
 export const CONTACT_EMAIL = "hello@flywheel.so";
 

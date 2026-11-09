@@ -46,6 +46,16 @@ competitor comparisons and a /hack-me page. Decision 017.
   firebase-studio, emergent). Lovable April 2026 API flaw checked against the TNW source by hand.
   Writers dropped every claim they could not source (list in their reports: Firebase Studio
   sunset date, Bolt Database provider, Rork Cloud provider, Escape.tech totals, Tempo dates).
+- 2026-11-09: Sign-up made explicit: CTAs go to `/login?signup=1` (`&plan=<id>` from pricing);
+  `lib/signup.ts` switches the heading, button and note, and names a paid plan. Sign-in links
+  stay `/login`. Dead `?next=/hack-me` removed (the email hook does not carry `next`).
+- Page check moved into the repo: `apps/web/scripts/check-pages.py`. Run the built Worker
+  (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP=postgres://x:x@127.0.0.1:5999/x
+  npx wrangler dev --config dist/server/wrangler.json --port 8788`), then
+  `python3 -I scripts/check-pages.py`. Proved it fails: adding `/login` exits 1.
+- Cache check: client navigation fetches `<path>.rsc` (text/x-component), a separate URL from the
+  HTML; an `RSC: 1` request to the HTML URL gets a 307. Both send `Vary` on the router headers,
+  so the public `Cache-Control` cannot mix HTML and RSC payloads.
 - Final run: typecheck 0, lint 0, `pnpm -r test` 0 (core 229, web 144, poller 6; Postgres tests
   ran), build 0, 62 sitemap pages pass the HTML check, unknown slugs 404.
 
@@ -62,6 +72,11 @@ llms.txt, og.png.
 - Confirm the inboxes `hello@flywheel.so` and `legal@flywheel.so` exist.
 - Re-check competitor prices and platform facts every quarter; each page shows its check date.
 - The /hack-me CTA goes to sign-up until the scan funnel ships (decision 016).
+- The copy describes the V1 product. STATE.md still lists the posture scan, detectors 1, 3 and 5,
+  webhook alerts, the weekly digest and Stripe billing as backlog. Ship them before deploy, or
+  reframe the pages as early access.
+- The privacy policy also promises account deletion within 30 days, a disconnect flow and notice
+  before a new subprocessor. Confirm each exists before launch.
 
 ## Open questions
 
