@@ -122,9 +122,10 @@ Unit tests run in `pnpm -r test`.
 - **`test/content.test.ts`: 96 cases.**
   - Route registry (3): paths are unique and all pass `isPublicMarketingPath`; every path maps to a
     `page.tsx`; nav links and legal pages are registered.
-  - Page metadata (55): 54 cases check that each platform landing page, platform guide, Postgres
-    guide and compare page fits search-result limits (title plus suffix ≤ 70, description 70–160,
-    intro > 120 characters). One case checks that titles and descriptions are unique.
+  - Page metadata (55): 54 cases check search-result limits (title plus suffix ≤ 70, description
+    70–160, intro > 120 characters) on 17 landing and 17 guide entries, 9 Postgres guides and 11
+    compare pages. Supabase's guide entry is checked although `/guides/supabase` has no page. One
+    case checks that titles and descriptions are unique.
   - Internal links (1): every link in `content/` and `components/marketing/` points at a
     registered page.
   - Platforms (19): the slugs match decision 017; no intro, risk or FAQ answer repeats across
@@ -176,7 +177,7 @@ passed the page check; unknown slugs returned 404; `/login` stayed `private, no-
   as private.
 - **Public pages are cached.** A shared cache may keep them, so they must never render per-user
   content or read the session.
-- **`og.png` is a static file.** It was rendered by hand with headless Chrome. No script
+- **`og.png` is a static file.** We rendered it by hand with headless Chrome. No script
   regenerates it.
 - **Facts go stale.** Platform and compare pages show their check date and sources. Writers dropped
   every claim they could not source; keep that rule.
