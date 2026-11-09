@@ -71,7 +71,7 @@ The API reference filters on `source`; the 23 Sept 2026 changelog filters on `so
 ## Build log
 
 - **No lockfile in this repo yet.** `~/pnpm-workspace.yaml` (Feb 2026) makes pnpm treat the home
-  folder as the workspace root. `pnpm add` therefore wrote supadog's dependencies into
+  folder as the workspace root. `pnpm add` therefore wrote this repo's dependencies into
   `~/pnpm-lock.yaml`, and the packages were linked from `~/node_modules`. This repo now has its
   own `pnpm-workspace.yaml`, `pnpm-lock.yaml` and store (fixed 2026-10-27).
 - **Ownership fix.** The first version merged every policy on a table. The quickstart `profiles`

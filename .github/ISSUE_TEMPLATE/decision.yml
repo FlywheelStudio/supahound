@@ -1,0 +1,21 @@
+name: Decision
+description: A product or technical choice of lasting consequence. Closes with a record in docs/decisions/.
+labels: ["type:decision"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What forces the choice now.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation

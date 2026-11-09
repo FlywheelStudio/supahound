@@ -1,0 +1,25 @@
+# Path → label rules for .github/workflows/labeler.yml.
+"area:detectors":
+  - changed-files:
+      - any-glob-to-any-file: ["packages/core/src/detectors/**", "packages/core/src/postgrest/**", "packages/core/src/ownership/**", "packages/core/src/network/**", "packages/core/src/config/**"]
+"area:incidents":
+  - changed-files:
+      - any-glob-to-any-file: ["packages/core/src/incidents/**", "packages/core/src/explainer/**"]
+"area:poller":
+  - changed-files:
+      - any-glob-to-any-file: ["apps/poller/**", "packages/core/src/poller/**", "packages/core/src/logs/**"]
+"area:web":
+  - changed-files:
+      - any-glob-to-any-file: ["apps/web/**"]
+"area:db":
+  - changed-files:
+      - any-glob-to-any-file: ["supabase/migrations/**", "packages/core/src/db/**"]
+"area:core":
+  - changed-files:
+      - any-glob-to-any-file: ["packages/core/src/tenancy/**", "packages/core/src/vault/**", "packages/core/src/supabase/**"]
+"area:infra":
+  - changed-files:
+      - any-glob-to-any-file: [".github/**", "**/wrangler.jsonc", "pnpm-workspace.yaml"]
+"type:docs":
+  - changed-files:
+      - all-globs-to-all-files: ["**/*.md"]

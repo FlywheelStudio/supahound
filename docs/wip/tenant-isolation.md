@@ -7,9 +7,10 @@ path may read, write, decrypt or mix one tenant's data with another's.
 
 - Built: scope keys, schema + RLS, vault, repositories, poller, scheduler, worker. 19 Postgres
   tests (isolation + poller) pass on a throwaway Postgres 17 cluster.
-- **Next step:** pick the Postgres host, create the two login roles, apply
-  `migrations/0001_tenancy.sql`, then run `pnpm worker` against one project. Applying the
-  migration to a shared database needs Erik's approval.
+- **Next step (issue #8):** create Supahound's Supabase project (decision 008), create the two
+  login roles, apply every file in `supabase/migrations/`, then run the poller
+  (`pnpm --filter @supahound/poller dev`) against one project. Applying migrations to a shared
+  database needs Erik's approval.
 - Not built: ownership refresh from `pg_policies`, OAuth connect and token refresh, stuck-run
   cleanup. See STATE.md backlog.
 
@@ -44,14 +45,14 @@ path may read, write, decrypt or mix one tenant's data with another's.
 ## Open questions
 
 - Does a Supabase OAuth token cover one organization? Settle when the OAuth app is registered.
-- Hosting for Postgres (Hetzner + Coolify per the PRD).
+- ~~Hosting for Postgres~~ Settled by decision 008: Supahound's own Supabase Postgres via Hyperdrive.
 
 ## Build log
 
 - Scope keys: `ServiceRoleNetworks` was keyed by Supabase ref. Two tenants watching one Supabase
   project would have shared learned networks, so one tenant's traffic could silence the other's
   `new_network` alert. Now keyed by tenant + Supahound project (commit 237ca10).
-- Schema + RLS (`migrations/0001_tenancy.sql`), `withTenant`, repositories, token vault. 12
+- Schema + RLS (now `supabase/migrations/20261027000000_tenancy.sql`), `withTenant`, repositories, token vault. 12
   Postgres tests run as a non-superuser role on a throwaway cluster (Postgres 17, Unix socket).
   Mutation checks: a permissive leak policy, FORCE removed, `nullif` removed, a single-column FK,
   and a writable audit log each fail the suite.
