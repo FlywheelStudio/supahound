@@ -19,7 +19,7 @@ This file tracks only what is in progress and what is done.
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
-| Project picker: pick and remove watched projects | #9 | 2026-11-09, PR into `develop` | [features/project-picker.md](features/project-picker.md), decision 022 |
+| Project picker: pick and remove watched projects | #9 | 2026-11-09, PR #61 into `develop` | [features/project-picker.md](features/project-picker.md), decision 022 |
 | GitHub workflow: CI, templates, labels, milestones, issues, E2E + UAT, project docs (chore, no feature doc) | #2 | 2026-11-09, PR #1 into `develop` | [WORKFLOW.md](WORKFLOW.md), [TESTING.md](TESTING.md), decisions 019 and 020 |
 
 A feature moves here when its feature doc exists in `docs/features/`.

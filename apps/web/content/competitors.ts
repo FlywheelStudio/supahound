@@ -166,7 +166,7 @@ export const competitors: Competitor[] = [
       },
       {
         q: "Does SupaExplorer need my service-role key?",
-        a: "Its site says only \"Connect your Supabase project directly\" and does not name the credential. Supahound uses read-only OAuth with the analytics:read and database:read scopes and never asks for a service-role key.",
+        a: "Its site says only \"Connect your Supabase project directly\" and does not name the credential. Supahound uses read-only OAuth with the read-only analytics:read, database:read and projects:read scopes and never asks for a service-role key.",
       },
       {
         q: "Is a point-in-time audit enough?",

@@ -17,7 +17,7 @@ export const LEGAL = {
   entity: "Flywheel Studio LLC",
   state: "Texas",
   email: CONTACT_EMAIL,
-  effective: "2026-11-08",
+  effective: "2026-11-09",
 } as const;
 
 export type Plan = {

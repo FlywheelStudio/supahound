@@ -1,6 +1,6 @@
 # Project picker
 
-Issue #9. Decision 022. Part of the web app ([wip/web-app.md](../wip/web-app.md)).
+Issue #9. Decisions 022 and 023. Part of the web app ([wip/web-app.md](../wip/web-app.md)).
 
 ## What it does
 
@@ -47,7 +47,8 @@ tenants can watch the same ref independently. Migration
 ## External services
 
 - **Supabase Management API**, `GET /v1/projects`. The OAuth app needs the scope **`projects:read`**,
-  in addition to `analytics:read` and `database:read` (setup step 0 in `wip/web-app.md`, issue #4).
+  in addition to `analytics:read` and `database:read` (decision 023; setup step 0 in
+  `wip/web-app.md`, issue #4). Public copy and the privacy policy name all three scopes.
 - `SUPABASE_API_URL` (Worker var, default `https://api.supabase.com`). Only E2E changes it.
 
 ## Testing

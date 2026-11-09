@@ -10,7 +10,7 @@ export const DETECTORS: { name: string; body: string; feature: FeatureId }[] = [
 ];
 
 export const STEPS: { title: string; body: string; feature: FeatureId }[] = [
-  { feature: "supabaseConnect", title: "Connect read-only", body: "Sign in with a magic link and connect your Supabase org with OAuth. Supahound asks for analytics:read and database:read only. It never sees your service-role key." },
+  { feature: "supabaseConnect", title: "Connect read-only", body: "Sign in with a magic link and connect your Supabase org with OAuth. Supahound asks for three read-only scopes: analytics:read, database:read and projects:read. It never sees your service-role key." },
   { feature: "postureScan", title: "Get a posture scan", body: "Supahound checks RLS coverage, Security Advisor findings, views without security_invoker and newly exposed tables. The scan is free." },
   { feature: "crossTenant", title: "Get told when it happens", body: "On a paid plan, Supahound reads your edge logs every 1–2 minutes, groups suspicious requests into incidents and emails you what happened and the SQL to fix it." },
 ];
@@ -26,7 +26,7 @@ export const HOME_FAQS: Faq[] = [
   },
   {
     q: "Does Supahound need my service-role key?",
-    a: "No. You connect your Supabase org with OAuth and grant analytics:read and database:read. Supahound stores the OAuth tokens sealed with a per-tenant key and never asks for a service-role or secret key.",
+    a: "No. You connect your Supabase org with OAuth and grant three read-only scopes: analytics:read, database:read and projects:read. Supahound stores the OAuth tokens sealed with a per-tenant key and never asks for a service-role or secret key.",
   },
   {
     q: "Does Supahound send my logs to an AI model?",

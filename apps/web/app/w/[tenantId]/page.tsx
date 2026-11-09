@@ -89,7 +89,7 @@ export default async function Workspace({
                 Connect Supabase
               </button>
               <p className="mt-2 text-sm text-slate-500">
-                Supahound asks for read access to logs and database metadata only.
+                Supahound asks for read access to logs, database metadata and the project list only.
               </p>
             </form>
           )}

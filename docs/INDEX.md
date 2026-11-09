@@ -36,3 +36,4 @@
 | [decisions/020-e2e-with-fake-supabase-auth.md](decisions/020-e2e-with-fake-supabase-auth.md) | E2E runs the built Worker, Postgres and a fake Supabase Auth |
 | [decisions/021-coming-soon-features.md](decisions/021-coming-soon-features.md) | Unbuilt features show Coming soon via one registry tied to issues; hello@ only |
 | [decisions/022-remove-project-keeps-audit-log.md](decisions/022-remove-project-keeps-audit-log.md) | Removing a project deletes its history, keeps its audit rows; typed-name confirm |
+| [decisions/023-oauth-scope-projects-read.md](decisions/023-oauth-scope-projects-read.md) | OAuth adds read-only `projects:read` for the project picker (amends 012) |
