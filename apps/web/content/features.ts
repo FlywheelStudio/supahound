@@ -22,7 +22,7 @@ export const FEATURES = {
   agencyDashboard: { name: "Multi-project dashboard", status: "soon", issues: [23] },
   clientReports: { name: "Client reports", status: "soon", issues: [31] },
   paidPlans: { name: "Paid plans and billing", status: "soon", issues: [25] },
-  hackMeScan: { name: "Hack me external scan", status: "soon", issues: [42] },
+  hackMeScan: { name: "Hack me external scan", status: "soon", issues: [51] },
   dataControls: { name: "Data controls: retention, deletion, disconnect", status: "soon", issues: [43] },
 } as const satisfies Record<string, Feature>;
 

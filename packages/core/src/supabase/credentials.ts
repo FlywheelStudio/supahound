@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { withTenant } from "../db/tenant.js";
+import { withTenant, type TenantTx } from "../db/tenant.js";
 import type { ConnectionId, TenantId } from "../tenancy/scope.js";
 import type { TokenVault } from "../vault/vault.js";
 import { needsRefresh, parseCredentials, refreshCredentials, type OAuthClient } from "./oauth.js";
@@ -10,6 +10,35 @@ import { needsRefresh, parseCredentials, refreshCredentials, type OAuthClient } 
 // is the one place a transaction spans an external call, on purpose: Supabase may rotate refresh
 // tokens, so two pollers refreshing at once would burn the grant. The second waiter re-reads the
 // row after the first commits and finds a fresh token. The token request times out at 10 s.
+//
+// accessTokenInTx runs inside a transaction the caller already holds, such as the web app's
+// withTenantForUser (membership checked first). accessTokenFor opens its own (the poller).
+export async function accessTokenInTx(
+  tx: TenantTx,
+  vault: TokenVault,
+  connection: ConnectionId,
+  client: OAuthClient | null,
+  now: Date,
+): Promise<string> {
+  const rows = await tx.query<{ sealed_token: Buffer }>(
+    "SELECT sealed_token FROM supahound.connections WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+    [tx.tenantId, connection],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("Connection not found for this tenant");
+  const binding = { tenantId: tx.tenantId, connectionId: connection };
+  const creds = parseCredentials(vault.open(row.sealed_token, binding));
+  if (!client || !needsRefresh(creds, now)) return creds.accessToken;
+
+  const next = await refreshCredentials(client, creds, now);
+  const sealed = vault.seal(JSON.stringify(next), binding);
+  await tx.query(
+    "UPDATE supahound.connections SET sealed_token = $3, key_version = $4, updated_at = $5 WHERE tenant_id = $1 AND id = $2",
+    [tx.tenantId, connection, sealed, vault.keyVersionOf(sealed), now],
+  );
+  return next.accessToken;
+}
+
 export async function accessTokenFor(
   pool: Pool,
   vault: TokenVault,
@@ -18,23 +47,5 @@ export async function accessTokenFor(
   client: OAuthClient | null,
   now: Date,
 ): Promise<string> {
-  return withTenant(pool, tenant, async (tx) => {
-    const rows = await tx.query<{ sealed_token: Buffer }>(
-      "SELECT sealed_token FROM supahound.connections WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
-      [tenant, connection],
-    );
-    const row = rows[0];
-    if (!row) throw new Error("Connection not found for this tenant");
-    const binding = { tenantId: tenant, connectionId: connection };
-    const creds = parseCredentials(vault.open(row.sealed_token, binding));
-    if (!client || !needsRefresh(creds, now)) return creds.accessToken;
-
-    const next = await refreshCredentials(client, creds, now);
-    const sealed = vault.seal(JSON.stringify(next), binding);
-    await tx.query(
-      "UPDATE supahound.connections SET sealed_token = $3, key_version = $4, updated_at = $5 WHERE tenant_id = $1 AND id = $2",
-      [tenant, connection, sealed, vault.keyVersionOf(sealed), now],
-    );
-    return next.accessToken;
-  });
+  return withTenant(pool, tenant, (tx) => accessTokenInTx(tx, vault, connection, client, now));
 }
