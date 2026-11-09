@@ -34,9 +34,8 @@ export function Footer() {
             {" "}· © {new Date().getFullYear()} {MAKER.legalName}
           </p>
           <p>
-            Supahound is not affiliated with or endorsed by Supabase, Lovable, Bolt, Vercel, Replit, Anysphere (Cursor),
-            Windsurf, Anthropic, Base44, Anything, Google, Tempo, Softgen, Rork, Same, Emergent, GitHub or any company
-            named on this site. Product names are trademarks of their owners.
+            Supahound is an independent product. It is not affiliated with or endorsed by Supabase, Inc. or any other
+            company or product named on this site. Product names are trademarks of their owners.
           </p>
         </div>
       </div>

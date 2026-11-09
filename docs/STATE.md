@@ -6,7 +6,7 @@ Updated 2026-10-27.
 
 | Feature | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- |
-| Marketing site (supahound.com) | Scaffold, legal pages, Postgres guides; platform and compare pages after research | Legal review of privacy policy and terms before launch | [wip/marketing-site.md](wip/marketing-site.md) |
+| Marketing site (supahound.com) | 62 pages built and verified; PR into develop next | Legal review; incident retention job; 276b883 placement | [wip/marketing-site.md](wip/marketing-site.md) |
 | Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Supahound Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
 | Incident engine + ZDR explainer | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Web app: auth, onboarding, dashboard | Sign-in, workspace, overview, Supabase OAuth connect built; project picker next | Supahound Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |

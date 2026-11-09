@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CardGrid, Cta, FaqList } from "../../components/marketing/Blocks";
 import { JsonLd } from "../../components/marketing/JsonLd";
 import { DETECTORS, HOME_FAQS, STEPS } from "../../content/home";
-import { platforms } from "../../content/platforms";
+import { builders } from "../../content/platforms";
 import { PLANS, SIGN_UP_PATH, SITE_DESCRIPTION } from "../../content/site";
 import { faqLd, pageMetadata, softwareLd } from "../../lib/seo";
 
@@ -77,9 +77,9 @@ export default function Home() {
           Supahound watches the Supabase project, so it works the same however you built the app.
         </p>
         <div className="mt-6">
-          <CardGrid items={platforms.slice(0, 9).map((p) => ({ href: `/platforms/${p.slug}`, title: `${p.name} + Supabase`, body: p.oneLine }))} />
+          <CardGrid items={builders().slice(0, 9).map((p) => ({ href: `/platforms/${p.slug}`, title: `${p.name} + Supabase`, body: p.oneLine }))} />
         </div>
-        <p className="mt-4 text-sm"><Link href="/platforms" className="font-medium text-emerald-700 hover:underline">See all {platforms.length} platforms</Link></p>
+        <p className="mt-4 text-sm"><Link href="/platforms" className="font-medium text-emerald-700 hover:underline">See all {builders().length} platforms</Link></p>
       </section>
 
       <section className="py-10">
