@@ -4,9 +4,9 @@
   "private": true,
   "packageManager": "pnpm@10.28.2",
   "dependencies": {
-    "@supahound/core": "workspace:*",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
+    "@supahound/core": "workspace:*",
     "@vinext/cloudflare": "^1.2.1",
     "pg": "^8.23.1",
     "react": "^19.3.1",
@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.65.0",
+    "@playwright/test": "~1.64.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.19.7",
     "@types/pg": "^8.23.1",
@@ -38,6 +39,8 @@
     "deploy": "vinext-cloudflare deploy --config dist/server/wrangler.json",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types worker-configuration.d.ts --strict-vars=false",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "vite build && playwright test -c e2e/playwright.config.ts",
+    "e2e:only": "playwright test -c e2e/playwright.config.ts"
   }
 }

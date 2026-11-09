@@ -4,7 +4,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
@@ -50,3 +50,35 @@ jobs:
           # A skipped suite still exits 0. Fail if any package reports skipped tests.
           if grep -E "Tests .*skipped" test.log; then echo "Skipped tests in CI"; exit 1; fi
       - run: pnpm -r build
+
+  e2e:
+    name: E2E and UAT (web, Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install Postgres 17
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -yq postgresql-17
+          echo "SUPAHOUND_PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @supahound/web exec playwright install --with-deps chromium-headless-shell
+      - run: pnpm e2e
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7

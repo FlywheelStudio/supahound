@@ -1,0 +1,60 @@
+import { createHash } from "node:crypto";
+import * as repo from "@supahound/core/db/repo";
+import { withTenant } from "@supahound/core/db/tenant";
+import { templateExplanation } from "@supahound/core/explainer/template";
+import { ownershipFromColumns } from "@supahound/core/ownership/ownership";
+import { pollProject } from "@supahound/core/poller/pollProject";
+import { projectScope, tenantId } from "@supahound/core/tenancy/scope";
+import { TokenVault } from "@supahound/core/vault/vault";
+import pg from "pg";
+
+// Drives the real detection pipeline (packages/core pollProject) into the E2E database, so the
+// dashboard shows incidents the poller produced, not hand-written rows. Supabase's logs API is
+// replaced by synthetic rollup rows; the model by the template explainer. Synthetic IDs only.
+
+export const ALICE = "11111111-1111-4111-8111-111111111111";
+export const BOB = "22222222-2222-4222-8222-222222222222";
+
+// User A reads user B's notes from a cloud host: detector 2 (cross-tenant access).
+export const SCRAPE_ROWS = [
+  {
+    method: "GET", path: "/rest/v1/notes", search: `?user_id=eq.${BOB}`, status: "200", contentRange: "0-49/*",
+    userAgent: "python-httpx/0.28.1", asn: "14061", asOrganization: "DigitalOcean, LLC",
+    jwtSubject: ALICE, jwtRole: "authenticated", apiKeyRole: "anon", hits: "37",
+  },
+];
+
+export async function pollAttack(tenant: string, projectName: string, now = new Date()): Promise<void> {
+  const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 2 });
+  const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: process.env.E2E_MASTER_KEYS });
+  try {
+    const t = tenantId(tenant);
+    const p = await withTenant(app, t, async (tx) => {
+      const conn = await repo.createConnection(tx, vault, { label: "E2E", token: "e2e-static-token" });
+      const id = await repo.createProject(tx, { connectionId: conn, supabaseRef: "e2eprojectrefxxxxxxx", name: projectName });
+      await repo.setOwnership(tx, id, ownershipFromColumns({ notes: ["user_id"] }));
+      return id;
+    });
+    const seen = new Date(now.getTime() - 4 * 60_000).toISOString();
+    const outcome = await pollProject(projectScope(t, p), {
+      app, vault, now: () => now,
+      queryLogs: async () => SCRAPE_ROWS.map((r) => ({ ...r, first_seen: seen, last_seen: seen })),
+      explain: async (f) => ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
+    });
+    if (outcome.status !== "ok") throw new Error(`Poll failed: ${JSON.stringify(outcome)}`);
+  } finally {
+    await app.end();
+  }
+}
+
+export async function adminQuery<T extends pg.QueryResultRow>(sql: string, params: unknown[] = []): Promise<T[]> {
+  const c = new pg.Client({ connectionString: process.env.E2E_ADMIN_DB_URL });
+  await c.connect();
+  try {
+    return (await c.query<T>(sql, params)).rows;
+  } finally {
+    await c.end();
+  }
+}
+
+export const sha256Hex = (s: string) => createHash("sha256").update(s).digest("hex");
