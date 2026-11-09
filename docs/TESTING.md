@@ -7,7 +7,7 @@ Updated 2026-11-09. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 229 core (unit + Postgres), 25 web |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 229 core (unit + Postgres), 31 web |
 | Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | within the 229 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 6 |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 6 |
@@ -101,5 +101,6 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | Hook checks its signature | Fake Auth signs the hook with the wrong secret | UAT-W1 fails (401) |
 | No shared caching of signed-in pages | Middleware stops setting `private, no-store` | 3 E2E checks fail |
 | No second page for a repeat | Engine pages on every update at high or above | UAT-D4 fails |
+| Sign-in email HTML is escaped | `renderSignInEmail` drops `escapeHtml` | 2 unit tests fail |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

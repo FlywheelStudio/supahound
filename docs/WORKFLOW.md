@@ -31,8 +31,19 @@ Three long-lived kinds, and no more:
 5. **PR into `develop`.** The description says `Closes #<n>`. The "PR hygiene" check fails without
    it. Fill in the template's definition-of-done list.
 6. **CI green.** Typecheck, lint, all Vitest suites (Postgres included), build, E2E + UAT.
-7. **Merge.** Then delete the branch. GitHub closes the issue.
+7. **Merge.** Then delete the branch. Close the issue with a link to the PR (see the note below).
 8. **Done.** Write the feature doc, delete the WIP doc, move the item to Completed in `STATE.md`.
+
+### While `main` is the default branch
+
+GitHub runs some features only from the default branch. Today that is `main`, and `develop` is not
+the default yet (a decision for Erik). Until it changes:
+
+- `Closes #n` closes the issue only when a PR merges into `main`. After a merge into `develop`,
+  close the issue by hand with a link to the PR.
+- `@claude` and the `claude` label work only after `claude.yml` reaches `main`.
+- Dependabot reads its config from `main`. The config sets `target-branch: develop`, so its PRs
+  never go straight to production.
 
 ## Labels
 

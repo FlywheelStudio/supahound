@@ -8,7 +8,6 @@ This file tracks only what is in progress and what is done.
 
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
-| GitHub workflow, docs, E2E + UAT | #2 | PR #1 into `develop`; CI green | Review | — (this PR) |
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Tenant isolation (storage, vault, poller) | #8 | Built; Cloudflare poller done; needs a live database | Supahound's Supabase project + Hyperdrive | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
@@ -16,7 +15,11 @@ This file tracks only what is in progress and what is done.
 
 ## Completed
 
-None yet. A feature moves here when its feature doc exists in `docs/features/`.
+| Item | Issue | Shipped | Docs |
+| --- | --- | --- | --- |
+| GitHub workflow: CI, templates, labels, milestones, issues, E2E + UAT, project docs (chore, no feature doc) | #2 | 2026-11-09, PR #1 into `develop` | [WORKFLOW.md](WORKFLOW.md), [TESTING.md](TESTING.md), decisions 019 and 020 |
+
+No product feature is complete yet. A feature moves here when its feature doc exists in `docs/features/`.
 
 ## Next up (Validate milestone, gate: log fields confirmed)
 

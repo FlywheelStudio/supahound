@@ -1,6 +1,7 @@
 # Claude Code on GitHub. Mention @claude in an issue, a PR or a review comment, or add the
 # `claude` label to an issue, and Claude works it on a feature branch and opens a PR into develop.
-# Claude follows CLAUDE.md and docs/ like a local session.
+# Claude follows CLAUDE.md and docs/ like a local session. Issue and comment events run this file
+# from the default branch, so it works only once it is on main (docs/WORKFLOW.md).
 #
 # Setup (once): run /install-github-app in Claude Code, or add the repository secret
 # ANTHROPIC_API_KEY (Settings → Secrets and variables → Actions).
