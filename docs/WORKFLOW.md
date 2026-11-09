@@ -35,8 +35,14 @@ Three long-lived kinds, and no more:
 8. **Done.** Write the feature doc, delete the WIP doc, move the item to Completed in `STATE.md`.
 
 `develop` is the default branch (since 2026-11-09). GitHub runs `claude.yml` and reads
-`dependabot.yml` from it. Branch protection on `develop` and `main` requires a PR and green CI
-(the three checks above). No approval is required, and force pushes and deletion are blocked.
+`dependabot.yml` from it. GitHub deletes a branch when its PR merges.
+
+**Branch protection is not enforced.** GitHub Free allows neither branch protection nor rulesets on
+a private repo. Until Erik upgrades to GitHub Team or makes the repo public, the rule holds by
+convention: never push to `develop` or `main` directly, merge only through a PR with green CI, and
+never force-push either branch.
+
+Dependabot opens grouped minor and patch updates only. Plan a major upgrade as an issue.
 
 ## Labels
 

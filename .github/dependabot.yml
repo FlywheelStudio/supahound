@@ -10,6 +10,10 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
     labels: ["type:chore"]
+    # Majors (TypeScript, @types/node, ...) are planned as issues. @types/node must match Node 22.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     target-branch: develop

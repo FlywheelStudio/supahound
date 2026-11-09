@@ -37,7 +37,11 @@ branches. Stale branches stayed open.
 - `docs/WORKFLOW.md` describes the loop. `CLAUDE.md` points to it.
 - `develop` is the default branch, so `Closes #n` closes issues on merge, and the Claude Action and
   Dependabot run from `develop`.
-- Branch protection on `develop` and `main`: PR required, the three CI checks required, no approval
-  (Erik is the only reviewer), no force pushes or deletion, admins included. Approved 2026-11-09.
+- Branch protection was approved on 2026-11-09 (PR required, the three CI checks, no approval,
+  no force pushes or deletion). GitHub refused it: the org is on GitHub Free, which allows neither
+  branch protection nor rulesets on a private repo. The rule holds by convention until Erik
+  upgrades to GitHub Team or makes the repo public.
+- GitHub deletes the head branch when a PR merges. Dependabot skips npm major updates; majors
+  are planned as issues (first: #50, TypeScript 6).
 - Decision numbers 016–018 are taken by open branches (scan funnel, marketing site). If those
   merge in another order, the numbers stay as they are; no renumbering.
