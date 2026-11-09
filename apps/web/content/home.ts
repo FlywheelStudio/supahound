@@ -1,0 +1,42 @@
+import type { Faq } from "./types";
+
+export const DETECTORS = [
+  { name: "Cross-tenant reads", body: "One signed-in user reads rows that belong to other users or teams. This is the classic broken-RLS leak." },
+  { name: "Service-key misuse", body: "Your service_role or secret key calls the API from a new network or a browser. That usually means the key leaked." },
+  { name: "Credential stuffing", body: "Bursts of failed sign-ins across many accounts from a small set of networks." },
+  { name: "Scraping and bulk export", body: "One actor pages through a table far faster, or far deeper, than your app ever does." },
+  { name: "Database tampering", body: "Unusual writes, deletes or schema changes from an actor that has never made them before." },
+] as const;
+
+export const STEPS = [
+  { title: "Connect read-only", body: "Sign in with a magic link and connect your Supabase org with OAuth. Supahound asks for analytics:read and database:read only. It never sees your service-role key." },
+  { title: "Get a posture scan", body: "Supahound checks RLS coverage, Security Advisor findings, views without security_invoker and newly exposed tables. The scan is free." },
+  { title: "Get told when it happens", body: "On a paid plan, Supahound reads your edge logs every 1–2 minutes, groups suspicious requests into incidents and emails you what happened and the SQL to fix it." },
+] as const;
+
+export const HOME_FAQS: Faq[] = [
+  {
+    q: "What is Supahound?",
+    a: "Supahound is abnormal-traffic monitoring for Supabase apps. It reads your project's logs with read-only access, detects abuse such as cross-tenant reads, leaked service keys, credential stuffing and scraping, and tells you in plain English what happened and how to fix it.",
+  },
+  {
+    q: "How is Supahound different from the Supabase Security Advisor?",
+    a: "The Security Advisor checks your configuration: it tells you if a table has no RLS. Supahound also watches traffic per actor, so it can tell you that one user is reading other users' rows right now, even when every table has RLS turned on but a policy is wrong.",
+  },
+  {
+    q: "Does Supahound need my service-role key?",
+    a: "No. You connect your Supabase org with OAuth and grant analytics:read and database:read. Supahound stores the OAuth tokens sealed with a per-tenant key and never asks for a service-role or secret key.",
+  },
+  {
+    q: "Does Supahound send my logs to an AI model?",
+    a: "No raw logs reach a model. The incident summary model gets only structured features, such as counts, enums and an anonymous actor label, and every call uses zero data retention. If the model fails, Supahound sends template text instead.",
+  },
+  {
+    q: "Which apps does Supahound work with?",
+    a: "Any app with a Supabase backend, whether you built it with Lovable, Bolt, v0, Cursor, Claude Code or by hand. Supahound reads the Supabase project, not your frontend code.",
+  },
+  {
+    q: "How much does Supahound cost?",
+    a: "The posture scan is free for up to 3 projects. Runtime detection costs $29 per project per month on Builder, or $19 per project per month on Agency with a 10-project minimum.",
+  },
+];
