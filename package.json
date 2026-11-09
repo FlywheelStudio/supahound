@@ -14,7 +14,8 @@
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "scan": "pnpm --filter @supahound/core scan",
-    "discover-keys": "pnpm --filter @supahound/core discover-keys"
+    "discover-keys": "pnpm --filter @supahound/core discover-keys",
+    "e2e": "pnpm --filter @supahound/web e2e"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

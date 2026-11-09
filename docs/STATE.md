@@ -1,30 +1,27 @@
 # State
 
-Updated 2026-10-27.
+Updated 2026-11-09. The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
+grouped by [milestone](https://github.com/FlywheelStudio/supahound/milestones) (decision 019).
+This file tracks only what is in progress and what is done.
 
 ## In progress
 
-| Feature | Current step | Blocker | WIP doc |
-| --- | --- | --- | --- |
-| Tenant isolation (storage, vault, poller) | Built; Cloudflare poller and memberships done; needs live Supabase + Hyperdrive | Supahound Supabase project | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
-| Incident engine + ZDR explainer | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
-| Web app: auth, onboarding, dashboard | Sign-in, workspace, overview, Supabase OAuth connect built; project picker next | Supahound Supabase project, Hyperdrive, email domain | [wip/web-app.md](wip/web-app.md) |
-| Baseline-free detectors (2 and 4) | Code and 127 tests done; live run | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
+| Feature | Issue | Current step | Blocker | WIP doc |
+| --- | --- | --- | --- | --- |
+| Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
+| Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
+| Tenant isolation (storage, vault, poller) | #8 | Built; Cloudflare poller done; needs a live database | Supahound's Supabase project + Hyperdrive | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
+| Web app: auth, onboarding, dashboard | #9 | Sign-in, workspace, overview, OAuth connect built; E2E in CI; project picker next | Supahound's Supabase project, OAuth app, email domain | [wip/web-app.md](wip/web-app.md) |
 
 ## Completed
 
-None yet.
+| Item | Issue | Shipped | Docs |
+| --- | --- | --- | --- |
+| GitHub workflow: CI, templates, labels, milestones, issues, E2E + UAT, project docs (chore, no feature doc) | #2 | 2026-11-09, PR #1 into `develop` | [WORKFLOW.md](WORKFLOW.md), [TESTING.md](TESTING.md), decisions 019 and 020 |
 
-## Backlog
+No product feature is complete yet. A feature moves here when its feature doc exists in `docs/features/`.
 
-From the PRD "This week" list:
+## Next up (Validate milestone, gate: log fields confirmed)
 
-- Confirm JWT subject, query string and response size fields on a live project (`discover-keys` is ready)
-- Register the Supabase OAuth app; confirm what `supabase_read_only_user` can read
-- Book 10–15 builder and 3–5 agency interviews
-
-- Ownership refresh: read `pg_policies` through the read-only SQL endpoint into `projects.ownership`
-  (without it, detector 2 has no owner columns on a live project)
-- Web: project picker + ownership load, Stripe billing, alert email, signed webhooks, team invites, Turnstile, shadcn/ui
-- Weekly digest; agency client report (V2)
-- Detectors 1, 3 and 5; posture scan
+#3 JWT fields in live logs · #4 Supabase OAuth app · #5 live detector run · #6 live gateway call ·
+#7 interviews. All five need something from Erik (`needs-erik`).
