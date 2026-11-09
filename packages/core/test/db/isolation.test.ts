@@ -12,6 +12,7 @@ const SHARED_REF = "abcdefghijklmnopqrst";
 const TABLES = [
   "tenants", "connections", "projects", "service_role_networks", "poll_runs", "incidents", "findings", "audit_log",
   "memberships", "oauth_states",
+  "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
 ] as const;
 
 interface Seeded {
@@ -49,6 +50,31 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
         userId: randomUUID(), stateHash: randomUUID().replace(/-/g, "").padEnd(64, "0"),
         codeVerifier: "v".repeat(64), expiresAt: new Date(Date.now() + 600_000),
       });
+      // Scan funnel rows: a verified domain and a completed scan, one of each per tenant.
+      const slug = name.toLowerCase();
+      const [domain] = await tx.query<{ id: string }>(
+        `INSERT INTO supahound.scan_domains (tenant_id, apex, verification_token, token_expires_at, verified_at, verifying_ip)
+         VALUES ($1, $2, $3, now() + interval '1 day', now(), '203.0.113.7') RETURNING id`,
+        [tenant, `acme-${slug}.com`, "a".repeat(32)],
+      );
+      const domainRowId = domain!.id;
+      await tx.query(
+        `INSERT INTO supahound.scan_authorizations (tenant_id, domain_id, tos_version, email, ip)
+         VALUES ($1, $2, 'v1', $3, '203.0.113.7')`,
+        [tenant, domainRowId, `founder@acme-${slug}.com`],
+      );
+      const [scan] = await tx.query<{ id: string }>(
+        `INSERT INTO supahound.scans (tenant_id, domain_id, mode, status, score, started_at, finished_at)
+         VALUES ($1, $2, 'introductory', 'done', 72, now(), now()) RETURNING id`,
+        [tenant, domainRowId],
+      );
+      const scanRowId = scan!.id;
+      await tx.query(
+        `INSERT INTO supahound.scan_findings (tenant_id, scan_id, severity, type, endpoint, evidence, fix, supahound_monitor)
+         VALUES ($1, $2, 'high', 'rls_missing', '/rest/v1/notes', '{"tables":1}', 'Enable RLS', 'anon_table_read')`,
+        [tenant, scanRowId],
+      );
+      await tx.query("INSERT INTO supahound.scan_jobs (tenant_id, scan_id, state) VALUES ($1, $2, 'queued')", [tenant, scanRowId]);
       return { tenant, connection, project, run, incident };
     });
   }

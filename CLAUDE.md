@@ -1,6 +1,6 @@
 # Supahound
 
-Repository folder: `supadog` (decision 015).
+Repository: [FlywheelStudio/supahound](https://github.com/FlywheelStudio/supahound) (private). Renamed from Guardbase (decision 015).
 
 **Supahound**: abnormal-traffic monitoring for Supabase apps. Customers connect their Supabase
 org (OAuth, read-only); a Cloudflare poller reads each project's edge logs, runs the detectors,
@@ -9,7 +9,28 @@ Workers handles sign-in (Supabase Auth magic links), onboarding and the dashboar
 Backend: Supahound's own Supabase Postgres (schema `supahound`, forced RLS, reached through
 Hyperdrive with caching off). Everything else runs on Cloudflare (decision 008).
 
-Product spec: [Supahound PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc, still titled Guardbase).
+Product spec: [Supahound PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc).
+Where the PRD and a decision record disagree, the decision wins (hosting: 008; models: 011).
+
+Orient in this order: `docs/INDEX.md` → `docs/STATE.md` → the active WIP doc → the issue.
+`docs/ARCHITECTURE.md` explains the system; `docs/ROADMAP.md` maps phases to milestones.
+
+This repo does not import `conventions/saas-web.md`: it deploys to Cloudflare, not Vercel, and
+uses the three-branch model below instead of a main-only flow.
+
+## Workflow (decision 019, `docs/WORKFLOW.md`)
+
+- **Ask before you do any work.** Confirm scope and approach with Erik first.
+- **Check branches first.** `git fetch && git branch -a`. If the work belongs on an open branch, use it.
+- **Three branches:** one `feature/<slug>` (or `fix/<slug>`), `develop`, `main` (production).
+  Feature PRs target `develop`. Every branch ends merged or deleted; no work left outstanding.
+- **One git worktree per session.** Other Claude sessions work in this repo too. Never commit,
+  switch branches or stage files in a checkout another session uses.
+- **Every change has a GitHub issue.** The PR says `Closes #<n>`; the "PR hygiene" check fails otherwise.
+  Give issues labels (`type:*`, `area:*`, `priority:*`, `needs-erik`) and a milestone (roadmap phase).
+- **CI must be green:** typecheck, lint, `pnpm -r test` (Postgres never skipped), build, `pnpm e2e`.
+- **Never add a new service without asking.** Stay on the stack in the decision records.
+- Decision numbers 016–018 are taken by open branches; check every branch before you number a new one.
 
 ## Commands
 
@@ -21,6 +42,8 @@ pnpm typecheck                 # every package
 pnpm lint                      # one ESLint config for the whole repo (holds the ZDR guard)
 pnpm -r test                   # core (unit + Postgres), web (unit), poller (inside workerd)
 pnpm -r build                  # poller: wrangler dry run; web: vite build
+pnpm e2e                       # web: vite build, then Playwright E2E + UAT (docs/TESTING.md)
+pnpm --filter @supahound/web e2e:only     # Playwright only, on an existing build
 
 pnpm scan --file test/fixtures/events.ndjson --ownership test/fixtures/policies.json   # core CLI
 pnpm discover-keys --project <ref>        # PRD task 1: which auth fields exist in edge logs
@@ -35,6 +58,11 @@ The Postgres tests start a throwaway cluster on a Unix socket and apply every fi
 `supabase/migrations/` in order. They look for `initdb` in `SUPAHOUND_PG_BIN`, then
 `/opt/homebrew/opt/postgresql@17/bin`. `SUPAHOUND_SKIP_DB_TESTS=1` skips them where no Postgres
 exists; never skip them before a merge.
+
+`pnpm e2e` starts Postgres 17 on TCP, a fake Supabase Auth (`apps/web/e2e/support/fakeAuth.ts`)
+and the built Worker under `wrangler dev` (decision 020). First run on a machine:
+`pnpm --filter @supahound/web exec playwright install chromium-headless-shell`. `E2E_DEBUG=1`
+prints the wrangler output. Prove each new check can fail before you trust it (docs/TESTING.md).
 
 ## Codebase map
 
@@ -53,6 +81,10 @@ exists; never skip them before a merge.
 | `apps/poller/` | Cloudflare Worker: cron → queue → poll, via Hyperdrive |
 | `apps/web/` | Next.js on Workers (vinext): auth, onboarding, dashboard, Supabase connect, email hook |
 | `supabase/migrations/` | Postgres schema with forced RLS (apply to shared DBs only with approval) |
+| `packages/core/test/db/`, `test/uat/` | Postgres suites; detection UAT scenarios (UAT-D*) |
+| `apps/web/e2e/` | Playwright: signed-out checks, web UAT journey (UAT-W*), fake Auth, Postgres setup |
+| `.github/` | CI, PR hygiene, labeler, Claude Action, Dependabot, issue and PR templates |
+| `docs/` | INDEX, STATE, ARCHITECTURE, ROADMAP, TESTING, WORKFLOW, decisions, WIP and feature docs |
 
 ## Environment
 

@@ -44,3 +44,15 @@ describe("onboarding steps", () => {
     expect(currentStep(onboardingSteps({ hasWorkspace: true, connections: 1, projects: 2 }))?.id).toBe("plan");
   });
 });
+
+describe("authCopy", () => {
+  it("reads as sign-in by default and as sign-up from marketing CTAs", async () => {
+    const { authCopy } = await import("../lib/signup");
+    expect(authCopy({}).heading).toBe("Sign in to Supahound");
+    expect(authCopy({ signup: "1" }).heading).toBe("Create your free Supahound account");
+    expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("$29");
+    expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("coming soon");
+    expect(authCopy({ signup: "1", plan: "free" }).plan).toBeUndefined();
+    expect(authCopy({ plan: "nope" }).heading).toBe("Sign in to Supahound");
+  });
+});

@@ -34,7 +34,7 @@ const zdrGuard = {
 };
 
 export default tseslint.config(
-  { ignores: ["**/dist", "**/node_modules", "**/.wrangler", "**/.vinext", "**/.next", "**/worker-configuration.d.ts"] },
+  { ignores: ["**/dist", "**/node_modules", "**/.wrangler", "**/.vinext", "**/.next", "**/worker-configuration.d.ts", "**/playwright-report", "**/test-results"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   zdrGuard,
