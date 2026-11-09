@@ -8,6 +8,10 @@ type Brand<T, B extends string> = T & { readonly [brand]: B };
 export type TenantId = Brand<string, "TenantId">;
 export type ConnectionId = Brand<string, "ConnectionId">;
 export type ProjectId = Brand<string, "ProjectId">;
+// The scan funnel (hackme.si). A verified domain, one scan run against it, and a finding.
+export type DomainId = Brand<string, "DomainId">;
+export type ScanId = Brand<string, "ScanId">;
+export type ScanFindingId = Brand<string, "ScanFindingId">;
 // A Supabase Auth user ID. Build one only from a verified JWT (see verifiedUserId), never from
 // request input.
 export type UserId = Brand<string, "UserId">;
@@ -29,6 +33,9 @@ export const tenantId = (v: string): TenantId => uuid(v, "TenantId");
 export const connectionId = (v: string): ConnectionId => uuid(v, "ConnectionId");
 export const projectId = (v: string): ProjectId => uuid(v, "ProjectId");
 export const verifiedUserId = (v: string): UserId => uuid(v, "UserId");
+export const domainId = (v: string): DomainId => uuid(v, "DomainId");
+export const scanId = (v: string): ScanId => uuid(v, "ScanId");
+export const scanFindingId = (v: string): ScanFindingId => uuid(v, "ScanFindingId");
 
 export function projectScope(tenant: string, project: string): ProjectScope {
   return Object.freeze({ tenantId: tenantId(tenant), projectId: projectId(project) });

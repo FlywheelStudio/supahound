@@ -8,6 +8,7 @@ This file tracks only what is in progress and what is done.
 
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
+| Scan funnel (hackme.si) | #33 | Authorization backbone built (DNS-TXT verify, scope guard, 5-table data model); repositories + passive checks + web funnel next | Legal review before any active-scan milestone | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Tenant isolation (storage, vault, poller) | #8 | Built; Cloudflare poller done; needs a live database | Supahound's Supabase project + Hyperdrive | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
