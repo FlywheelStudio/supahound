@@ -2,7 +2,11 @@
 
 | Doc | Description |
 | --- | --- |
-| [STATE.md](STATE.md) | In progress, completed and backlog |
+| [STATE.md](STATE.md) | In progress and completed; the backlog is in GitHub issues |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System diagram, packages, one poll step by step, isolation layers, data model |
+| [ROADMAP.md](ROADMAP.md) | Phases, gates, milestones, V1 scope status with issue links |
+| [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
+| [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
 | [wip/tenant-isolation.md](wip/tenant-isolation.md) | Multi-tenant storage, RLS, token vault, poller |
@@ -22,3 +26,5 @@
 | [decisions/013-billing-stripe.md](decisions/013-billing-stripe.md) | Stripe Checkout and webhooks, tenant set server-side |
 | [decisions/014-email-cloudflare.md](decisions/014-email-cloudflare.md) | Cloudflare Email Service for magic links, alerts and digests |
 | [decisions/015-name-supahound.md](decisions/015-name-supahound.md) | The product is named Supahound; every identifier follows |
+| [decisions/019-github-issues-and-three-branches.md](decisions/019-github-issues-and-three-branches.md) | GitHub issues hold the work; feature / develop / main; CI gates merges |
+| [decisions/020-e2e-with-fake-supabase-auth.md](decisions/020-e2e-with-fake-supabase-auth.md) | E2E runs the built Worker, Postgres and a fake Supabase Auth |
