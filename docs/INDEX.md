@@ -25,3 +25,4 @@
 | [decisions/015-name-supahound.md](decisions/015-name-supahound.md) | The product is named Supahound; every identifier follows |
 | [decisions/017-marketing-site.md](decisions/017-marketing-site.md) | Marketing site in the web app on supahound.com; public-path middleware allowlist |
 | [decisions/018-vercel-ai-sdk.md](decisions/018-vercel-ai-sdk.md) | Keep the Vercel AI SDK + Vercel AI Gateway; Cloudflare AI Gateway declined on ZDR coverage |
+| [decisions/021-coming-soon-features.md](decisions/021-coming-soon-features.md) | Unbuilt features show Coming soon via one registry tied to issues; hello@ only |

@@ -1,3 +1,4 @@
+import { isLive } from "../content/features";
 import { PLANS } from "../content/site";
 
 // The magic-link page doubles as sign-up: the same link creates the account. Marketing CTAs
@@ -13,7 +14,9 @@ export function authCopy(params: Record<string, string | undefined>) {
     button: "Email me a sign-up link",
     note: "No password and no credit card. Already have an account? The same link signs you in.",
     plan: plan && plan.id !== "free"
-      ? `You picked ${plan.name} (${plan.priceLabel} ${plan.unit}). Start free, connect a project, then upgrade it from your workspace.`
+      ? isLive("paidPlans")
+        ? `You picked ${plan.name} (${plan.priceLabel} ${plan.unit}). Start free, connect a project, then upgrade it from your workspace.`
+        : `You picked ${plan.name} (${plan.priceLabel} ${plan.unit}). Paid plans are coming soon. Create your free account now and we will email you when ${plan.name} opens.`
       : undefined,
   };
 }

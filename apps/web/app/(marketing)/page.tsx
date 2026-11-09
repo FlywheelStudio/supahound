@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CardGrid, Cta, FaqList } from "../../components/marketing/Blocks";
 import { JsonLd } from "../../components/marketing/JsonLd";
+import { Soon } from "../../components/marketing/Soon";
 import { DETECTORS, HOME_FAQS, STEPS } from "../../content/home";
 import { builders } from "../../content/platforms";
 import { PLANS, SIGN_UP_PATH, SITE_DESCRIPTION } from "../../content/site";
@@ -29,7 +30,7 @@ export default function Home() {
           <Link href={SIGN_UP_PATH} className="rounded-md bg-slate-950 px-5 py-2.5 font-medium text-white hover:bg-slate-800">Start free</Link>
           <Link href="/hack-me" className="rounded-md border border-slate-300 bg-white px-5 py-2.5 font-medium hover:border-slate-500">Get a free external scan</Link>
         </div>
-        <p className="mt-3 text-sm text-slate-500">Free posture scan for up to 3 projects. No credit card.</p>
+        <p className="mt-3 text-sm text-slate-500">Early access: sign up free, no credit card. Features switch on as they ship.</p>
       </section>
 
       <section className="py-10">
@@ -48,7 +49,7 @@ export default function Home() {
           {STEPS.map((s, i) => (
             <li key={s.title} className="rounded-xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-semibold text-emerald-700">Step {i + 1}</p>
-              <p className="mt-1 font-semibold">{s.title}</p>
+              <p className="mt-1 font-semibold">{s.title}<Soon id={s.feature} /></p>
               <p className="mt-2 text-sm leading-6 text-slate-600">{s.body}</p>
             </li>
           ))}
@@ -60,14 +61,14 @@ export default function Home() {
         <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {DETECTORS.map((d) => (
             <li key={d.name} className="rounded-xl border border-slate-200 bg-white p-5">
-              <p className="font-semibold">{d.name}</p>
+              <p className="font-semibold">{d.name}<Soon id={d.feature} /></p>
               <p className="mt-2 text-sm leading-6 text-slate-600">{d.body}</p>
             </li>
           ))}
         </ul>
         <p className="mt-4 max-w-3xl text-sm text-slate-600">
-          Cross-tenant reads, service-key misuse, credential stuffing and tampering alert from day one. Behavioral
-          detectors learn your project&apos;s normal traffic for 7 days first.
+          Cross-tenant reads, service-key misuse, credential stuffing and tampering alert from day one. The scraping
+          detector learns your app&apos;s normal queries for 7 days first.
         </p>
       </section>
 

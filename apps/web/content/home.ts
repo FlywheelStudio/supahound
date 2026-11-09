@@ -1,18 +1,19 @@
+import type { FeatureId } from "./features";
 import type { Faq } from "./types";
 
-export const DETECTORS = [
-  { name: "Cross-tenant reads", body: "One signed-in user reads rows that belong to other users or teams. This is the classic broken-RLS leak." },
-  { name: "Service-key misuse", body: "Your service_role or secret key calls the API from a new network or a browser. That usually means the key leaked." },
-  { name: "Credential stuffing", body: "Bursts of failed sign-ins across many accounts from a small set of networks." },
-  { name: "Scraping and bulk export", body: "One actor pages through a table far faster, or far deeper, than your app ever does." },
-  { name: "Database tampering", body: "Unusual writes, deletes or schema changes from an actor that has never made them before." },
-] as const;
+export const DETECTORS: { name: string; body: string; feature: FeatureId }[] = [
+  { name: "Cross-tenant reads", body: "One signed-in user reads rows that belong to other users or teams. This is the classic broken-RLS leak.", feature: "crossTenant" },
+  { name: "Service-key misuse", body: "Your service_role or secret key calls the API from a new network or a browser. That usually means the key leaked.", feature: "serviceKey" },
+  { name: "Credential stuffing", body: "Bursts of failed sign-ins across many accounts from a small set of networks.", feature: "credentialStuffing" },
+  { name: "Scraping and bulk reads", body: "One actor sends a request your app never sends, such as select=* with no filter on a users table, or pages through a table far deeper than your app does.", feature: "unusualQueries" },
+  { name: "Database tampering", body: "A write to a column your app never writes, such as role, is_admin, plan or credits. That is how privilege escalation looks.", feature: "sensitiveWrites" },
+];
 
-export const STEPS = [
-  { title: "Connect read-only", body: "Sign in with a magic link and connect your Supabase org with OAuth. Supahound asks for analytics:read and database:read only. It never sees your service-role key." },
-  { title: "Get a posture scan", body: "Supahound checks RLS coverage, Security Advisor findings, views without security_invoker and newly exposed tables. The scan is free." },
-  { title: "Get told when it happens", body: "On a paid plan, Supahound reads your edge logs every 1–2 minutes, groups suspicious requests into incidents and emails you what happened and the SQL to fix it." },
-] as const;
+export const STEPS: { title: string; body: string; feature: FeatureId }[] = [
+  { feature: "supabaseConnect", title: "Connect read-only", body: "Sign in with a magic link and connect your Supabase org with OAuth. Supahound asks for analytics:read and database:read only. It never sees your service-role key." },
+  { feature: "postureScan", title: "Get a posture scan", body: "Supahound checks RLS coverage, Security Advisor findings, views without security_invoker and newly exposed tables. The scan is free." },
+  { feature: "crossTenant", title: "Get told when it happens", body: "On a paid plan, Supahound reads your edge logs every 1–2 minutes, groups suspicious requests into incidents and emails you what happened and the SQL to fix it." },
+];
 
 export const HOME_FAQS: Faq[] = [
   {

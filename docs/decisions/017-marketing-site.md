@@ -21,7 +21,7 @@ external scan ("hack me", decision 016). Erik made four calls on 2026-11-08.
    funnel ships. It describes only what decision 016 allows: DNS-TXT proof, apex scope, passive
    checks.
 4. **Legal.** The contracting party is Flywheel Studio LLC under Texas law; contact
-   legal@flywheel.so. The privacy policy and terms need a lawyer's review before launch.
+   legal@flywheel.so (superseded by decision 021: hello@flywheel.so only).
 5. **Code location.** The pages are a `(marketing)` route group in `apps/web`, with content as
    typed TypeScript in `apps/web/content/`. No CMS, analytics, font host or other new service.
 6. **Middleware.** A GET or HEAD to an allowlisted public path (`isPublicMarketingPath` in

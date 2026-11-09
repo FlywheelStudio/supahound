@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Breadcrumbs, Cta, FaqList, PageHead } from "../../../components/marketing/Blocks";
 import { JsonLd } from "../../../components/marketing/JsonLd";
+import { Soon } from "../../../components/marketing/Soon";
 import { SIGN_UP_PATH, SITE_UPDATED } from "../../../content/site";
 import type { Faq } from "../../../content/types";
 import { breadcrumbLd, faqLd, pageMetadata } from "../../../lib/seo";
@@ -50,7 +51,7 @@ export default function HackMe() {
       />
       <div className="mt-8 flex flex-wrap items-center gap-3">
         <Link href={SIGN_UP_PATH} className="rounded-md bg-slate-950 px-5 py-2.5 font-medium text-white hover:bg-slate-800">Create a free account to scan</Link>
-        <p className="text-sm text-slate-600">The scan is in development. Create your account now and the scan shows up in it at launch.</p>
+        <p className="text-sm text-slate-600"><Soon id="hackMeScan" className="ml-0 mr-2" />The scan is in development. Create your account now and the scan shows up in it at launch.</p>
       </div>
 
       <section className="mt-16 max-w-3xl">

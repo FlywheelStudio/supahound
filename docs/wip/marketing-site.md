@@ -67,22 +67,31 @@ llms.txt, og.png.
 
 ## Before launch
 
-- Lawyer review of `content/legal.ts` (privacy policy and terms).
-- Build the 30-day incident retention job the privacy policy promises, or change the policy.
-- Confirm the inboxes `hello@flywheel.so` and `legal@flywheel.so` exist.
+Every unbuilt feature shows "Coming soon" (decision 021, `content/features.ts`). Each ships through
+its own issue and flips its status to `live` in that PR:
+
+| Feature | Issues |
+| --- | --- |
+| Read-only connect, project picker | #4, #9 |
+| Posture scan | #11 |
+| Cross-tenant and service-key detectors live | #5 |
+| Credential stuffing, scraping, tampering detectors | #14, #12, #13 |
+| Incident summaries (live model call) | #6 |
+| Email alerts, webhook alerts, weekly digest | #16, #17, #22 |
+| 30-day incident history | #44 |
+| Agency dashboard, client reports | #23, #31 |
+| Paid plans | #25 |
+| Hack me scan | #42 |
+| Data controls (privacy policy promises) | #43 |
+
 - Re-check competitor prices and platform facts every quarter; each page shows its check date.
-- The /hack-me CTA goes to sign-up until the scan funnel ships (decision 016).
-- The copy describes the V1 product. STATE.md still lists the posture scan, detectors 1, 3 and 5,
-  webhook alerts, the weekly digest and Stripe billing as backlog. Ship them before deploy, or
-  reframe the pages as early access.
-- The privacy policy also promises account deletion within 30 days, a disconnect flow and notice
-  before a new subprocessor. Confirm each exists before launch.
+
+- 2026-11-09: Erik: hello@flywheel.so only; mark unbuilt features Coming soon; privacy promises
+  become a to-do feature. Issues #40 (this feature), #42 (hack me), #43 (data controls), #44
+  (incident history) created; the rest already existed. Decision 021.
 
 ## Open questions
 
 - Legal review of the privacy policy and terms before launch.
 - The PR targets `develop` (it now exists). Commit 276b883 (decision 018, from another session)
   sits on this branch; Erik decides whether it moves to feature/scan-funnel before the push.
-- Confirm `hello@flywheel.so` and `legal@flywheel.so` exist (`content/site.ts`).
-- The privacy policy promises incident deletion after the plan's 30-day history. No retention job
-  exists yet; build one before launch or change the policy.

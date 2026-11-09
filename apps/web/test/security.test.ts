@@ -51,6 +51,7 @@ describe("authCopy", () => {
     expect(authCopy({}).heading).toBe("Sign in to Supahound");
     expect(authCopy({ signup: "1" }).heading).toBe("Create your free Supahound account");
     expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("$29");
+    expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("coming soon");
     expect(authCopy({ signup: "1", plan: "free" }).plan).toBeUndefined();
     expect(authCopy({ plan: "nope" }).heading).toBe("Sign in to Supahound");
   });
