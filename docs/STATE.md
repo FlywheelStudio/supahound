@@ -1,6 +1,6 @@
 # State
 
-Updated 2026-11-09. The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
+Updated 2026-11-10. The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
 grouped by [milestone](https://github.com/FlywheelStudio/supahound/milestones) (decision 019).
 This file tracks only what is in progress and what is done.
 
@@ -8,7 +8,7 @@ This file tracks only what is in progress and what is done.
 
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
-| Public release (fair source, FSL-1.1-ALv2) | #63–#68 | Audit, site split, self-hosting and public files in PR #69; rehearsal and publish next | OAuth app (#4), live database (#8), legal review of `CLA.md`, Erik approves #68 | [wip/public-release.md](wip/public-release.md) |
+| Public release (fair source, FSL-1.1-ALv2) | #63–#68 | Audit, site split, self-hosting and public files merged (PR #69, 2026-11-10); rehearsal (#67) and publish (#68) next | OAuth app (#4), live database (#8), legal review of `CLA.md`, Erik approves #68 | [wip/public-release.md](wip/public-release.md) |
 | Scan funnel (hackme.si) | #51 | Authorization backbone built (DNS-TXT verify, scope guard, 5-table data model); repositories + passive checks + web funnel next | Legal review before any active-scan milestone | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
