@@ -55,6 +55,10 @@ export interface ProjectRecord {
   connectionId: ConnectionId;
   supabaseRef: string;
   ownership: OwnershipMap;
+  // The last successful read of the project's RLS policies; null = never loaded (decision 024).
+  ownershipRefreshedAt: Date | null;
+  ownershipAttemptedAt: Date | null;
+  ownershipError: string | null;
   expectedAsns: number[];
   paused: boolean;
 }
@@ -62,8 +66,10 @@ export interface ProjectRecord {
 export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRecord | null> {
   const rows = await tx.query<{
     connection_id: string; supabase_ref: string; ownership: OwnershipMap; expected_asns: number[]; paused: boolean;
+    ownership_refreshed_at: Date | null; ownership_attempted_at: Date | null; ownership_error: string | null;
   }>(
-    `SELECT connection_id, supabase_ref, ownership, expected_asns, paused
+    `SELECT connection_id, supabase_ref, ownership, expected_asns, paused,
+            ownership_refreshed_at, ownership_attempted_at, ownership_error
      FROM supahound.projects WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, id],
   );
@@ -74,14 +80,49 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
     connectionId: connectionId(r.connection_id),
     supabaseRef: r.supabase_ref,
     ownership: r.ownership,
+    ownershipRefreshedAt: r.ownership_refreshed_at,
+    ownershipAttemptedAt: r.ownership_attempted_at,
+    ownershipError: r.ownership_error,
     expectedAsns: r.expected_asns,
     paused: r.paused,
   };
 }
 
-export async function setOwnership(tx: TenantTx, id: ProjectId, ownership: OwnershipMap): Promise<void> {
-  await tx.query("UPDATE supahound.projects SET ownership = $3 WHERE tenant_id = $1 AND id = $2", [
-    tx.tenantId, id, JSON.stringify(ownership),
+// Stores a loaded ownership map. A hand-set map (CLI, tests) counts as a successful load too.
+export async function setOwnership(tx: TenantTx, id: ProjectId, ownership: OwnershipMap, at: Date = new Date()): Promise<void> {
+  await tx.query(
+    `UPDATE supahound.projects
+     SET ownership = $3, ownership_refreshed_at = $4, ownership_attempted_at = $4, ownership_error = NULL
+     WHERE tenant_id = $1 AND id = $2`,
+    [tx.tenantId, id, JSON.stringify(ownership), at],
+  );
+}
+
+// Claims a policies refresh when one is due: never attempted, the last success older than
+// refreshSeconds, or the last failure older than retrySeconds. The conditional update takes the
+// row lock, so two workers never both refresh.
+export async function claimOwnershipRefresh(
+  tx: TenantTx,
+  id: ProjectId,
+  now: Date,
+  intervals: { refreshSeconds: number; retrySeconds: number },
+): Promise<boolean> {
+  const rows = await tx.query(
+    `UPDATE supahound.projects SET ownership_attempted_at = $3
+     WHERE tenant_id = $1 AND id = $2
+       AND (ownership_attempted_at IS NULL
+            OR ownership_attempted_at <= $3::timestamptz - make_interval(secs =>
+                 CASE WHEN ownership_error IS NULL THEN $4::double precision ELSE $5::double precision END))
+     RETURNING id`,
+    [tx.tenantId, id, now, intervals.refreshSeconds, intervals.retrySeconds],
+  );
+  return rows.length === 1;
+}
+
+// A failed refresh keeps the last good map; only the error code changes.
+export async function failOwnershipRefresh(tx: TenantTx, id: ProjectId, errorCode: string): Promise<void> {
+  await tx.query("UPDATE supahound.projects SET ownership_error = $3 WHERE tenant_id = $1 AND id = $2", [
+    tx.tenantId, id, errorCode,
   ]);
 }
 
@@ -150,13 +191,18 @@ export async function startPollRun(tx: TenantTx, id: ProjectId, window: { start:
 export async function finishPollRun(
   tx: TenantTx,
   runId: string,
-  result: { status: "ok" | "unable_to_assess"; errorCode?: string; templates?: number; findings?: number },
+  result: {
+    status: "ok" | "unable_to_assess"; errorCode?: string; templates?: number; findings?: number;
+    // Detectors this run could not check (decision 024). Meaningful on "ok" runs only.
+    unassessedDetectors?: Finding["detector"][];
+  },
 ): Promise<void> {
   await tx.query(
     `UPDATE supahound.poll_runs
-     SET status = $3, error_code = $4, templates = $5, findings = $6, finished_at = now()
+     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
-    [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null],
+    [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null,
+      result.unassessedDetectors ?? []],
   );
 }
 
@@ -280,14 +326,29 @@ export interface ProjectSummary {
   lastPolledAt: Date | null;
   openIncidents: number;
   lastRunStatus: "running" | "ok" | "unable_to_assess" | null;
+  // Detector 2 coverage (decision 024): "unable_to_assess" when the latest finished run lists it as
+  // unassessed; "no_owned_tables" when the policies loaded but scope no table to an owner.
+  crossTenant: "assessed" | "unable_to_assess" | "no_owned_tables" | null;
+}
+
+function crossTenantCoverage(lastUnassessed: string[] | null, loaded: boolean, empty: boolean): ProjectSummary["crossTenant"] {
+  if (lastUnassessed?.includes("cross_tenant")) return "unable_to_assess";
+  if (loaded && empty) return "no_owned_tables";
+  return lastUnassessed === null ? null : "assessed";
 }
 
 export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
   const rows = await tx.query<{
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
+    last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean;
   }>(
     `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at,
+            p.ownership_refreshed_at IS NOT NULL AS ownership_loaded,
+            p.ownership = '{}'::jsonb AS ownership_empty,
+            (SELECT r.unassessed_detectors FROM supahound.poll_runs r
+              WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id AND r.status = 'ok'
+              ORDER BY r.started_at DESC LIMIT 1) AS last_unassessed,
             (SELECT count(*)::int FROM supahound.incidents i
               WHERE i.tenant_id = p.tenant_id AND i.project_id = p.id AND i.status = 'open') AS open_incidents,
             (SELECT r.status FROM supahound.poll_runs r
@@ -298,6 +359,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
   return rows.map((r) => ({
     id: projectId(r.id), name: r.name, supabaseRef: r.supabase_ref, paused: r.paused,
     lastPolledAt: r.last_polled_at, openIncidents: r.open_incidents, lastRunStatus: r.last_run_status,
+    crossTenant: crossTenantCoverage(r.last_unassessed, r.ownership_loaded, r.ownership_empty),
   }));
 }
 

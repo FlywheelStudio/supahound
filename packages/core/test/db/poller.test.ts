@@ -71,6 +71,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
         logCalls.push({ token: o.token, ref: q.projectRef, start: q.start, end: q.end });
         return behaviour[o.token]!(q);
       },
+      queryPolicies: async () => { throw new Error("queryPolicies called: ownership was hand-set"); },
       explain: async (f: IncidentFeatures): Promise<ExplainResult> => {
         explained.push(f);
         return { explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] };

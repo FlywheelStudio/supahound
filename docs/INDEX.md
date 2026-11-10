@@ -8,6 +8,7 @@
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
 | [features/marketing-site.md](features/marketing-site.md) | Marketing site: pages, content model, SEO/AEO, middleware allowlist, Coming soon registry, tests |
+| [wip/ownership-refresh.md](wip/ownership-refresh.md) | Ownership refresh (#10): RLS policies read in the poll, detector 2 coverage states |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
