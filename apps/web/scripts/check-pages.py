@@ -1,4 +1,4 @@
-# End-to-end check of every public page on a running build (see docs/wip/marketing-site.md).
+# End-to-end check of every public page on a running build (see docs/features/marketing-site.md).
 # Usage: python3 -I scripts/check-pages.py [base-url] [extra paths that must also pass...]
 
 import json, re, sys, urllib.request
