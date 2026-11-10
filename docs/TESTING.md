@@ -44,6 +44,10 @@ Nothing calls a real Supabase, Stripe or model API. UAT-W5 stops the browser at
 `api.supabase.com` with a route stub. UAT-W8 runs core's real `pollProject` against synthetic
 rollup rows, with the template explainer in place of the model.
 
+Before a test clicks a link right after `page.goto` or `page.reload`, call `settled(page)`
+(`e2e/support/session.ts`). Those calls return at the load event, but vinext's `<Link>` imports its
+navigation module on the first click, and a click in that window was lost once (UAT-W14, #70).
+
 First run on a new machine: `pnpm --filter @supahound/web exec playwright install chromium-headless-shell`.
 Set `E2E_DEBUG=1` to print the wrangler output.
 

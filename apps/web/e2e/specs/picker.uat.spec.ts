@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { adminQuery, managementCalls, pollAttack, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
-import { signIn, tenantFromUrl, uniqueEmail, WORKSPACE_URL } from "../support/session";
+import { settled, signIn, tenantFromUrl, uniqueEmail, WORKSPACE_URL } from "../support/session";
 
 // UAT for the project picker (issue #9): connect → pick → watched, members, removal, Supabase errors.
 // The Worker calls a fake Management API (support/fakeManagement.ts); Postgres and RLS are real.
@@ -33,6 +33,7 @@ test.describe("UAT: choose the projects Supahound watches", () => {
   test("UAT-W11 the owner picks a project and sees it waiting for its first poll", async ({ page }) => {
     const { tenant } = await ownerWithConnection(page, "w11");
     await page.reload();
+    await settled(page);
     await page.getByRole("link", { name: "Choose projects" }).click();
     await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
 
@@ -116,7 +117,10 @@ test.describe("UAT: choose the projects Supahound watches", () => {
     expect(auditBefore).toBeGreaterThan(0);
 
     await page.goto(`/w/${tenant}/projects`);
+    await settled(page);
     await page.getByRole("link", { name: "Remove Client app" }).click();
+    // If this fails again: a URL without ?remove= means the click was lost; with it, the render was slow.
+    await expect(page).toHaveURL(new RegExp(`/w/${tenant}/projects\\?remove=${id}$`));
     await expect(page.getByRole("heading", { name: "Remove Client app?" })).toBeVisible();
     await expect(page.getByText(/permanently deletes its incidents, findings and poll history/)).toBeVisible();
 
