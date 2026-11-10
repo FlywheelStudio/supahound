@@ -143,7 +143,8 @@ Set `EMAIL_FROM_ADDRESS` (an address on that domain) and `EMAIL_FROM_NAME` in
 
 In the Supabase org that will own the app: Settings → OAuth Apps → add an app.
 
-- Scopes: `analytics:read` and `database:read` only.
+- Scopes: `analytics:read` (edge logs), `database:read` (the RLS policies) and `projects:read`
+  (the project picker lists your projects; decision 023). All three are read-only. Ask for no others.
 - Redirect URI: `<APP_URL>/api/supabase/callback`.
 
 Put the client ID in both `wrangler.jsonc` files as `SUPABASE_OAUTH_CLIENT_ID`.
