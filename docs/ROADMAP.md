@@ -29,7 +29,7 @@ Its gate: legal review before any active-scan work.
 | Supabase OAuth connect, multi-project | Connect built; project picker not built | #4, #9 |
 | Posture scan | Not built | #11 |
 | Detector 1: query fingerprinting | Not built | #12 |
-| Detector 2: cross-tenant access | Built, 127 tests at prototype; live run pending | #3, #5 |
+| Detector 2: cross-tenant access | Built; ownership refreshes from RLS policies in the poll (#10); live run pending | #3, #5, #10 |
 | Detector 3: sensitive-column writes | Not built | #13 |
 | Detector 4: service-role misuse | Built; live run pending | #3, #5 |
 | Detector 5: credential stuffing | Not built | #14 |

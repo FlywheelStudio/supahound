@@ -70,10 +70,14 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    counted twice. A log that lands more than 120 s late is missed.
 3. **Token.** The vault opens the connection's sealed OAuth token. The poller refreshes it under the
    connection's row lock when it is near expiry.
+   **Ownership.** On the first poll, then every 24 hours (1 hour after a failure), the poller audits
+   and runs `POLICIES_SQL` on the read-only SQL endpoint and stores the owner columns (decision 024).
+   A failed read keeps the last good map and never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
-   Detector 2 checks cross-tenant access. Detector 4 checks service-role misuse.
+   Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
+   run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
@@ -120,8 +124,8 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `tenants` | One Supahound account (an agency or a builder) |
 | `memberships` | Supabase Auth user → tenant, with role owner / admin / member |
 | `connections` | One Supabase OAuth grant; sealed token |
-| `projects` | One watched Supabase project; ownership map; paused flag |
-| `poll_runs` | One poll: window, status, error code |
+| `projects` | One watched Supabase project; ownership map and when it last loaded; paused flag |
+| `poll_runs` | One poll: window, status, error code, detectors it could not check |
 | `findings` | Detector output: structured evidence only |
 | `incidents` | Grouped findings per actor; severity, hits, summary and its source |
 | `service_role_networks` | Learned server ASNs per project (decision 003) |

@@ -12,13 +12,13 @@ This file tracks only what is in progress and what is done.
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Tenant isolation (storage, vault, poller) | #8 | Built; Cloudflare poller done; needs a live database | Supahound's Supabase project + Hyperdrive | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
-| Ownership refresh (RLS policies → detector 2) | #10 | Building: read-only SQL client, refresh in the poll, coverage states | None for the build; live check needs the OAuth app (#4) | [wip/ownership-refresh.md](wip/ownership-refresh.md) |
 | Web app: auth, onboarding, dashboard | #9 | Sign-in, workspace, overview, OAuth connect built; E2E in CI; project picker next | Supahound's Supabase project, OAuth app, email domain | [wip/web-app.md](wip/web-app.md) |
 
 ## Completed
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
+| Ownership refresh: RLS policies read in the poll, detector 2 coverage states | #10 | 2026-11-09, PR into `develop` | [features/ownership-refresh.md](features/ownership-refresh.md), decision 024 |
 | GitHub workflow: CI, templates, labels, milestones, issues, E2E + UAT, project docs (chore, no feature doc) | #2 | 2026-11-09, PR #1 into `develop` | [WORKFLOW.md](WORKFLOW.md), [TESTING.md](TESTING.md), decisions 019 and 020 |
 | Marketing site (supahound.com): 62 pages, SEO/AEO, Coming soon registry | #34, #40 | 2026-11-09, PRs #45 and #53 into `develop` | [features/marketing-site.md](features/marketing-site.md), decisions 017 and 021 |
 

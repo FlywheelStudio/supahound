@@ -11,8 +11,9 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Built: Supabase OAuth connect. "Connect Supabase" (owners and admins) → Supabase consent →
   `/api/supabase/callback` → sealed credentials on a new connection. The poller refreshes tokens
   under the connection's row lock.
-- **Next step:** the project picker (list the connection's projects through the Management API,
-  create `projects` rows, load ownership from `pg_policies`). Then Stripe, then alert email.
+- Built: ownership refresh (#10): the poller loads `pg_policies` on a project's first poll; the
+  overview shows detector 2 coverage ([feature doc](../features/ownership-refresh.md)).
+- **Next step:** the project picker (#9, PR #61). Then Stripe (#25), then alert email (#16).
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
   need Supahound's Supabase project and a Hyperdrive config.
 
