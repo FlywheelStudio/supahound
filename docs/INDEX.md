@@ -6,6 +6,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System diagram, packages, one poll step by step, isolation layers, data model |
 | [ROADMAP.md](ROADMAP.md) | Phases, gates, milestones, V1 scope status with issue links |
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
+| [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |

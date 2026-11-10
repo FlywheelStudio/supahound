@@ -1,8 +1,8 @@
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Finding } from "../src/detectors/finding.js";
 import { buildFeatures, type IncidentFeatures } from "../src/explainer/features.js";
-import { explainIncident, FALLBACK_MODEL, PRIMARY_MODEL } from "../src/explainer/llm.js";
+import { explainerFor, explainIncident, FALLBACK_MODEL, PRIMARY_MODEL } from "../src/explainer/llm.js";
 import { templateExplanation } from "../src/explainer/template.js";
 import { validateExplanation } from "../src/explainer/validate.js";
 import type { Incident } from "../src/incidents/incident.js";
@@ -206,5 +206,29 @@ describe("explainIncident over the real gateway client", () => {
       expect(JSON.parse(call.body).providerOptions?.gateway?.zeroDataRetention).toBe(true);
       expect(call.body).not.toContain(ALICE);
     }
+  });
+});
+
+// Self-hosting without a model key (decision 025): the poller must not call any model.
+describe("explainerFor", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([undefined, "", "   "])("uses template text and makes no request when the key is %j", async (key) => {
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 500 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const r = await explainerFor(key)(features);
+    expect(r).toEqual({ explanation: templateExplanation(features), source: "template", model: null, zdrConfirmed: null, attempts: [] });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("calls the gateway when a key is set", async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ error: { message: "stub", type: "internal_server_error" } }), {
+      status: 500, headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const r = await explainerFor("test-key")(features);
+    expect(r.source).toBe("template");
+    expect(r.attempts.length).toBeGreaterThan(0);
+    expect(fetchSpy).toHaveBeenCalled();
   });
 });

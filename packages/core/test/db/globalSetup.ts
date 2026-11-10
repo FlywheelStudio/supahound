@@ -22,7 +22,7 @@ declare module "vitest" {
   }
 }
 
-function pgBin(): string | null {
+export function pgBin(): string | null {
   const candidates = [
     process.env.SUPAHOUND_PG_BIN,
     "/opt/homebrew/opt/postgresql@17/bin",

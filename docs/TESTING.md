@@ -56,6 +56,18 @@ Prove a new rule can fail: commit a planted secret in a scratch clone and see th
 2026-11-10 every custom rule fired on its planted secret, a placeholder URL
 (`postgres://postgres:postgres@…`) did not, and the real history had no findings (decision 025).
 
+### Self-hosting checks
+
+- `packages/core/test/db/loginUsers.test.ts` (5, Postgres) runs `supabase/setup/login-users.sql`
+  with the real `psql`: short passwords refused, no superuser or BYPASSRLS, one role each, RLS
+  still applies, the scheduler keeps only its column grants, a second run is safe.
+- `packages/core/test/vault.test.ts`, `newMasterKeys` (4): the vault accepts a new key, rotation
+  keeps old tokens readable.
+- `packages/core/test/explainer.test.ts`, `explainerFor` (4): no key (or a blank one) means
+  template text and no HTTP request.
+- Mutations on record (2026-11-10): BYPASSRLS granted → 1 fails; the wrong role granted → 2 fail;
+  rotation drops the old keys → 1 fails; a blank key treated as a key → 2 fail.
+
 ## Rules
 
 - Every feature ships with tests. Each acceptance criterion in its issue maps to a test or to a
