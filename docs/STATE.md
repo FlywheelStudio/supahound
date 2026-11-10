@@ -9,7 +9,7 @@ This file tracks only what is in progress and what is done.
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
 | Public release (fair source, FSL-1.1-ALv2) | #63–#68 | Public since 2026-11-10 (#68): ruleset, secret scanning and private reporting on; rehearsal (#67) next | OAuth app (#4), live database (#8), legal review of `CLA.md` and `LICENSE.md` | [wip/public-release.md](wip/public-release.md) |
-| Scan funnel (hackme.si) | #51 | Authorization backbone built (DNS-TXT verify, scope guard, 5-table data model); repositories + passive checks + web funnel next | Legal review before any active-scan milestone | [wip/scan-funnel.md](wip/scan-funnel.md) |
+| Scan funnel (hackme.si) | #51, #74 | Authorization backbone built; secrets scanner built (client code, source maps, leak paths, decision 026); repositories + other passive checks + web funnel next | Legal review before any active-scan milestone and before the leak-path probe goes public | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Tenant isolation (storage, vault, poller) | #8 | Built; Cloudflare poller done; needs a live database | Supahound's Supabase project + Hyperdrive | [wip/tenant-isolation.md](wip/tenant-isolation.md) |

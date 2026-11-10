@@ -12,7 +12,7 @@
 | [features/ownership-refresh.md](features/ownership-refresh.md) | Ownership refresh (#10): RLS policies read in the poll, detector 2 coverage states, tests |
 | [features/project-picker.md](features/project-picker.md) | Project picker (#9): pick and remove watched projects, Management API client, tests |
 | [wip/public-release.md](wip/public-release.md) | Public release: what PR #69 did, the rehearsal and the publish steps left |
-| [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
+| [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone and secrets scanner built, other passive checks + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
 | [wip/tenant-isolation.md](wip/tenant-isolation.md) | Multi-tenant storage, RLS, token vault, poller |
@@ -42,3 +42,4 @@
 | [decisions/023-oauth-scope-projects-read.md](decisions/023-oauth-scope-projects-read.md) | OAuth adds read-only `projects:read` for the project picker (amends 012) |
 | [decisions/024-ownership-refresh-and-detector-coverage.md](decisions/024-ownership-refresh-and-detector-coverage.md) | Ownership refreshes in the poll every 24 h; detector 2 coverage has three states |
 | [decisions/025-public-release-fsl.md](decisions/025-public-release-fsl.md) | Public repo under FSL-1.1-ALv2 (fair source), short CLA, marketing site to a private repo |
+| [decisions/026-scan-secrets-leak-paths.md](decisions/026-scan-secrets-leak-paths.md) | Scan funnel secrets scanner: client code plus a fixed leak-path list; scope on every hop; no secret in evidence (amends 016) |

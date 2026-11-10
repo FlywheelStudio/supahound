@@ -49,3 +49,5 @@ decisions fix the shape:
 - The denylist is defence in depth behind DNS verification, and is meant to grow from config.
 - Legal review of the active-scan ToS is still required before any active milestone ships (PRD,
   Open questions). This decision covers the funnel and passive checks only.
+- [Decision 026](026-scan-secrets-leak-paths.md) amends point 3: the secrets scanner also probes a
+  fixed list of leak paths (`/.env`, `/.git/config`, ...). Legal review should cover that probe too.
