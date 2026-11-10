@@ -112,9 +112,10 @@ the passwords.
 
 ### 4. Hyperdrive
 
-Use the Supabase **session pooler** (Settings → Database → Connection string → Session pooler):
-host `aws-0-<region>.pooler.supabase.com`, port 5432. On the pooler the user name carries the
-project ref: `supahound_app_login.<ref>`. The direct host `db.<ref>.supabase.co` has an IPv6
+Use the Supabase **session pooler**. Copy its host from the dashboard (Connect → Session
+pooler), for example `aws-0-eu-west-1.pooler.supabase.com`, port 5432. The prefix (`aws-0`,
+`aws-1`) differs between projects, and the wrong one answers "tenant/user not found". On the
+pooler the user name carries the project ref: `supahound_app_login.<ref>`. The direct host `db.<ref>.supabase.co` has an IPv6
 address only. Never use the transaction pooler (port 6543): the app sets the tenant per
 transaction, and Hyperdrive already pools.
 
