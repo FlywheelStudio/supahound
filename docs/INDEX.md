@@ -43,3 +43,4 @@
 | [decisions/024-ownership-refresh-and-detector-coverage.md](decisions/024-ownership-refresh-and-detector-coverage.md) | Ownership refreshes in the poll every 24 h; detector 2 coverage has three states |
 | [decisions/025-public-release-fsl.md](decisions/025-public-release-fsl.md) | Public repo under FSL-1.1-ALv2 (fair source), short CLA, marketing site to a private repo |
 | [decisions/026-scan-secrets-leak-paths.md](decisions/026-scan-secrets-leak-paths.md) | Scan funnel secrets scanner: client code plus a fixed leak-path list; scope on every hop; no secret in evidence (amends 016) |
+| [decisions/027-hosted-deploy-config-private.md](decisions/027-hosted-deploy-config-private.md) | Flywheel's hosted deploy config in a private repo; public `wrangler.jsonc` files stay templates; deploys from a fresh clone |
