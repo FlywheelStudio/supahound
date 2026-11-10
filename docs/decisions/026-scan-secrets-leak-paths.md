@@ -1,5 +1,7 @@
 # 026: The scan funnel's secrets scanner reads client code and probes a fixed list of leak paths
 
+Amends [016](016-scan-funnel.md).
+
 Date: 2026-11-10
 
 ## Context

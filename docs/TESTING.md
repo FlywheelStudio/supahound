@@ -156,5 +156,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | Only a service_role JWT is a finding (#74) | The JWT rule drops its `role` check | 3 unit tests fail |
 | Redirect hops pass the scope guard (#74) | `scopedGet` follows `Location` without `scannableUrl` | 2 unit tests fail |
 | A leak path must answer at its own path (#74) | `probeLeakPaths` drops the same-path check | 1 unit test fails |
+| An npmrc needs a known key (#74) | `leakShape` drops the known-key check | 1 unit test fails |
+| Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

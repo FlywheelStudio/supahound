@@ -431,23 +431,27 @@ export const LEAK_PATHS: readonly { path: string; kind: LeakKind }[] = [
   { path: "/.aws/credentials", kind: "aws-credentials" },
 ];
 
-const ENV_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.]*)\s*=/;
-const NPMRC_LINE = /^\s*([^#;\s=][^=]*?)\s*=/;
+const ENV_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.]{0,63})\s*=/;
+// An npmrc key, optionally scoped to a registry (`//registry.npmjs.org/:_authToken`) or a package
+// scope (`@acme:registry`). Only the last segment is kept, and only when it is a plain identifier.
+const NPMRC_LINE = /^\s*(?:\/\/[^\s=]+:|@[a-z0-9._-]+:)?([A-Za-z_][A-Za-z0-9_-]{0,63})\s*=/;
+const NPMRC_KNOWN_KEY = /^(?:registry|_authToken|_auth|_password|always-auth)$/;
 
 function meaningfulLines(text: string): string[] {
   return text.split(/\r?\n/).filter((l) => l.trim() !== "" && !/^\s*[#;]/.test(l));
 }
 
-// The key names of a KEY=VALUE file, or null when most lines are not KEY=VALUE. Values are dropped.
+// The key names of a KEY=VALUE file, or null when fewer than four in five lines are KEY=VALUE.
+// Values are dropped; a name is a plain identifier, so free text never reaches evidence.
 export function keyValueNames(text: string, line: RegExp): string[] | null {
   const lines = meaningfulLines(text);
   if (lines.length === 0) return null;
   const names: string[] = [];
   for (const l of lines) {
     const m = line.exec(l);
-    if (m) names.push(m[1]!.slice(0, 64));
+    if (m) names.push(m[1]!);
   }
-  return names.length > 0 && names.length * 2 >= lines.length ? names : null;
+  return names.length > 0 && names.length * 5 >= lines.length * 4 ? names : null;
 }
 
 interface LeakShape {
@@ -464,10 +468,9 @@ export function leakShape(kind: LeakKind, text: string): LeakShape | null {
   switch (kind) {
     case "env":
     case "npmrc": {
-      const names = keyValueNames(text, kind === "env" ? ENV_LINE : NPMRC_LINE);
-      if (!names) return null;
-      // npmrc keys hold registry URLs; keep only the part after the last colon (`_authToken`).
-      const keys = kind === "npmrc" ? names.map((n) => n.split(":").pop()!.slice(0, 64)) : names;
+      const keys = keyValueNames(text, kind === "env" ? ENV_LINE : NPMRC_LINE);
+      if (!keys) return null;
+      if (kind === "npmrc" && !keys.some((k) => NPMRC_KNOWN_KEY.test(k))) return null;
       return {
         severity: "high",
         evidence: { keyCount: keys.length, keyNames: [...new Set(keys)].slice(0, 50) },
@@ -522,6 +525,8 @@ export async function probeLeakPaths(targetUrl: string, verifiedApex: string, op
     }
     result.fetched.push(reportUrl(url));
     if (doc.status !== 200 || new URL(doc.url).pathname !== path || isHtml(doc.contentType, doc.text)) continue;
+    // A secret is a finding even when the file's shape is unusual; the file finding needs the shape.
+    findings.addSecrets(matchSecrets(doc.text), url, "leak-path");
     const shape = leakShape(kind, doc.text);
     if (!shape) continue;
     findings.addFile({
@@ -532,7 +537,6 @@ export async function probeLeakPaths(targetUrl: string, verifiedApex: string, op
       fix: shape.fix,
       supahoundMonitor: null,
     });
-    findings.addSecrets(matchSecrets(doc.text), url, "leak-path");
   }
 
   return { findings: findings.list(), ...result };

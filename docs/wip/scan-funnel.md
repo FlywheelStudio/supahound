@@ -57,7 +57,7 @@ Erik asked for a secrets scanner and chose to probe leak paths as well as client
       `supahoundMonitor`). Supabase key findings map to the `service_role_misuse` monitor.
   - Evidence holds the rule id, a 12-hex SHA-256 fingerprint, the last 4 characters, the offset and
     an occurrence count. An exposed `.env` gives key names only. Endpoints drop query strings.
-  - Tests: `test/scanSecrets.test.ts`, 86 tests. Every rule has a positive sample and a near miss.
+  - Tests: `test/scanSecrets.test.ts`, 103 tests. Every rule has a positive sample and a near miss; two tests enforce that coverage.
     Fake keys come from a seeded generator, so gitleaks stays clean (local `gitleaks dir`: no leaks).
     Mutations are on record in TESTING.md.
 - Problems solved: the first test generator multiplied past 2^53, so its low bits collapsed and the

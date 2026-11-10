@@ -61,22 +61,34 @@ const POSITIVES: [string, string][] = [
   ["sendgrid-api-key", join("SG", ".", rand(22), ".", rand(43))],
 ];
 
-// Strings one step away from a real key. Each must produce no finding.
-const NEAR_MISSES: [string, string][] = [
-  ["anon JWT", ANON],
-  ["JWT without a role", jwt({ iss: "supabase", ref: REF })],
-  ["publishable Supabase key", join("sb", "_publishable_", rand(32))],
-  ["Stripe publishable key", join("pk", "_live_", rand(32))],
-  ["short Stripe key", join("sk", "_live_", rand(10))],
-  ["placeholder Stripe key", join("sk", "_live_", "x".repeat(24))],
-  ["repeated-character key", join("sk", "_live_", "ab".repeat(16))],
-  ["documented placeholder", join("sk", "_live_", "your_", rand(24))],
-  ["access token with 39 hex", join("sb", "p_", hex(39))],
-  ["lowercase AWS key", join("ak", "ia", upper(16).toLowerCase())],
-  ["postgres URL with a default password", join("postgres", "://postgres:", "postgres", "@localhost:5432/db")],
-  ["postgres URL without a password", join("postgres", "://postgres@localhost:5432/db")],
-  ["public key block", join("-----BEGIN ", "PUBLIC KEY-----\n", rand(64), "\n-----END ", "PUBLIC KEY-----")],
-  ["Anthropic prefix without a body", join("sk", "-ant-api03-", rand(20))],
+// Strings one step away from a real key, keyed by the rule they test. Each must produce no finding.
+const NEAR_MISSES: [string, string, string][] = [
+  ["supabase-service-role-key", "anon JWT", ANON],
+  ["supabase-service-role-key", "JWT without a role", jwt({ iss: "supabase", ref: REF })],
+  ["supabase-secret-key", "publishable Supabase key", join("sb", "_publishable_", rand(32))],
+  ["supabase-secret-key", "secret key one short", join("sb", "_secret_", rand(19))],
+  ["supabase-access-token", "access token with 39 hex", join("sb", "p_", hex(39))],
+  ["postgres-url-with-password", "postgres URL with a default password", join("postgres", "://postgres:", "postgres", "@localhost:5432/db")],
+  ["postgres-url-with-password", "postgres URL without a password", join("postgres", "://postgres@localhost:5432/db")],
+  ["private-key", "public key block", join("-----BEGIN ", "PUBLIC KEY-----\n", rand(64), "\n-----END ", "PUBLIC KEY-----")],
+  ["stripe-secret-key", "Stripe publishable key", join("pk", "_live_", rand(32))],
+  ["stripe-secret-key", "short Stripe key", join("sk", "_live_", rand(19))],
+  ["stripe-secret-key", "placeholder Stripe key", join("sk", "_live_", "x".repeat(24))],
+  ["stripe-secret-key", "repeated-character key", join("sk", "_live_", "ab".repeat(16))],
+  ["stripe-secret-key", "documented placeholder", join("sk", "_live_", "your_", rand(24))],
+  ["stripe-restricted-key", "restricted key one short", join("rk", "_live_", rand(19))],
+  ["stripe-test-secret-key", "test key one short", join("sk", "_test_", rand(19))],
+  ["stripe-webhook-secret", "webhook secret one short", join("wh", "sec_", rand(23))],
+  ["openai-api-key", "sk- key without the OpenAI marker", join("sk", "-", rand(48))],
+  ["openai-api-key", "project key one short", join("sk", "-proj-", rand(39))],
+  ["anthropic-api-key", "Anthropic prefix without a body", join("sk", "-ant-api03-", rand(20))],
+  ["vercel-ai-gateway-key", "gateway key one short", join("vc", "k_", rand(39))],
+  ["aws-access-key-id", "lowercase AWS key", join("ak", "ia", upper(16).toLowerCase())],
+  ["aws-access-key-id", "AWS key one short", join("AK", "IA", upper(15))],
+  ["github-token", "GitHub token one short", join("gh", "p_", rand(35))],
+  ["github-token", "unknown GitHub prefix", join("gh", "x_", rand(36))],
+  ["slack-token", "Slack token one short", join("xo", "xb-", rand(19))],
+  ["sendgrid-api-key", "SendGrid key one short", join("SG", ".", rand(22), ".", rand(42))],
 ];
 
 describe("matchSecrets", () => {
@@ -84,12 +96,16 @@ describe("matchSecrets", () => {
     expect(new Set(POSITIVES.map(([id]) => id))).toEqual(new Set(SECRET_RULES.map((r) => r.id)));
   });
 
+  it("has a near miss for every rule", () => {
+    expect(new Set(NEAR_MISSES.map(([id]) => id))).toEqual(new Set(SECRET_RULES.map((r) => r.id)));
+  });
+
   it.each(POSITIVES)("matches %s", (id, secret) => {
     const found = matchSecrets(`const config = { key: "${secret}" };`);
     expect(found.map((m) => m.rule.id)).toEqual([id]);
   });
 
-  it.each(NEAR_MISSES)("does not match a %s", (_label, text) => {
+  it.each(NEAR_MISSES)("%s: does not match a %s", (_id, _label, text) => {
     expect(matchSecrets(`window.__ENV = "${text}";`)).toEqual([]);
   });
 
@@ -316,6 +332,9 @@ describe("leak-path shapes", () => {
     ["env", "<!doctype html><html><body>app</body></html>"],
     ["env", "Not Found"],
     ["env", "var a=1;function b(){return a}"],
+    ["env", "status=404\nNot found"],
+    ["npmrc", "Page not found. Try <a href=/>home</a>"],
+    ["npmrc", "color=true\nfund=false"],
     ["git-config", "[user]\nname = x"],
     ["git-head", "<html>ref: refs/heads/main</html>"],
     ["aws-credentials", "[default]\nregion = us-east-1"],
@@ -393,6 +412,13 @@ describe("probeLeakPaths", () => {
     expect(out.findings.find((f) => f.type === "exposed-file:git-config")!.evidence).toEqual({ path: "/.git/config", hasRemote: true });
     expect(out.findings.find((f) => f.type === "exposed-file:npmrc")!.evidence).toMatchObject({ keyNames: ["_authToken"] });
     expect(JSON.stringify(out)).not.toContain("acme/app");
+  });
+
+  it("reports a secret in a leak-path file that has no file shape", async () => {
+    const s = site({ [`${SITE}/.env.local`]: text(`Not found\nhere is ${STRIPE_LIVE}\nbye`) });
+    const out = await probeLeakPaths(`${SITE}/`, APEX, { fetchImpl: s.fetchImpl });
+    expect(out.findings.map((f) => f.type)).toEqual(["exposed-secret:stripe-secret-key"]);
+    expect(out.findings[0]!.evidence.source).toBe("leak-path");
   });
 
   it("refuses a target outside the verified apex", async () => {
