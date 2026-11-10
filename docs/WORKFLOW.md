@@ -69,7 +69,7 @@ One more, Scan funnel, holds the hackme.si work (decision 016). It is not a PRD 
 | `cla.yml` | PR, or a signing comment | Fails until every outside author has signed `CLA.md` (decision 025). Signatures on the `cla-signatures` branch |
 | `pr-hygiene.yml` | PR opened or edited | Fails if the PR does not close an issue |
 | `labeler.yml` | PR | Adds `area:*` labels by path |
-| `claude.yml` | `@claude` in an issue or PR, or the `claude` label, by an owner, member or collaborator only | Claude Code works the issue and opens a PR into `develop` |
+| `claude.yml` | `@claude` in an issue or PR, or the `claude` label. Both the asker and the issue or PR author must be owners, members or collaborators; never on a fork PR | Claude Code works the issue and opens a PR into `develop` |
 | `dependabot.yml` | Weekly / monthly | Dependency update PRs (`type:chore`) |
 
 Only owners, members and collaborators can start the Claude workflow. It needs the

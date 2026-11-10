@@ -33,7 +33,12 @@ BEGIN
       RAISE EXCEPTION 'Role % does not exist. Apply supabase/migrations first.', u[2];
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = u[1]) THEN
-      EXECUTE format('ALTER ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE INHERIT PASSWORD %L', u[1], u[3]);
+      -- On Supabase `postgres` is not a superuser and may not name SUPERUSER or BYPASSRLS in
+      -- ALTER ROLE, even to turn them off. So check them instead, and change only the password.
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = u[1] AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb)) THEN
+        RAISE EXCEPTION 'Role % exists with SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB. Drop it, then run this file again.', u[1];
+      END IF;
+      EXECUTE format('ALTER ROLE %I LOGIN INHERIT PASSWORD %L', u[1], u[3]);
     ELSE
       EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE INHERIT PASSWORD %L', u[1], u[3]);
     END IF;

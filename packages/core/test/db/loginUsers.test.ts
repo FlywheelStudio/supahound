@@ -17,9 +17,9 @@ describe.skipIf(pgInfo === null)("login-users.sql", () => {
   const name = `t_${randomUUID().replace(/-/g, "")}`;
   let admin: pg.Client;
 
-  const run = (app: string, scheduler: string) =>
+  const run = (app: string, scheduler: string, user = "postgres") =>
     spawnSync(join(pgBin()!, "psql"), [
-      "-X", "-q", "-h", pgInfo!.host, "-p", String(pgInfo!.port), "-U", "postgres", "-d", name,
+      "-X", "-q", "-h", pgInfo!.host, "-p", String(pgInfo!.port), "-U", user, "-d", name,
       "-v", `app_password=${app}`, "-v", `scheduler_password=${scheduler}`, "-f", SQL_FILE,
     ], { encoding: "utf8" });
 
@@ -80,11 +80,43 @@ describe.skipIf(pgInfo === null)("login-users.sql", () => {
     });
   });
 
-  it("runs again without error and keeps one membership each", async () => {
+  // On Supabase the database owner `postgres` is not a superuser: it has CREATEROLE and ADMIN
+  // OPTION on the roles the migrations created. The file must work, twice, for that role too.
+  it("works twice as a non-superuser with CREATEROLE, as on Supabase", async () => {
+    await admin.query("DROP ROLE IF EXISTS supahound_app_login, supahound_scheduler_login");
+    await admin.query("DROP ROLE IF EXISTS supa_owner");
+    await admin.query("CREATE ROLE supa_owner LOGIN NOSUPERUSER NOBYPASSRLS CREATEROLE");
+    await admin.query("GRANT supahound_app, supahound_scheduler TO supa_owner WITH ADMIN OPTION");
+    const first = run(GOOD, GOOD, "supa_owner");
+    expect(first.status, first.stderr).toBe(0);
+    const second = run("c".repeat(24), "d".repeat(24), "supa_owner");
+    expect(second.status, second.stderr).toBe(0);
+    const { rows } = await admin.query(
+      "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname LIKE 'supahound\\_%\\_login' ORDER BY 1");
+    expect(rows).toEqual([
+      { rolname: "supahound_app_login", rolsuper: false, rolbypassrls: false },
+      { rolname: "supahound_scheduler_login", rolsuper: false, rolbypassrls: false },
+    ]);
+  });
+
+  it("refuses to reuse an existing user that has BYPASSRLS", async () => {
+    await admin.query("ALTER ROLE supahound_app_login BYPASSRLS");
+    const r = run(GOOD, GOOD);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("BYPASSRLS");
+    await admin.query("ALTER ROLE supahound_app_login NOBYPASSRLS");
+  });
+
+  // Postgres 16+ keeps one membership row per grantor, so count distinct (user, role) pairs.
+  it("runs again without error and each user stays in exactly its one role", async () => {
     expect(run(GOOD, GOOD).status).toBe(0);
     const { rows } = await admin.query(`
-      SELECT count(*)::int AS n FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
-      WHERE r.rolname IN ('supahound_app_login', 'supahound_scheduler_login')`);
-    expect(rows[0].n).toBe(2);
+      SELECT DISTINCT r.rolname::text AS member, g.rolname::text AS role
+      FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member JOIN pg_roles g ON g.oid = m.roleid
+      WHERE r.rolname IN ('supahound_app_login', 'supahound_scheduler_login') ORDER BY 1`);
+    expect(rows).toEqual([
+      { member: "supahound_app_login", role: "supahound_app" },
+      { member: "supahound_scheduler_login", role: "supahound_scheduler" },
+    ]);
   });
 });

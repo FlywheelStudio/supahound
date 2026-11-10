@@ -17,6 +17,7 @@ Decision 025. Milestone "Public release", issues #63–#68.
 2. **Legal review.** `CLA.md` is not a vetted template. `LICENSE.md` is the FSL template with the
    licensor filled in.
 3. **Publish (#68).** Irreversible; Erik approves the exact steps in the issue first.
+   Never `@claude` on an outsider's issue or PR.
 4. **After publish:** branch protection on `develop` and `main` (update `WORKFLOW.md` and decision
    019), secret-scanning push protection, private vulnerability reporting. Deploy the site to
    `supahound.com` and the app to `app.supahound.com`; production deploys need approval.
@@ -29,5 +30,7 @@ Decision 025. Milestone "Public release", issues #63–#68.
 - The 87 Claude workflow runs have logs that become public with the repo. #68 deletes them first.
 - UAT-W14 (#61) failed once in 11 runs under parallel load on the trial merge; it looks like a
   pre-existing flake.
-- The fork that built the site repo ran its first `pnpm install` against `~/pnpm-workspace.yaml`
-  and rewrote `~/pnpm-lock.yaml` and `~/node_modules` (outside every repo).
+- `login-users.sql` first failed as a non-superuser: Supabase's `postgres` may not name
+  NOSUPERUSER or NOBYPASSRLS in `ALTER ROLE`. The rerun path now changes only the password and
+  refuses an existing user with elevated attributes.
+- `claude.yml` now refuses fork PRs and outsider-authored issues, not only outsider commenters.

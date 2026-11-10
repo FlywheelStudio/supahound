@@ -58,15 +58,18 @@ Prove a new rule can fail: commit a planted secret in a scratch clone and see th
 
 ### Self-hosting checks
 
-- `packages/core/test/db/loginUsers.test.ts` (5, Postgres) runs `supabase/setup/login-users.sql`
+- `packages/core/test/db/loginUsers.test.ts` (7, Postgres) runs `supabase/setup/login-users.sql`
   with the real `psql`: short passwords refused, no superuser or BYPASSRLS, one role each, RLS
-  still applies, the scheduler keeps only its column grants, a second run is safe.
+  still applies, the scheduler keeps only its column grants, it works twice as a non-superuser
+  with CREATEROLE (as Supabase's `postgres` is), an existing BYPASSRLS user is refused, a second
+  run is safe.
 - `packages/core/test/vault.test.ts`, `newMasterKeys` (4): the vault accepts a new key, rotation
   keeps old tokens readable.
 - `packages/core/test/explainer.test.ts`, `explainerFor` (4): no key (or a blank one) means
   template text and no HTTP request.
 - Mutations on record (2026-11-10): BYPASSRLS granted → 1 fails; the wrong role granted → 2 fail;
-  rotation drops the old keys → 1 fails; a blank key treated as a key → 2 fail.
+  rotation drops the old keys → 1 fails; a blank key treated as a key → 2 fail; `ALTER ROLE` names
+  NOBYPASSRLS → the non-superuser run fails; the BYPASSRLS check removed → 1 fails.
 
 ## Rules
 

@@ -104,6 +104,9 @@ Local values go in `.dev.vars` (git-ignored). Hyperdrive local strings:
 - **This repo is public.** Never put secrets, client names, customer data or internal-only notes in
   code, docs, issues or PRs. CI runs gitleaks on every push; add a rule to `.gitleaks.toml` for any
   new secret format.
+- **Never `@claude` on an outsider's issue or PR.** The Claude Action holds a write token and the
+  Claude secret; `claude.yml` refuses fork PRs and outsider-authored issues. Copy what you need into a
+  new issue instead.
 - A shipped feature that the marketing site shows as "Coming soon" flips to live in
   `FlywheelStudio/supahound-site` (`content/features.ts`) in a follow-up PR there.
 - Never commit real log rows. They hold user IDs, IPs and emails. Name local exports `*.local.ndjson`
