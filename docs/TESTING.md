@@ -47,6 +47,33 @@ rollup rows, with the template explainer in place of the model.
 First run on a new machine: `pnpm --filter @supahound/web exec playwright install chromium-headless-shell`.
 Set `E2E_DEBUG=1` to print the wrangler output.
 
+### Secret scan
+
+The CI job `secrets` runs gitleaks 8.30.1 (pinned by SHA-256) over the full history with
+`.gitleaks.toml`: the default rules plus Postgres URLs with a password, Supabase secret keys, personal
+access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys and
+`SUPAHOUND_MASTER_KEYS` values. Run it locally with
+`gitleaks git --config .gitleaks.toml --redact .` (`brew install gitleaks`).
+
+Prove a new rule can fail: commit a planted secret in a scratch clone and see the rule fire. On
+2026-11-10 every custom rule fired on its planted secret, a placeholder URL
+(`postgres://postgres:postgres@…`) did not, and the real history had no findings (decision 025).
+
+### Self-hosting checks
+
+- `packages/core/test/db/loginUsers.test.ts` (7, Postgres) runs `supabase/setup/login-users.sql`
+  with the real `psql`: short passwords refused, no superuser or BYPASSRLS, one role each, RLS
+  still applies, the scheduler keeps only its column grants, it works twice as a non-superuser
+  with CREATEROLE (as Supabase's `postgres` is), an existing BYPASSRLS user is refused, a second
+  run is safe.
+- `packages/core/test/vault.test.ts`, `newMasterKeys` (4): the vault accepts a new key, rotation
+  keeps old tokens readable.
+- `packages/core/test/explainer.test.ts`, `explainerFor` (4): no key (or a blank one) means
+  template text and no HTTP request.
+- Mutations on record (2026-11-10): BYPASSRLS granted → 1 fails; the wrong role granted → 2 fail;
+  rotation drops the old keys → 1 fails; a blank key treated as a key → 2 fail; `ALTER ROLE` names
+  NOBYPASSRLS → the non-superuser run fails; the BYPASSRLS check removed → 1 fails.
+
 ## Rules
 
 - Every feature ships with tests. Each acceptance criterion in its issue maps to a test or to a

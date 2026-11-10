@@ -1,5 +1,5 @@
 import { dueProjects } from "@supahound/core/db/repo";
-import { explainIncident } from "@supahound/core/explainer/llm";
+import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
 import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
@@ -99,7 +99,8 @@ export default {
         clientSecret: env.SUPABASE_OAUTH_CLIENT_SECRET,
         redirectUri: new URL("/api/supabase/callback", env.APP_URL).toString(),
       },
-      explain: (features) => explainIncident(features, { apiKey: env.AI_GATEWAY_API_KEY }),
+      // Optional secret (decision 025): without it, alerts use template text and no model is called.
+      explain: explainerFor((env as Env & { AI_GATEWAY_API_KEY?: string }).AI_GATEWAY_API_KEY),
       env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
     };
     try {

@@ -50,9 +50,17 @@ describe("authCopy", () => {
     const { authCopy } = await import("../lib/signup");
     expect(authCopy({}).heading).toBe("Sign in to Supahound");
     expect(authCopy({ signup: "1" }).heading).toBe("Create your free Supahound account");
-    expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("$29");
-    expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("coming soon");
+    expect(authCopy({ signup: "1", plan: "builder" }).plan).toContain("paid plan");
     expect(authCopy({ signup: "1", plan: "free" }).plan).toBeUndefined();
-    expect(authCopy({ plan: "nope" }).heading).toBe("Sign in to Supahound");
+    expect(authCopy({ plan: "builder" }).heading).toBe("Create your free Supahound account");
+  });
+
+  // Prices and plan names live on the marketing site (decision 025). The app never echoes the
+  // plan parameter, so a crafted link cannot put text on the page.
+  it("never echoes the plan id and names no price", async () => {
+    const { authCopy } = await import("../lib/signup");
+    const plan = authCopy({ signup: "1", plan: "<b>free money</b>" }).plan ?? "";
+    expect(plan).not.toContain("free money");
+    expect(plan).not.toMatch(/\$\d/);
   });
 });

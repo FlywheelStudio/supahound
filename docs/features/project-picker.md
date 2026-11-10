@@ -71,5 +71,5 @@ tenants can watch the same ref independently. Migration
 - New projects have empty ownership until #10 loads RLS policies. Detector 2 finds nothing for
   them until then.
 - Picking is unlimited until plans exist (#25).
-- `content/features.ts` keeps `supabaseConnect` at `soon` until the OAuth app (#4) exists.
+- The Coming-soon registry (`content/features.ts`, now in the private repo `FlywheelStudio/supahound-site`, decision 025) keeps `supabaseConnect` at `soon` until the OAuth app (#4) exists.
 - `page.route` cannot stub server-side calls. E2E reaches the fake through `SUPABASE_API_URL`.

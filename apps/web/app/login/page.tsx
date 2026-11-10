@@ -1,4 +1,6 @@
+import { env } from "cloudflare:workers";
 import { redirect } from "next/navigation";
+import { brandFrom } from "../../lib/brand";
 import { currentUser } from "../../lib/supabase";
 import { authCopy } from "../../lib/signup";
 import { sendMagicLink } from "./actions";
@@ -14,6 +16,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
   const params = await searchParams;
   const error = params.error ? ERRORS[params.error] : undefined;
   const copy = authCopy(params);
+  const brand = brandFrom(env);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
@@ -35,6 +38,13 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <p className="text-sm text-slate-600">{copy.note}</p>
+      {(brand.termsUrl || brand.privacyUrl || brand.supportEmail) && (
+        <p className="flex flex-wrap gap-x-4 text-xs text-slate-500">
+          {brand.termsUrl && <a href={brand.termsUrl} className="underline-offset-2 hover:underline">Terms</a>}
+          {brand.privacyUrl && <a href={brand.privacyUrl} className="underline-offset-2 hover:underline">Privacy</a>}
+          {brand.supportEmail && <a href={`mailto:${brand.supportEmail}`} className="underline-offset-2 hover:underline">{brand.supportEmail}</a>}
+        </p>
+      )}
     </main>
   );
 }

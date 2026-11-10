@@ -27,6 +27,11 @@
     "EMAIL_FROM_NAME": "Supahound",
     // Supabase OAuth app (decision 012). Redirect URI: <APP_URL>/api/supabase/callback.
     "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID",
+    // Optional brand links on the sign-in page (lib/brand.ts, decision 025). Empty hides them.
+    // https URLs only. Self-hosters: your own terms and privacy policy, or leave them empty.
+    "SUPPORT_EMAIL": "",
+    "TERMS_URL": "",
+    "PRIVACY_URL": "",
     // Supabase Management API (project picker). Only E2E points this at a fake.
     "SUPABASE_API_URL": "https://api.supabase.com"
   },

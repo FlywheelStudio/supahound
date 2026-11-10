@@ -4,11 +4,26 @@ import { expect, test } from "@playwright/test";
 // doc's verification log; they now run on every PR.
 
 test.describe("signed out", () => {
-  test("the home and sign-in pages load", async ({ page }) => {
-    expect((await page.goto("/"))?.status()).toBe(200);
+  test("the sign-in page loads, and / leads to it", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/login$/);
     expect((await page.goto("/login"))?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: "Sign in to Supahound" })).toBeVisible();
     await expect(page.getByLabel("Work email")).toBeVisible();
+  });
+
+  // The marketing site and legal pages live in a private repo (decision 025). A self-hosted copy
+  // with no brand vars set shows no one's terms, and nothing in the app is indexable.
+  test("the app serves no marketing pages, no legal links and no index", async ({ page, request }) => {
+    for (const path of ["/pricing", "/terms", "/privacy", "/hack-me", "/sitemap.xml", "/llms.txt"]) {
+      expect((await request.get(path, { maxRedirects: 0 })).status(), path).toBe(404);
+    }
+    const robots = await request.get("/robots.txt");
+    expect(await robots.text()).toMatch(/Disallow: \/\s*$/m);
+    await page.goto("/login");
+    await expect(page.getByRole("link", { name: "Terms" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Privacy" })).toHaveCount(0);
+    expect((await request.get("/login")).headers()["cache-control"]).toBe("private, no-store");
   });
 
   for (const path of ["/app", "/onboarding", "/w/00000000-0000-4000-8000-000000000000"]) {

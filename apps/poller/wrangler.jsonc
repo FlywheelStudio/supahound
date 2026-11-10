@@ -1,7 +1,8 @@
 // Supahound poller (decision 008).
 //   cron  -> list due project scopes (scheduler role, IDs only) -> one queue message per scope
 //   queue -> one tenant-scoped poll per message (app role)
-// Secrets (wrangler secret put): SUPAHOUND_MASTER_KEYS, AI_GATEWAY_API_KEY, SUPABASE_OAUTH_CLIENT_SECRET.
+// Secrets (wrangler secret put): SUPAHOUND_MASTER_KEYS, SUPABASE_OAUTH_CLIENT_SECRET. Optional:
+// AI_GATEWAY_API_KEY (without it, alerts use template text and no model is called; decision 025).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "supahound-poller",
@@ -43,7 +44,7 @@
     "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID",
     "APP_URL": "http://localhost:5173"
   },
-  "secrets": { "required": ["SUPAHOUND_MASTER_KEYS", "AI_GATEWAY_API_KEY", "SUPABASE_OAUTH_CLIENT_SECRET"] },
+  "secrets": { "required": ["SUPAHOUND_MASTER_KEYS", "SUPABASE_OAUTH_CLIENT_SECRET"] },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },

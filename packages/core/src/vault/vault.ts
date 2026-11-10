@@ -31,6 +31,16 @@ export interface TokenBinding {
   connectionId: ConnectionId;
 }
 
+// A new SUPAHOUND_MASTER_KEYS value (self-hosting, decision 025). With no current value it
+// returns "1:<key>". With one, it keeps every old key (sealed tokens still open) and appends the
+// next version, which then seals new tokens. Each key is 32 random bytes, base64.
+export function newMasterKeys(current?: string): string {
+  const key = randomBytes(32).toString("base64");
+  if (!current?.trim()) return `1:${key}`;
+  const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: current });
+  return `${current.trim()},${vault.currentVersion + 1}:${key}`;
+}
+
 export class TokenVault {
   private readonly keys: ReadonlyMap<number, Buffer>;
   readonly currentVersion: number;
