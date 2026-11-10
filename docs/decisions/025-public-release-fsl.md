@@ -83,3 +83,8 @@ selling a hosted Supahound with its own paid plans (decision 013). Erik's terms,
 - Branch protection becomes possible (public repos on GitHub Free). Decision 019 and `WORKFLOW.md`
   change when #68 is done.
 - A license change later needs the CLA, which every outside contribution has signed.
+- Published 2026-11-10 (#68). The final audit (94 commits, 27 refs, merge resolutions) found
+  nothing. Secret scanning with push protection and private vulnerability reporting are on. The
+  ruleset "develop and main" enforces PRs and the five checks. The Claude workflow run logs were
+  not deleted: all 105 `claude.yml` runs were skipped by the member gate, and the one
+  `claude-code-review.yml` run failed before Claude started, so no log holds a transcript.
