@@ -44,6 +44,18 @@ rollup rows, with the template explainer in place of the model.
 First run on a new machine: `pnpm --filter @supahound/web exec playwright install chromium-headless-shell`.
 Set `E2E_DEBUG=1` to print the wrangler output.
 
+### Secret scan
+
+The CI job `secrets` runs gitleaks 8.30.1 (pinned by SHA-256) over the full history with
+`.gitleaks.toml`: the default rules plus Postgres URLs with a password, Supabase secret keys, personal
+access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys and
+`SUPAHOUND_MASTER_KEYS` values. Run it locally with
+`gitleaks git --config .gitleaks.toml --redact .` (`brew install gitleaks`).
+
+Prove a new rule can fail: commit a planted secret in a scratch clone and see the rule fire. On
+2026-11-10 every custom rule fired on its planted secret, a placeholder URL
+(`postgres://postgres:postgres@…`) did not, and the real history had no findings (decision 025).
+
 ## Rules
 
 - Every feature ships with tests. Each acceptance criterion in its issue maps to a test or to a

@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Supahound PRD
-    url: https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj
-    about: Product scope, detectors, pricing and milestones.
+  - name: Report a security vulnerability
+    url: https://github.com/FlywheelStudio/supahound/security/advisories/new
+    about: Report vulnerabilities privately. Never open a public issue for one (SECURITY.md).
+  - name: Self-hosting help
+    url: https://github.com/FlywheelStudio/supahound/blob/develop/docs/self-hosting.md
+    about: Read the self-hosting guide before you open a bug.

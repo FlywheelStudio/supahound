@@ -1,8 +1,7 @@
 # WIP: Scan funnel (hackme.si)
 
 Build the free AI pentest funnel into Supahound as a lead-gen front door (decision 016). The scan
-is the one-time snapshot; Supahound is the always-on version. PRD:
-[hackme.si — AI Pentest Lead-Gen PRD](https://claude.ai/artifact/N4FjPDGkoHvoSUFXMSCsAp).
+is the one-time snapshot; Supahound is the always-on version. The spec is the hackme.si PRD, a private Flywheel document.
 
 ## Status — 2026-11-08
 

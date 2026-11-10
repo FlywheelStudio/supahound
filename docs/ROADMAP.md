@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-11-09. Source: the [PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj),
+Updated 2026-11-09. Source: the PRD (a private Flywheel document, decision 025),
 "Milestones and next steps". Each phase is a
 [GitHub milestone](https://github.com/FlywheelStudio/supahound/milestones), and each item is an issue.
 No phase starts until the gate before it passes.

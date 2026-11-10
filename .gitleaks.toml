@@ -1,0 +1,61 @@
+# gitleaks config: the default rules plus the secrets this repo can hold (decision 025).
+# CI runs it on every push and PR (.github/workflows/ci.yml). Prove a new rule can fail:
+# docs/TESTING.md, "Secret scan".
+
+title = "supahound"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "postgres-url-with-password"
+description = "Postgres connection string with an inline password"
+regex = '''postgres(?:ql)?://[^:@/\s'"]+:([^@/\s'"]{6,})@'''
+secretGroup = 1
+keywords = ["postgres://", "postgresql://"]
+
+[[rules]]
+id = "supabase-secret-key"
+description = "Supabase secret API key"
+regex = '''\bsb_secret_[A-Za-z0-9_-]{20,}'''
+keywords = ["sb_secret_"]
+
+[[rules]]
+id = "supabase-personal-access-token"
+description = "Supabase personal access token or OAuth token"
+regex = '''\bsbp_(?:oauth_)?[a-f0-9]{40}\b'''
+keywords = ["sbp_"]
+
+[[rules]]
+id = "supabase-oauth-client-secret"
+description = "Supabase OAuth app client secret"
+regex = '''\bsba_[a-f0-9]{40}\b'''
+keywords = ["sba_"]
+
+[[rules]]
+id = "stripe-webhook-secret"
+description = "Stripe webhook signing secret"
+regex = '''\bwhsec_[A-Za-z0-9]{24,}'''
+keywords = ["whsec_"]
+
+[[rules]]
+id = "supahound-master-key"
+description = "A SUPAHOUND_MASTER_KEYS value (key id, then a 32-byte base64 key)"
+regex = '''SUPAHOUND_MASTER_KEYS\s*[=:]\s*['"]?([A-Za-z0-9_-]+:[A-Za-z0-9+/]{43}=)'''
+secretGroup = 1
+keywords = ["SUPAHOUND_MASTER_KEYS"]
+
+[[rules]]
+id = "vercel-ai-gateway-key"
+description = "Vercel AI Gateway API key"
+regex = '''\bvck_[A-Za-z0-9]{40,}'''
+keywords = ["vck_"]
+
+[allowlist]
+description = "Placeholders and test fixtures"
+regexTarget = "match"
+regexes = [
+  '''REPLACE_ME''',
+  '''REPLACE_WITH_''',
+  '''postgres(?:ql)?://[^:@/\s]+:(?:postgres|password|secret|test|pass|changeme)@''',
+]
