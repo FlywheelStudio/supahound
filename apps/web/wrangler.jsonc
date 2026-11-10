@@ -31,7 +31,9 @@
     // https URLs only. Self-hosters: your own terms and privacy policy, or leave them empty.
     "SUPPORT_EMAIL": "",
     "TERMS_URL": "",
-    "PRIVACY_URL": ""
+    "PRIVACY_URL": "",
+    // Supabase Management API (project picker). Only E2E points this at a fake.
+    "SUPABASE_API_URL": "https://api.supabase.com"
   },
   "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET", "SUPAHOUND_MASTER_KEYS"] },
   "observability": {

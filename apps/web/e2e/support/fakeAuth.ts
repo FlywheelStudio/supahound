@@ -139,6 +139,10 @@ export async function startFakeAuth(port: number, appUrl: string): Promise<FakeA
           return;
         }
         if (req.method === "GET" && path === "/__test/sent") return json(res, 200, sent);
+        if (req.method === "GET" && path === "/__test/user") {
+          const user = usersByEmail.get(new URL(req.url ?? "/", "http://x").searchParams.get("email") ?? "");
+          return user ? json(res, 200, user) : json(res, 404, {});
+        }
         json(res, 404, { msg: `fake auth: no route for ${req.method} ${path}` });
       } catch (err) {
         json(res, 500, { msg: String(err) });

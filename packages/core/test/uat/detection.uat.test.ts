@@ -6,6 +6,7 @@ import type { IncidentFeatures } from "../../src/explainer/features.js";
 import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
 import { LogsApiError } from "../../src/logs/client.js";
+import { SqlQueryError } from "../../src/ownership/client.js";
 import { ownershipFromColumns } from "../../src/ownership/ownership.js";
 import { pollProject, type PollDeps } from "../../src/poller/pollProject.js";
 import { projectScope, tenantId, type ProjectScope } from "../../src/tenancy/scope.js";
@@ -46,6 +47,9 @@ const normalTraffic = (seen: Date) => [
 describe.skipIf(pgInfo === null)("UAT: detection", () => {
   const db = useDb();
   let logs: (now: Date) => Record<string, unknown>[];
+  // The project's pg_policies rows, read through the read-only SQL endpoint. Only projects that
+  // start without a hand-set map (pickProject) read them.
+  let policies: () => Record<string, unknown>[];
 
   async function watchProject(name: string, supabaseRef = "abcdefghijklmnopqrst"): Promise<ProjectScope> {
     const t = tenantId(randomUUID());
@@ -58,10 +62,21 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     });
   }
 
+  // As the project picker leaves a project: no ownership yet. The first poll reads the policies.
+  async function pickProject(name: string): Promise<ProjectScope> {
+    const t = tenantId(randomUUID());
+    return withTenant(db.app, t, async (tx) => {
+      await repo.createTenant(tx, name);
+      const conn = await repo.createConnection(tx, db.vault, { label: name, token: `token-${randomUUID()}` });
+      return projectScope(t, await repo.createProject(tx, { connectionId: conn, supabaseRef: "abcdefghijklmnopqrst", name }));
+    });
+  }
+
   function poll(scope: ProjectScope, now: Date) {
     const deps: PollDeps = {
       app: db.app, vault: db.vault, now: () => now, intervalSeconds: 0,
       queryLogs: async () => logs(now),
+      queryPolicies: async () => policies(),
       explain: async (f: IncidentFeatures): Promise<ExplainResult> =>
         ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
     };
@@ -73,6 +88,7 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
 
   beforeEach(() => {
     logs = () => [];
+    policies = () => { throw new Error("queryPolicies called: ownership was hand-set"); };
   });
 
   it("UAT-D1 a user who reads another user's rows raises one critical incident and one page", async () => {
@@ -131,5 +147,48 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
 
     expect((await dashboard(agency)).map((i) => i.projectName)).toEqual(["Agency"]);
     expect(await dashboard(client)).toEqual([]);
+  });
+
+  it("UAT-D7 a scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet", async () => {
+    const s = await pickProject("Notes app");
+    policies = () => [
+      { schemaname: "public", tablename: "notes", permissive: "PERMISSIVE", roles: ["authenticated"], cmd: "ALL", qual: "(auth.uid() = user_id)" },
+      { schemaname: "public", tablename: "profiles", permissive: "PERMISSIVE", roles: ["public"], cmd: "SELECT", qual: "true" },
+      { schemaname: "public", tablename: "profiles", permissive: "PERMISSIVE", roles: ["authenticated"], cmd: "UPDATE", qual: "(( SELECT auth.uid() AS uid) = id)" },
+    ];
+    logs = (now) => {
+      const seen = new Date(now.getTime() - 200_000);
+      return [
+        scrape(seen),
+        // Alice views Bob's public profile: normal on a public-read table.
+        row(seen, {
+          method: "GET", path: "/rest/v1/profiles", search: `?id=eq.${BOB}`, userAgent: CHROME_UA, asn: "7922",
+          asOrganization: "Comcast", jwtSubject: ALICE, jwtRole: "authenticated", apiKeyRole: "anon", hits: "3",
+        }),
+      ];
+    };
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect((await dashboard(s)).map((i) => i.severity)).toEqual(["critical"]);
+    expect((await projects(s))[0]!.crossTenant).toBe("assessed");
+  });
+
+  it("UAT-D8 a project whose RLS policies cannot be read shows detector 2 as 'unable to assess', and detector 4 still alerts", async () => {
+    const s = await pickProject("Locked app");
+    policies = () => { throw new SqlQueryError("forbidden", 403); };
+    logs = (now) => [scrape(new Date(now.getTime() - 200_000)), serviceKeyFromBrowser(new Date(now.getTime() - 200_000))];
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "unable_to_assess" }]);
+    expect((await dashboard(s)).map((i) => i.severity)).toEqual(["critical"]);
+  });
+
+  it("UAT-D9 a project whose policies scope no table to an owner reads 'no owner-scoped tables', not clean", async () => {
+    const s = await pickProject("Team app");
+    policies = () => [{
+      schemaname: "public", tablename: "notes", permissive: "PERMISSIVE", roles: ["authenticated"], cmd: "ALL",
+      qual: "(team_id IN ( SELECT m.team_id FROM members m WHERE (m.user_id = auth.uid())))",
+    }];
+    logs = (now) => normalTraffic(new Date(now.getTime() - 200_000));
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
+    expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "no_owned_tables" }]);
   });
 });

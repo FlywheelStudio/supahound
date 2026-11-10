@@ -1,6 +1,7 @@
 import { dueProjects } from "@supahound/core/db/repo";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
+import { queryReadOnly } from "@supahound/core/ownership/client";
 import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
 import { projectScope, type ProjectScope } from "@supahound/core/tenancy/scope";
 import { TokenVault } from "@supahound/core/vault/vault";
@@ -92,6 +93,7 @@ export default {
       app,
       vault: TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: env.SUPAHOUND_MASTER_KEYS }),
       queryLogs,
+      queryPolicies: queryReadOnly,
       oauth: {
         clientId: env.SUPABASE_OAUTH_CLIENT_ID,
         clientSecret: env.SUPABASE_OAUTH_CLIENT_SECRET,

@@ -11,6 +11,8 @@ import type { Incident } from "../incidents/incident.js";
 import { LogsApiError, MAX_WINDOW_MS, type LogsQuery } from "../logs/client.js";
 import { normalizeRow } from "../logs/event.js";
 import { edgeRollupSql } from "../logs/sql.js";
+import { parsePolicyRows, SqlQueryError, type ReadOnlyQuery } from "../ownership/client.js";
+import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap } from "../ownership/ownership.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
 import type { ProjectScope } from "../tenancy/scope.js";
@@ -27,6 +29,8 @@ export interface PollDeps {
   // Supabase OAuth app credentials, for refreshing tokens. Null for static tokens (tests, CLI).
   oauth?: OAuthClient | null;
   queryLogs: (query: LogsQuery, options: { token: string }) => Promise<Record<string, unknown>[]>;
+  // Read-only SQL on the customer's project, for POLICIES_SQL only (issue #10, decision 024).
+  queryPolicies: (query: ReadOnlyQuery, options: { token: string }) => Promise<Record<string, unknown>[]>;
   explain: (features: IncidentFeatures) => Promise<ExplainResult>;
   now?: () => Date;
   // Minimum time between polls of one project. Supabase allows 10 analytics queries a minute.
@@ -47,6 +51,10 @@ export const FIRST_LOOKBACK_MINUTES = 5;
 // A poll holds no transaction across its external calls, but the Supabase query, the model
 // calls (20 s timeout each) and the save fit well inside this.
 export const STALE_RUN_SECONDS = 600;
+// Ownership from RLS policies is read again after this long (decision 024), and on the first poll.
+export const OWNERSHIP_REFRESH_SECONDS = 24 * 60 * 60;
+// After a failed read, the next attempt waits this long instead of running on every poll.
+export const OWNERSHIP_RETRY_SECONDS = 60 * 60;
 
 const floorToMinute = (ms: number) => Math.floor(ms / 60_000) * 60_000;
 
@@ -67,7 +75,7 @@ export function nextWindow(lastAssessed: Date | null, now: Date): { start: Date;
 
 function errorCode(err: unknown): string {
   if (err instanceof OAuthError) return err.status === 401 || err.status === 400 ? "unauthorized" : "token_refresh_failed";
-  if (err instanceof LogsApiError) {
+  if (err instanceof LogsApiError || err instanceof SqlQueryError) {
     if (err.status === 401 || err.status === 403) return "unauthorized";
     if (err.status === 429) return "rate_limited";
     return "query_failed";
@@ -76,6 +84,52 @@ function errorCode(err: unknown): string {
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+function ownershipDue(project: repo.ProjectRecord, now: Date): boolean {
+  const attempted = project.ownershipAttemptedAt;
+  if (attempted === null) return true;
+  // Only a read that saved counts as a success. An attempt with no save after it (failed, or the
+  // worker died mid-read) waits the retry interval.
+  const succeeded = project.ownershipRefreshedAt !== null && project.ownershipRefreshedAt >= attempted;
+  const wait = succeeded ? OWNERSHIP_REFRESH_SECONDS : OWNERSHIP_RETRY_SECONDS;
+  return now.getTime() - attempted.getTime() >= wait * 1000;
+}
+
+// Reads the project's RLS policies when due. The audit row is written before the query runs; the
+// query runs outside any transaction. A failure keeps the last good map and never fails the poll.
+// Returns the map to use and whether one has ever loaded.
+async function refreshOwnership(
+  scope: ProjectScope,
+  project: repo.ProjectRecord,
+  token: string,
+  deps: PollDeps,
+  now: Date,
+): Promise<{ ownership: OwnershipMap; loaded: boolean }> {
+  const current = { ownership: project.ownership, loaded: project.ownershipRefreshedAt !== null };
+  if (!ownershipDue(project, now)) return current;
+  const claimed = await withTenant(deps.app, scope.tenantId, async (tx) => {
+    const ok = await repo.claimOwnershipRefresh(tx, scope.projectId, now, {
+      refreshSeconds: OWNERSHIP_REFRESH_SECONDS, retrySeconds: OWNERSHIP_RETRY_SECONDS,
+    });
+    if (ok) {
+      await repo.appendAudit(tx, { projectId: scope.projectId, action: "policies_query", detail: { sql_sha256: sha256(POLICIES_SQL) } });
+    }
+    return ok;
+  });
+  if (!claimed) return current;
+
+  let ownership: OwnershipMap;
+  try {
+    const rows = await deps.queryPolicies({ projectRef: project.supabaseRef, sql: POLICIES_SQL }, { token });
+    ownership = ownershipFromPolicies(parsePolicyRows(rows));
+  } catch (err) {
+    const code = err instanceof SqlQueryError && err.status < 300 ? "invalid_response" : errorCode(err);
+    await withTenant(deps.app, scope.tenantId, (tx) => repo.failOwnershipRefresh(tx, scope.projectId, code));
+    return current;
+  }
+  await withTenant(deps.app, scope.tenantId, (tx) => repo.setOwnership(tx, scope.projectId, ownership, now));
+  return { ownership, loaded: true };
+}
 
 export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<PollOutcome> {
   const now = deps.now?.() ?? new Date();
@@ -122,6 +176,9 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     return { status: "unable_to_assess", errorCode: code };
   }
 
+  // Detector 2's input: the RLS policies, read again when due (decision 024).
+  const owners = await refreshOwnership(scope, project, token, deps, now);
+
   // 2. Query Supabase outside any transaction. A failure is "unable to assess", never all-clear.
   let rows: Record<string, unknown>[];
   try {
@@ -136,8 +193,10 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   const networks = new ServiceRoleNetworks();
   if (loaded.networks.length > 0) networks.learn(scope, loaded.networks);
   const events = rows.map(normalizeRow);
+  // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
+  const unassessedDetectors: ("cross_tenant")[] = owners.loaded ? [] : ["cross_tenant"];
   const findings = scan(events, {
-    scope, networks, ownership: project.ownership, expectedAsns: new Set(project.expectedAsns),
+    scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
   });
   const openIncidents: Incident[] = loaded.open.map((i) => ({
     ...i, scope, status: "open", detectors: i.detectors as Incident["detectors"],
@@ -184,7 +243,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       }
     }
     await repo.saveNetworks(tx, scope.projectId, networks.known(scope));
-    await repo.finishPollRun(tx, runId, { status: "ok", templates: events.length, findings: findings.length });
+    await repo.finishPollRun(tx, runId, { status: "ok", templates: events.length, findings: findings.length, unassessedDetectors });
   });
 
   return { status: "ok", findings: findings.length, notified: explained.size };
