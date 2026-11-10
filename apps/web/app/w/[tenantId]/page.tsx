@@ -4,6 +4,7 @@ import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Checklist } from "../../../components/Checklist";
+import { crossTenantNote } from "../../../lib/coverage";
 import { withPool } from "../../../lib/db";
 import { currentStep, onboardingSteps } from "../../../lib/onboarding";
 import { requireUser } from "../../../lib/supabase";
@@ -129,15 +130,23 @@ export default async function Workspace({
           </p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-            {data.projects.map((p) => (
-              <li key={p.id} className="flex justify-between px-4 py-3">
-                <span className="font-medium">{p.name}</span>
-                <span className="text-sm text-slate-500">
-                  {p.paused ? "paused" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
-                  {" · "}{p.openIncidents} open
-                </span>
-              </li>
-            ))}
+            {data.projects.map((p) => {
+              const note = crossTenantNote(p.crossTenant);
+              return (
+                <li key={p.id} className="px-4 py-3">
+                  <div className="flex justify-between">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-sm text-slate-500">
+                      {p.paused ? "paused" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
+                      {" · "}{p.openIncidents} open
+                    </span>
+                  </div>
+                  {note && (
+                    <p className={`mt-1 text-sm ${note.tone === "warn" ? "text-amber-800" : "text-slate-600"}`}>{note.text}</p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

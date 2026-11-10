@@ -71,6 +71,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D4 | The same attack minutes later updates the open incident and does not page again |
 | UAT-D5 | A Supabase logs outage reads as "unable to assess", never as an all-clear |
 | UAT-D6 | An agency and its client watching one Supabase project each see only their own incidents |
+| UAT-D7 | A scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet |
+| UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
+| UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -91,6 +94,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W13 | A member sees watched projects, gets no picker or Remove, triggers no Supabase call; a replayed owner form is refused |
 | UAT-W14 | Remove needs the exact name; it deletes the project and its incidents and keeps its audit rows |
 | UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
+| UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 
 ### Manual (needs a live service)
 
@@ -113,5 +117,14 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | Picks are checked against Supabase's list | `handleWatch` inserts the submitted refs | UAT-W12 fails |
 | Remove needs the exact name | `removalOutcome` ignores the typed name | UAT-W14 fails |
 | Removal keeps audit rows | Migration `20261109000000` left out | Postgres `projects.test.ts` fails |
+| Never-loaded ownership is not clean (#10) | The run records no unassessed detectors | 3 tests fail, including UAT-D8 |
+| Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
+| A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |
+| A failed read retries after an hour (#10) | Retry wait set to 0 | 1 Postgres test fails |
+| A lost attempt retries after an hour (#10) | Retry wait keyed on `ownership_error` instead of a saved success | 1 Postgres test fails |
+| 24-hour refresh (#10) | Never read again after the first attempt | 3 Postgres tests fail |
+| An unreadable response is an error (#10) | Client reads a body without rows as no policies | 2 unit tests fail |
+| "No owner-scoped tables" is its own state (#10) | `listProjects` drops the state | 2 tests fail, including UAT-D9 |
+| The overview shows the coverage note (#10) | Page hides the note | UAT-W16 fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.
