@@ -110,6 +110,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
 | A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |
 | A failed read retries after an hour (#10) | Retry wait set to 0 | 1 Postgres test fails |
+| A lost attempt retries after an hour (#10) | Retry wait keyed on `ownership_error` instead of a saved success | 1 Postgres test fails |
 | 24-hour refresh (#10) | Never read again after the first attempt | 3 Postgres tests fail |
 | An unreadable response is an error (#10) | Client reads a body without rows as no policies | 2 unit tests fail |
 | "No owner-scoped tables" is its own state (#10) | `listProjects` drops the state | 2 tests fail, including UAT-D9 |

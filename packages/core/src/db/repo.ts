@@ -99,7 +99,7 @@ export async function setOwnership(tx: TenantTx, id: ProjectId, ownership: Owner
 }
 
 // Claims a policies refresh when one is due: never attempted, the last success older than
-// refreshSeconds, or the last failure older than retrySeconds. The conditional update takes the
+// refreshSeconds, or the last unsaved attempt (failed, or lost mid-read) older than retrySeconds. The conditional update takes the
 // row lock, so two workers never both refresh.
 export async function claimOwnershipRefresh(
   tx: TenantTx,
@@ -112,7 +112,7 @@ export async function claimOwnershipRefresh(
      WHERE tenant_id = $1 AND id = $2
        AND (ownership_attempted_at IS NULL
             OR ownership_attempted_at <= $3::timestamptz - make_interval(secs =>
-                 CASE WHEN ownership_error IS NULL THEN $4::double precision ELSE $5::double precision END))
+                 CASE WHEN ownership_refreshed_at >= ownership_attempted_at THEN $4::double precision ELSE $5::double precision END))
      RETURNING id`,
     [tx.tenantId, id, now, intervals.refreshSeconds, intervals.retrySeconds],
   );

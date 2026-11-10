@@ -153,6 +153,16 @@ describe.skipIf(pgInfo === null)("ownership refresh in the poll", () => {
     expect(await project(s)).toMatchObject({ ownershipError: null, ownershipRefreshedAt: after(OWNERSHIP_RETRY_SECONDS) });
   });
 
+  it("retries after an hour when an attempt never saved (worker lost mid-read)", async () => {
+    const s = await watch("Lost app");
+    await db.admin.query("UPDATE supahound.projects SET ownership_attempted_at = $1 WHERE tenant_id = $2", [T0, s.tenantId]);
+    await poll(s, after(OWNERSHIP_RETRY_SECONDS - 60));
+    expect(policyCalls).toHaveLength(0);
+    await poll(s, after(OWNERSHIP_RETRY_SECONDS + 60));
+    expect(policyCalls).toHaveLength(1);
+    expect((await project(s))!.ownershipRefreshedAt).toEqual(after(OWNERSHIP_RETRY_SECONDS + 60));
+  });
+
   it("tells 'no owner-scoped tables' apart from clean and from unable to assess", async () => {
     const s = await watch("Team app");
     policies = () => [MEMBERSHIP_POLICY];

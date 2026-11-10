@@ -88,7 +88,10 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 function ownershipDue(project: repo.ProjectRecord, now: Date): boolean {
   const attempted = project.ownershipAttemptedAt;
   if (attempted === null) return true;
-  const wait = project.ownershipError === null ? OWNERSHIP_REFRESH_SECONDS : OWNERSHIP_RETRY_SECONDS;
+  // Only a read that saved counts as a success. An attempt with no save after it (failed, or the
+  // worker died mid-read) waits the retry interval.
+  const succeeded = project.ownershipRefreshedAt !== null && project.ownershipRefreshedAt >= attempted;
+  const wait = succeeded ? OWNERSHIP_REFRESH_SECONDS : OWNERSHIP_RETRY_SECONDS;
   return now.getTime() - attempted.getTime() >= wait * 1000;
 }
 

@@ -22,7 +22,8 @@ Erik decided on 2026-11-09 (issue #10):
 
 1. **Where and when.** `pollProject` reads the policies after the token opens and before the logs
    query, when a read is due: never attempted, the last success is 24 hours old, or the last
-   failure is 1 hour old. No separate cron job.
+   attempt that did not save (a failure, or a worker lost mid-read) is 1 hour old. No separate
+   cron job.
 2. **How.** `POST /v1/projects/{ref}/database/query/read-only` with `POLICIES_SQL`, which reads
    `pg_catalog.pg_policies` only. Scope `database:read`, already in the grant (decisions 012 and 023).
    Supabase runs it as `supabase_read_only_user`. The `policies_query` audit row is written in the

@@ -16,8 +16,9 @@ owner-scoped tables found".
 1. `pollProject` (`packages/core/src/poller/pollProject.ts`) claims the poll, opens the token, then
    calls `refreshOwnership`.
 2. `refreshOwnership` checks the project row. A read is due when it was never attempted, the last
-   success is 24 hours old (`OWNERSHIP_REFRESH_SECONDS`), or the last failure is 1 hour old
-   (`OWNERSHIP_RETRY_SECONDS`).
+   success is 24 hours old (`OWNERSHIP_REFRESH_SECONDS`), or the last unsaved attempt is 1 hour old
+   (`OWNERSHIP_RETRY_SECONDS`). An attempt counts as a success only when `ownership_refreshed_at`
+   is at or after `ownership_attempted_at`; a failure or a worker lost mid-read retries after an hour.
 3. One short transaction claims the read (`repo.claimOwnershipRefresh`, a conditional update on
    `ownership_attempted_at`) and writes the `policies_query` audit row with the SQL's SHA-256.
 4. Outside any transaction, `deps.queryPolicies` sends `POLICIES_SQL` to Supabase. In the Worker,
@@ -65,9 +66,9 @@ unchanged: it cannot read the new columns.
 
 - `packages/core/test/ownershipClient.test.ts` (12): request shape, both response shapes, status
   without body text, unreadable bodies fail, bad refs refused, row parsing, row cap.
-- `packages/core/test/db/ownershipRefresh.test.ts` (10, Postgres): first-poll read with the audit
+- `packages/core/test/db/ownershipRefresh.test.ts` (11, Postgres): first-poll read with the audit
   row written before the query; never-loaded → unable to assess with detector 4 still alerting;
-  failure keeps the old map; 24-hour refresh; 1-hour retry; no owner-scoped tables; invalid
+  failure keeps the old map; 24-hour refresh; 1-hour retry after a failure and after a lost attempt; no owner-scoped tables; invalid
   response; no audit row when the token fails; tenant isolation on a shared Supabase ref; the
   `unassessed_detectors` CHECK.
 - UAT-D7, UAT-D8, UAT-D9 (`packages/core/test/uat/detection.uat.test.ts`) and UAT-W16
@@ -83,6 +84,9 @@ unchanged: it cannot read the new columns.
   endpoint in the test checks the row exists when it is called. Tested.
 - **A failed read keeps the old map.** Detector 2 keeps working on the last good map. Tested.
   The overview does not yet flag a map that has not refreshed for days.
+- **The claim commits before the read.** `ownership_attempted_at` is set before the query runs, so a
+  worker that dies mid-read leaves an attempt with no save. The retry rule keys on a saved success,
+  not on `ownership_error`, so that state retries after an hour. Tested.
 - **Hand-set maps count as loaded.** `repo.setOwnership` sets `ownership_refreshed_at`, so CLI and
   test fixtures never trigger a read.
 - **Not verified live** that `supabase_read_only_user` can read `pg_policies`. Needs the OAuth app (#4).
