@@ -37,10 +37,10 @@ Three long-lived kinds, and no more:
 `develop` is the default branch (since 2026-11-09). GitHub runs `claude.yml` and reads
 `dependabot.yml` from it. GitHub deletes a branch when its PR merges.
 
-**Branch protection is not enforced.** GitHub Free allows neither branch protection nor rulesets on
-a private repo. Until Erik upgrades to GitHub Team or makes the repo public, the rule holds by
-convention: never push to `develop` or `main` directly, merge only through a PR with green CI, and
-never force-push either branch.
+**Branch protection is enforced** since the repo went public on 2026-11-10 (decision 025). The
+ruleset "develop and main" requires a PR, and these checks green: `Secret scan (gitleaks)`,
+`Typecheck, lint, test, build`, `E2E and UAT (web, Playwright)`, `Links an issue` and `cla`. It
+blocks force-pushes and branch deletion. No approving review is required.
 
 Dependabot opens grouped minor and patch updates only. Plan a major upgrade as an issue.
 
@@ -59,15 +59,17 @@ The labeler workflow adds `area:*` labels to PRs from the paths they change.
 ## Milestones
 
 One per roadmap phase: Validate, Dogfood V1, Private beta, Paid launch. See [ROADMAP.md](ROADMAP.md).
+One more, Scan funnel, holds the hackme.si work (decision 016). It is not a PRD phase.
 
 ## Automation
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | PR, push to `develop` or `main` | Typecheck, lint, tests, build; E2E + UAT job |
+| `ci.yml` | PR, push to `develop` or `main` | gitleaks secret scan; typecheck, lint, tests, build; E2E + UAT job |
+| `cla.yml` | PR, or a signing comment | Fails until every outside author has signed `CLA.md` (decision 025). Signatures on the `cla-signatures` branch |
 | `pr-hygiene.yml` | PR opened or edited | Fails if the PR does not close an issue |
 | `labeler.yml` | PR | Adds `area:*` labels by path |
-| `claude.yml` | `@claude` in an issue or PR, or the `claude` label | Claude Code works the issue and opens a PR into `develop` |
+| `claude.yml` | `@claude` in an issue or PR, or the `claude` label. Both the asker and the issue or PR author must be owners, members or collaborators; never on a fork PR | Claude Code works the issue and opens a PR into `develop` |
 | `dependabot.yml` | Weekly / monthly | Dependency update PRs (`type:chore`) |
 
 Only owners, members and collaborators can start the Claude workflow. It needs the

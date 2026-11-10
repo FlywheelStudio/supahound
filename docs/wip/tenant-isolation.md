@@ -11,8 +11,8 @@ path may read, write, decrypt or mix one tenant's data with another's.
   login roles, apply every file in `supabase/migrations/`, then run the poller
   (`pnpm --filter @supahound/poller dev`) against one project. Applying migrations to a shared
   database needs Erik's approval.
-- Not built: ownership refresh from `pg_policies`, OAuth connect and token refresh, stuck-run
-  cleanup. See STATE.md backlog.
+- Built since: ownership refresh from `pg_policies` (#10, [feature doc](../features/ownership-refresh.md)),
+  OAuth connect and token refresh, stuck-run cleanup.
 
 ## Tenancy model
 

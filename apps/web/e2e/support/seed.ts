@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as repo from "@supahound/core/db/repo";
 import { withTenant } from "@supahound/core/db/tenant";
 import { templateExplanation } from "@supahound/core/explainer/template";
+import { SqlQueryError } from "@supahound/core/ownership/client";
 import { ownershipFromColumns } from "@supahound/core/ownership/ownership";
 import { pollProject } from "@supahound/core/poller/pollProject";
 import { projectScope, tenantId } from "@supahound/core/tenancy/scope";
@@ -39,6 +40,41 @@ export async function pollAttack(tenant: string, projectName: string, now = new 
     const outcome = await pollProject(projectScope(t, p), {
       app, vault, now: () => now,
       queryLogs: async () => SCRAPE_ROWS.map((r) => ({ ...r, first_seen: seen, last_seen: seen })),
+      queryPolicies: async () => { throw new Error("queryPolicies called: ownership was hand-set"); },
+      explain: async (f) => ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
+    });
+    if (outcome.status !== "ok") throw new Error(`Poll failed: ${JSON.stringify(outcome)}`);
+  } finally {
+    await app.end();
+  }
+}
+
+// A valid 20-character ref per project name, so one workspace can hold several seeded projects.
+const refFor = (name: string) => createHash("sha256").update(name).digest("hex").replace(/[^a-z]/g, "").padEnd(20, "x").slice(0, 20);
+
+// A freshly picked project (no ownership yet) polled once: the poll reads its RLS policies through
+// a fake read-only SQL endpoint. "forbidden" makes that read fail with HTTP 403 (decision 024).
+export async function pollPickedProject(
+  tenant: string,
+  projectName: string,
+  policies: Record<string, unknown>[] | "forbidden",
+  now = new Date(),
+): Promise<void> {
+  const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 2 });
+  const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: process.env.E2E_MASTER_KEYS });
+  try {
+    const t = tenantId(tenant);
+    const p = await withTenant(app, t, async (tx) => {
+      const conn = await repo.createConnection(tx, vault, { label: "E2E", token: "e2e-static-token" });
+      return repo.createProject(tx, { connectionId: conn, supabaseRef: refFor(projectName), name: projectName });
+    });
+    const outcome = await pollProject(projectScope(t, p), {
+      app, vault, now: () => now,
+      queryLogs: async () => [],
+      queryPolicies: async () => {
+        if (policies === "forbidden") throw new SqlQueryError("forbidden", 403);
+        return policies;
+      },
       explain: async (f) => ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
     });
     if (outcome.status !== "ok") throw new Error(`Poll failed: ${JSON.stringify(outcome)}`);
@@ -58,3 +94,33 @@ export async function adminQuery<T extends pg.QueryResultRow>(sql: string, param
 }
 
 export const sha256Hex = (s: string) => createHash("sha256").update(s).digest("hex");
+
+// A Supabase connection with a static token (no refresh), as the OAuth callback would store it.
+export async function seedConnection(tenant: string, token: string): Promise<string> {
+  const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 1 });
+  const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: process.env.E2E_MASTER_KEYS });
+  try {
+    return await withTenant(app, tenantId(tenant), (tx) => repo.createConnection(tx, vault, { label: "Supabase", token }));
+  } finally {
+    await app.end();
+  }
+}
+
+// What the fake Management API answers for this token (support/fakeManagement.ts).
+export async function setSupabaseProjects(token: string, projects: { ref: string; name: string; status?: string }[], status = 200): Promise<void> {
+  const res = await fetch(`${process.env.E2E_MGMT_URL}/__test/projects`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, status, projects }),
+  });
+  if (!res.ok) throw new Error(`fake management: ${res.status}`);
+}
+
+export async function managementCalls(token: string): Promise<number> {
+  const calls = (await (await fetch(`${process.env.E2E_MGMT_URL}/__test/calls`)).json()) as { token: string }[];
+  return calls.filter((c) => c.token === token).length;
+}
+
+export async function userIdFor(email: string): Promise<string> {
+  const res = await fetch(`${process.env.E2E_AUTH_URL}/__test/user?email=${encodeURIComponent(email)}`);
+  if (!res.ok) throw new Error(`No fake Auth user for ${email}`);
+  return ((await res.json()) as { id: string }).id;
+}

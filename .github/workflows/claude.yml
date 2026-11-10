@@ -5,6 +5,12 @@
 #
 # Setup (once): run /install-github-app in Claude Code, or add the repository secret
 # ANTHROPIC_API_KEY (Settings → Secrets and variables → Actions).
+#
+# This repo is public (decision 025). The job holds a write token and the Claude secret, so it runs
+# only when BOTH the person who asks and the author of the issue or PR are owners, members or
+# collaborators, and never on a PR from a fork. Text an outsider wrote (an issue body, a fork's
+# code or its install scripts) must never reach this job. Never @claude on an outsider's issue or
+# PR; copy what you need into a new issue instead.
 name: Claude
 
 on:
@@ -19,7 +25,9 @@ on:
 
 jobs:
   claude:
-    # Only people with write access can start a run, so text from outsiders never drives Claude.
+    # 1. The trigger asks for Claude. 2. The person who asks has write access. 3. The issue or PR
+    #    was written by someone with write access. 4. A PR's head is in this repo, not a fork.
+    #    (issue_comment on a PR carries no head repo; the first step checks it.)
     if: |
       (
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -29,6 +37,9 @@ jobs:
         (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude')
       ) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
         github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association)
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.issue.author_association || github.event.pull_request.author_association)
+      && (!github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -38,6 +49,13 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: Refuse PRs from forks
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cross=$(gh pr view "${{ github.event.issue.number }}" -R "${{ github.repository }}" --json isCrossRepository -q .isCrossRepository)
+          if [ "$cross" != "false" ]; then echo "PR is from a fork; Claude does not run on fork code."; exit 1; fi
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

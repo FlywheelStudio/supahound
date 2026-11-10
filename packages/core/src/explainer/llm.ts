@@ -167,3 +167,13 @@ export async function explainIncident(features: IncidentFeatures, options: Expla
 
   return { explanation: templateExplanation(features), source: "template", model: null, zdrConfirmed: null, attempts };
 }
+
+// A self-hosted copy may run without a model key (decision 025). Then no model call is made at
+// all and every alert uses template text. A blank key counts as no key.
+export function explainerFor(apiKey: string | undefined): (features: IncidentFeatures) => Promise<ExplainResult> {
+  const key = apiKey?.trim();
+  if (!key) {
+    return async (features) => ({ explanation: templateExplanation(features), source: "template", model: null, zdrConfirmed: null, attempts: [] });
+  }
+  return (features) => explainIncident(features, { apiKey: key });
+}

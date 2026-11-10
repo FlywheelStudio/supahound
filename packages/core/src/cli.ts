@@ -15,6 +15,7 @@ import {
 import { ServiceRoleNetworks } from "./detectors/serviceRole.js";
 import { scan } from "./scan.js";
 import { projectScope } from "./tenancy/scope.js";
+import { newMasterKeys } from "./vault/vault.js";
 
 const LOCAL_SCOPE = projectScope("00000000-0000-4000-8000-000000000000", "00000000-0000-4000-8000-000000000001");
 
@@ -23,9 +24,12 @@ const USAGE = `Usage:
                [--expected-asns 16509,24940]
   supahound discover-keys --project <ref> [--minutes 60]
   supahound print-sql
+  supahound master-key [--rotate]
 
 --ownership takes a JSON object {"table": ["owner_col", ...]} or a JSON array of pg_policies rows
-(run the SQL from print-sql). Live calls read SUPABASE_ACCESS_TOKEN (analytics:read) from the env or .env.`;
+(run the SQL from print-sql). Live calls read SUPABASE_ACCESS_TOKEN (analytics:read) from the env or .env.
+master-key prints a new SUPAHOUND_MASTER_KEYS value. --rotate reads the current value from the
+SUPAHOUND_MASTER_KEYS env var and appends a new version; old tokens still open.`;
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n\n${USAGE}\n`);
@@ -151,6 +155,13 @@ async function main(argv: string[]): Promise<void> {
       process.stdout.write(`-- Key discovery (PRD task 1)\n${discoverKeysSql(process.env)}\n\n`);
       process.stdout.write(`-- Ownership from RLS policies (read-only SQL)\n${POLICIES_SQL}\n`);
       return;
+    case "master-key": {
+      const { values } = parseArgs({ args: rest, options: { rotate: { type: "boolean" } } });
+      const current = values.rotate ? process.env.SUPAHOUND_MASTER_KEYS : undefined;
+      if (values.rotate && !current) fail("--rotate needs the current value in SUPAHOUND_MASTER_KEYS");
+      process.stdout.write(`${newMasterKeys(current)}\n`);
+      return;
+    }
     default:
       fail(command ? `Unknown command "${command}"` : "No command given");
   }

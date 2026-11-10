@@ -1,8 +1,7 @@
 # WIP: Scan funnel (hackme.si)
 
 Build the free AI pentest funnel into Supahound as a lead-gen front door (decision 016). The scan
-is the one-time snapshot; Supahound is the always-on version. PRD:
-[hackme.si — AI Pentest Lead-Gen PRD](https://claude.ai/artifact/N4FjPDGkoHvoSUFXMSCsAp).
+is the one-time snapshot; Supahound is the always-on version. The spec is the hackme.si PRD, a private Flywheel document.
 
 ## Status — 2026-11-08
 
@@ -36,6 +35,39 @@ purely defensive. Nothing active runs until a domain is proven-owned and scope-l
 
 - Blockers / open: see below. Nothing blocks the next code step.
 
+## Status — 2026-11-10: secrets scanner (#74, decision 026)
+
+Erik asked for a secrets scanner and chose to probe leak paths as well as client code (decision 026).
+
+- Done:
+  - `packages/core/src/scan/fetch.ts` — `scopedGet`, the only way `scan/` reads a target. Every URL
+    and every redirect hop passes the scope guard. Redirects are followed by hand. It accepts http(s)
+    on the default port only, with no credentials in the URL. It caps bytes, redirects and time, and
+    sends a named User-Agent. #51's header and TLS checks should use it too.
+  - `packages/core/src/scan/secrets.ts`:
+    - `scanClientCode`: the page, its same-apex `<script src>` and script preloads, chunk paths
+      named in the code (Vite relative imports, Next.js `static/chunks/`), and public source maps.
+      Third-party script hosts are recorded as skipped, never fetched.
+    - `probeLeakPaths`: one GET each for the fixed list (`.env` x5, `.npmrc`, `.git/config`,
+      `.git/HEAD`, `.aws/credentials`). A response is a finding only when it is a 200 at the same
+      path, is not HTML, and has the file's shape.
+    - 16 prefix-anchored rules. A JWT is a finding only with `role: service_role`; its project ref
+      goes into the evidence.
+    - Output rows match `scan_findings` (`severity`, `type`, `endpoint`, `evidence`, `fix`,
+      `supahoundMonitor`). Supabase key findings map to the `service_role_misuse` monitor.
+  - Evidence holds the rule id, a 12-hex SHA-256 fingerprint, the last 4 characters, the offset and
+    an occurrence count. An exposed `.env` gives key names only. Endpoints drop query strings.
+  - Tests: `test/scanSecrets.test.ts`, 103 tests. Every rule has a positive sample and a near miss; two tests enforce that coverage.
+    Fake keys come from a seeded generator, so gitleaks stays clean (local `gitleaks dir`: no leaks).
+    Mutations are on record in TESTING.md.
+- Problems solved: the first test generator multiplied past 2^53, so its low bits collapsed and the
+  "random" hex had too few symbols. It now uses `Math.imul`. The placeholder check reads the last 16
+  characters, so a fixed prefix such as `sk_live_` cannot add variety to a fake key.
+- Known gaps: chunks that webpack builds from a runtime map (no literal path) are not found. Base64
+  inline source maps are not decoded. The scanner does not read `SourceMap` response headers.
+- Next: #51 wires `scanClientCode` (and `probeLeakPaths` once legal review clears it) into the scan
+  job and the report.
+
 ## Approach
 
 - **Two gates, both in code.** Verification (`verify.ts`) proves control; scope (`scope.ts`) proves
@@ -52,7 +84,8 @@ purely defensive. Nothing active runs until a domain is proven-owned and scope-l
 ## Open questions & risks
 
 - **Legal review of the active-scan ToS** before any active milestone (PRD). Backbone + passive only
-  for now.
+  for now. Legal review should also cover the leak-path probe (decision 026) before the public funnel
+  calls it. The scope agreement text must name it.
 - **Account vs. email-first entry.** PRD wants a light "enter URL + email" start, but shared tenancy
   needs a tenant. Decide whether the funnel signs the user in (magic link) up front or binds the
   scan to a provisional tenant. Current model assumes a tenant exists (reuses `withTenantForUser`).

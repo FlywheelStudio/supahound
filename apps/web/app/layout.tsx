@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "../content/site";
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "../lib/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
-  title: { default: `${SITE_NAME}: Supabase abuse and attack monitoring`, template: `%s | ${SITE_NAME}` },
-  description: SITE_DESCRIPTION,
+  title: { default: PRODUCT_NAME, template: `%s | ${PRODUCT_NAME}` },
+  description: PRODUCT_DESCRIPTION,
   icons: { icon: "/favicon.svg" },
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

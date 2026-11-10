@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-11-09. Source: the [PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj),
+Updated 2026-11-09. Source: the PRD (a private Flywheel document, decision 025),
 "Milestones and next steps". Each phase is a
 [GitHub milestone](https://github.com/FlywheelStudio/supahound/milestones), and each item is an issue.
 No phase starts until the gate before it passes.
@@ -19,14 +19,17 @@ flowchart LR
 | [Private beta](https://github.com/FlywheelStudio/supahound/milestone/3) | 2027-01-31 | 3–5 outside agencies and about 20 builders; digest and agency dashboard live | 3 agencies ready to pay |
 | [Paid launch](https://github.com/FlywheelStudio/supahound/milestone/4) | 2027-03-31 | Pricing live on V1; V2 starts | — |
 
+The [Scan funnel](https://github.com/FlywheelStudio/supahound/milestone/5) milestone (hackme.si, decision 016) is outside the PRD phases.
+Its gate: legal review before any active-scan work.
+
 ## V1 scope and status
 
 | V1 item (PRD) | Status | Issue |
 | --- | --- | --- |
-| Supabase OAuth connect, multi-project | Connect built; project picker not built | #4, #9 |
+| Supabase OAuth connect, multi-project | Connect and project picker built; live OAuth app pending | #4, #9 |
 | Posture scan | Not built | #11 |
 | Detector 1: query fingerprinting | Not built | #12 |
-| Detector 2: cross-tenant access | Built, 127 tests at prototype; live run pending | #3, #5 |
+| Detector 2: cross-tenant access | Built; ownership refreshes from RLS policies in the poll (#10); live run pending | #3, #5, #10 |
 | Detector 3: sensitive-column writes | Not built | #13 |
 | Detector 4: service-role misuse | Built; live run pending | #3, #5 |
 | Detector 5: credential stuffing | Not built | #14 |

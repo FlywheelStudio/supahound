@@ -35,14 +35,48 @@ fails if any suite reports skipped tests.
 2. **A fake Supabase Auth** (`support/fakeAuth.ts`). It issues ES256 tokens, and `getClaims()` verifies
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.
-3. **The built Worker** under `wrangler dev`, with test-only secrets in a temp env file.
+3. **A fake Supabase Management API** (`support/fakeManagement.ts`). It serves `GET /v1/projects`
+   per bearer token; an unknown token gets 401. The Worker reaches it through `SUPABASE_API_URL`,
+   because `page.route` cannot see server-side calls.
+4. **The built Worker** under `wrangler dev`, with test-only secrets in a temp env file.
 
 Nothing calls a real Supabase, Stripe or model API. UAT-W5 stops the browser at
 `api.supabase.com` with a route stub. UAT-W8 runs core's real `pollProject` against synthetic
 rollup rows, with the template explainer in place of the model.
 
+Before a test clicks a link right after `page.goto` or `page.reload`, call `settled(page)`
+(`e2e/support/session.ts`). Those calls return at the load event, but vinext's `<Link>` imports its
+navigation module on the first click, and a click in that window was lost once (UAT-W14, #70).
+
 First run on a new machine: `pnpm --filter @supahound/web exec playwright install chromium-headless-shell`.
 Set `E2E_DEBUG=1` to print the wrangler output.
+
+### Secret scan
+
+The CI job `secrets` runs gitleaks 8.30.1 (pinned by SHA-256) over the full history with
+`.gitleaks.toml`: the default rules plus Postgres URLs with a password, Supabase secret keys, personal
+access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys and
+`SUPAHOUND_MASTER_KEYS` values. Run it locally with
+`gitleaks git --config .gitleaks.toml --redact .` (`brew install gitleaks`).
+
+Prove a new rule can fail: commit a planted secret in a scratch clone and see the rule fire. On
+2026-11-10 every custom rule fired on its planted secret, a placeholder URL
+(`postgres://postgres:postgres@…`) did not, and the real history had no findings (decision 025).
+
+### Self-hosting checks
+
+- `packages/core/test/db/loginUsers.test.ts` (7, Postgres) runs `supabase/setup/login-users.sql`
+  with the real `psql`: short passwords refused, no superuser or BYPASSRLS, one role each, RLS
+  still applies, the scheduler keeps only its column grants, it works twice as a non-superuser
+  with CREATEROLE (as Supabase's `postgres` is), an existing BYPASSRLS user is refused, a second
+  run is safe.
+- `packages/core/test/vault.test.ts`, `newMasterKeys` (4): the vault accepts a new key, rotation
+  keeps old tokens readable.
+- `packages/core/test/explainer.test.ts`, `explainerFor` (4): no key (or a blank one) means
+  template text and no HTTP request.
+- Mutations on record (2026-11-10): BYPASSRLS granted → 1 fails; the wrong role granted → 2 fail;
+  rotation drops the old keys → 1 fails; a blank key treated as a key → 2 fail; `ALTER ROLE` names
+  NOBYPASSRLS → the non-superuser run fails; the BYPASSRLS check removed → 1 fails.
 
 ## Rules
 
@@ -68,6 +102,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D4 | The same attack minutes later updates the open incident and does not page again |
 | UAT-D5 | A Supabase logs outage reads as "unable to assess", never as an all-clear |
 | UAT-D6 | An agency and its client watching one Supabase project each see only their own incidents |
+| UAT-D7 | A scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet |
+| UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
+| UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -83,6 +120,12 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W8 | The owner sees a critical incident after the poller catches a scrape; no raw IDs or user agents on the page |
 | UAT-W9 | Signing out ends the session |
 | UAT-W10 | The magic-link form gives the same answer for a known and an unknown address |
+| UAT-W11 | The owner picks a project; it shows "waiting for first poll"; inactive projects cannot be picked |
+| UAT-W12 | A forged pick adds only running projects Supabase lists, with Supabase's name, each once |
+| UAT-W13 | A member sees watched projects, gets no picker or Remove, triggers no Supabase call; a replayed owner form is refused |
+| UAT-W14 | Remove needs the exact name; it deletes the project and its incidents and keeps its audit rows |
+| UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
+| UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 
 ### Manual (needs a live service)
 
@@ -102,5 +145,22 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | No shared caching of signed-in pages | Middleware stops setting `private, no-store` | 3 E2E checks fail |
 | No second page for a repeat | Engine pages on every update at high or above | UAT-D4 fails |
 | Sign-in email HTML is escaped | `renderSignInEmail` drops `escapeHtml` | 2 unit tests fail |
+| Picks are checked against Supabase's list | `handleWatch` inserts the submitted refs | UAT-W12 fails |
+| Remove needs the exact name | `removalOutcome` ignores the typed name | UAT-W14 fails |
+| Removal keeps audit rows | Migration `20261109000000` left out | Postgres `projects.test.ts` fails |
+| Never-loaded ownership is not clean (#10) | The run records no unassessed detectors | 3 tests fail, including UAT-D8 |
+| Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
+| A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |
+| A failed read retries after an hour (#10) | Retry wait set to 0 | 1 Postgres test fails |
+| A lost attempt retries after an hour (#10) | Retry wait keyed on `ownership_error` instead of a saved success | 1 Postgres test fails |
+| 24-hour refresh (#10) | Never read again after the first attempt | 3 Postgres tests fail |
+| An unreadable response is an error (#10) | Client reads a body without rows as no policies | 2 unit tests fail |
+| "No owner-scoped tables" is its own state (#10) | `listProjects` drops the state | 2 tests fail, including UAT-D9 |
+| The overview shows the coverage note (#10) | Page hides the note | UAT-W16 fails |
+| Only a service_role JWT is a finding (#74) | The JWT rule drops its `role` check | 3 unit tests fail |
+| Redirect hops pass the scope guard (#74) | `scopedGet` follows `Location` without `scannableUrl` | 2 unit tests fail |
+| A leak path must answer at its own path (#74) | `probeLeakPaths` drops the same-path check | 1 unit test fails |
+| An npmrc needs a known key (#74) | `leakShape` drops the known-key check | 1 unit test fails |
+| Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

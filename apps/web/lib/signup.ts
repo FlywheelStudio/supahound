@@ -1,22 +1,18 @@
-import { isLive } from "../content/features";
-import { PLANS } from "../content/site";
+import { PRODUCT_NAME } from "./brand";
 
-// The magic-link page doubles as sign-up: the same link creates the account. Marketing CTAs
-// send `?signup=1` (and `plan=<id>`) so the page reads as sign-up, not sign-in.
+// The magic-link page doubles as sign-up: the same link creates the account. A marketing site
+// sends `?signup=1` (and `plan=<id>`) so the page reads as sign-up, not sign-in. Plans and prices
+// live on the marketing site, not here (decision 025); the app never echoes the plan id.
 export function authCopy(params: Record<string, string | undefined>) {
-  const plan = PLANS.find((p) => p.id === params.plan);
-  const signup = params.signup === "1" || plan !== undefined;
+  const paidPlan = params.plan !== undefined && params.plan !== "" && params.plan !== "free";
+  const signup = params.signup === "1" || paidPlan;
   if (!signup) {
-    return { heading: "Sign in to Supahound", button: "Email me a sign-in link", note: "No password. New here? The same link creates your account.", plan: undefined };
+    return { heading: `Sign in to ${PRODUCT_NAME}`, button: "Email me a sign-in link", note: "No password. New here? The same link creates your account.", plan: undefined };
   }
   return {
-    heading: "Create your free Supahound account",
+    heading: `Create your free ${PRODUCT_NAME} account`,
     button: "Email me a sign-up link",
     note: "No password and no credit card. Already have an account? The same link signs you in.",
-    plan: plan && plan.id !== "free"
-      ? isLive("paidPlans")
-        ? `You picked ${plan.name} (${plan.priceLabel} ${plan.unit}). Start free, connect a project, then upgrade it from your workspace.`
-        : `You picked ${plan.name} (${plan.priceLabel} ${plan.unit}). Paid plans are coming soon. Create your free account now and we will email you when ${plan.name} opens.`
-      : undefined,
+    plan: paidPlan ? "You picked a paid plan. Create your free account first; you choose the plan from your workspace." : undefined,
   };
 }

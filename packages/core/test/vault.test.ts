@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { connectionId, tenantId } from "../src/tenancy/scope.js";
-import { TokenVault, VaultError } from "../src/vault/vault.js";
+import { newMasterKeys, TokenVault, VaultError } from "../src/vault/vault.js";
 
 const TENANT_A = tenantId("aaaaaaaa-0000-4000-8000-000000000001");
 const TENANT_B = tenantId("bbbbbbbb-0000-4000-8000-000000000002");
@@ -64,5 +64,36 @@ describe("TokenVault", () => {
     expect(() => TokenVault.fromEnv({})).toThrow(/SUPAHOUND_MASTER_KEYS/);
     const fromEnv = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: `1:${key1.toString("base64")}` });
     expect(fromEnv.currentVersion).toBe(1);
+  });
+});
+
+// `pnpm master-key` for self-hosters (decision 025).
+describe("newMasterKeys", () => {
+  const binding = { tenantId: TENANT_A, connectionId: CONN_1 };
+
+  it("makes a first key that the vault accepts", () => {
+    const value = newMasterKeys();
+    expect(value).toMatch(/^1:[A-Za-z0-9+/]{43}=$/);
+    const v = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: value });
+    expect(v.open(v.seal(TOKEN, binding), binding)).toBe(TOKEN);
+  });
+
+  it("makes a different key every time", () => {
+    expect(newMasterKeys()).not.toBe(newMasterKeys());
+  });
+
+  it("rotates: keeps the old keys, appends the next version, and old tokens still open", () => {
+    const first = newMasterKeys();
+    const sealedOld = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: first }).seal(TOKEN, binding);
+    const second = newMasterKeys(first);
+    expect(second.startsWith(`${first},2:`)).toBe(true);
+    const v = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: second });
+    expect(v.currentVersion).toBe(2);
+    expect(v.open(sealedOld, binding)).toBe(TOKEN);
+    expect(newMasterKeys(second)).toMatch(/,3:[A-Za-z0-9+/]{43}=$/);
+  });
+
+  it("refuses to rotate a broken value", () => {
+    expect(() => newMasterKeys("1:dG9vLXNob3J0")).toThrow(VaultError);
   });
 });

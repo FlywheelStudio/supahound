@@ -1,8 +1,10 @@
 import { countConnections, listOpenIncidents, listProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Checklist } from "../../../components/Checklist";
+import { crossTenantNote } from "../../../lib/coverage";
 import { withPool } from "../../../lib/db";
 import { currentStep, onboardingSteps } from "../../../lib/onboarding";
 import { requireUser } from "../../../lib/supabase";
@@ -76,6 +78,11 @@ export default async function Workspace({
         <section className="mb-10 rounded-md border border-slate-200 bg-white p-6">
           <h2 className="mb-4 font-semibold">Finish setup</h2>
           <Checklist steps={steps} />
+          {setupLeft.id === "projects" && data.role !== "member" && (
+            <Link href={`/w/${tenant}/projects`} className="mt-6 inline-block rounded-md bg-slate-950 px-4 py-2 font-medium text-white hover:bg-slate-800">
+              Choose projects
+            </Link>
+          )}
           {setupLeft.id === "connect" && data.role !== "member" && (
             <form action={startConnect} className="mt-6">
               <input type="hidden" name="tenantId" value={tenant} />
@@ -83,7 +90,7 @@ export default async function Workspace({
                 Connect Supabase
               </button>
               <p className="mt-2 text-sm text-slate-500">
-                Supahound asks for read access to logs and database metadata only.
+                Supahound asks for read access to logs, database metadata and the project list only.
               </p>
             </form>
           )}
@@ -111,20 +118,35 @@ export default async function Workspace({
       </section>
 
       <section>
-        <h2 className="mb-3 font-semibold">Projects</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold">Projects</h2>
+          {data.connections > 0 && (
+            <Link href={`/w/${tenant}/projects`} className="text-sm text-slate-600 hover:text-slate-950">Manage projects</Link>
+          )}
+        </div>
         {data.projects.length === 0 ? (
-          <p className="text-slate-600">No projects yet. Connect Supabase to add them.</p>
+          <p className="text-slate-600">
+            {data.connections > 0 ? "No projects yet. Choose the projects to watch." : "No projects yet. Connect Supabase to add them."}
+          </p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-            {data.projects.map((p) => (
-              <li key={p.id} className="flex justify-between px-4 py-3">
-                <span className="font-medium">{p.name}</span>
-                <span className="text-sm text-slate-500">
-                  {p.paused ? "paused" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
-                  {" · "}{p.openIncidents} open
-                </span>
-              </li>
-            ))}
+            {data.projects.map((p) => {
+              const note = crossTenantNote(p.crossTenant);
+              return (
+                <li key={p.id} className="px-4 py-3">
+                  <div className="flex justify-between">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-sm text-slate-500">
+                      {p.paused ? "paused" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
+                      {" · "}{p.openIncidents} open
+                    </span>
+                  </div>
+                  {note && (
+                    <p className={`mt-1 text-sm ${note.tone === "warn" ? "text-amber-800" : "text-slate-600"}`}>{note.text}</p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

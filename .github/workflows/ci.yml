@@ -15,6 +15,23 @@ permissions:
   contents: read
 
 jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # The binary is pinned by version and SHA-256; no third-party action and no licence key.
+      # Rules: .gitleaks.toml (decision 025). Scans every commit on the checked-out history.
+      - name: Install gitleaks 8.30.1
+        run: |
+          curl -sSfL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+      - run: ./gitleaks git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
+
   check:
     name: Typecheck, lint, test, build
     runs-on: ubuntu-24.04

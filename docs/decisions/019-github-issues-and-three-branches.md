@@ -41,6 +41,8 @@ branches. Stale branches stayed open.
   no force pushes or deletion). GitHub refused it: the org is on GitHub Free, which allows neither
   branch protection nor rulesets on a private repo. The rule holds by convention until Erik
   upgrades to GitHub Team or makes the repo public.
+  Update 2026-11-10: the repo is public (decision 025), and the ruleset "develop and main" now
+  enforces this rule, plus the secret-scan and CLA checks.
 - GitHub deletes the head branch when a PR merges. Dependabot skips npm major updates; majors
   are planned as issues (first: #50, TypeScript 6).
 - Decision numbers 016–018 are taken by open branches (scan funnel, marketing site). If those
