@@ -8,8 +8,11 @@ Decision 025. Milestone "Public release", issues #63–#68.
   (#65), public files (#66). On `develop`: core 352, web 68, poller 9 tests, 27 E2E, CI green.
 - The private site repo exists: `FlywheelStudio/supahound-site` (main, CI green). It holds #61's
   content edits.
-- **Next step:** legal review of `CLA.md` and `LICENSE.md`, then the rehearsal (#67), then the
-  publish (#68). UAT-W14 flake: #70.
+- **Public since 2026-11-10 (#68).** Erik chose to publish before the legal review. Secret scanning
+  with push protection, private vulnerability reporting and the ruleset "develop and main" are on.
+  UAT-W14 flake fixed (#70).
+- **Next step:** legal review of `CLA.md` and `LICENSE.md`, then the rehearsal (#67). `main` gets
+  the release through PR #77 (Erik merges `main`).
 
 ## Remaining
 
@@ -18,11 +21,9 @@ Decision 025. Milestone "Public release", issues #63–#68.
    verified yet" in the guide.
 2. **Legal review.** `CLA.md` is not a vetted template. `LICENSE.md` is the FSL template with the
    licensor filled in.
-3. **Publish (#68).** Irreversible; Erik approves the exact steps in the issue first.
-   Never `@claude` on an outsider's issue or PR.
-4. **After publish:** branch protection on `develop` and `main` (update `WORKFLOW.md` and decision
-   019), secret-scanning push protection, private vulnerability reporting. Deploy the site to
-   `supahound.com` and the app to `app.supahound.com`; production deploys need approval.
+3. **Never `@claude` on an outsider's issue or PR.**
+4. **Deploy** the site to `supahound.com` and the app to `app.supahound.com`; production deploys
+   need approval.
 
 ## Build log
 

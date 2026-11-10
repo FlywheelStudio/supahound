@@ -37,10 +37,10 @@ Three long-lived kinds, and no more:
 `develop` is the default branch (since 2026-11-09). GitHub runs `claude.yml` and reads
 `dependabot.yml` from it. GitHub deletes a branch when its PR merges.
 
-**Branch protection is not enforced.** GitHub Free allows neither branch protection nor rulesets on
-a private repo. On 2026-11-09 Erik chose to keep the repo private on GitHub Free, so the rule holds
-by convention: never push to `develop` or `main` directly, merge only through a PR with green CI, and
-never force-push either branch.
+**Branch protection is enforced** since the repo went public on 2026-11-10 (decision 025). The
+ruleset "develop and main" requires a PR, and these checks green: `Secret scan (gitleaks)`,
+`Typecheck, lint, test, build`, `E2E and UAT (web, Playwright)`, `Links an issue` and `cla`. It
+blocks force-pushes and branch deletion. No approving review is required.
 
 Dependabot opens grouped minor and patch updates only. Plan a major upgrade as an issue.
 
