@@ -1,6 +1,6 @@
 # Architecture
 
-Updated 2026-11-09.
+Updated 2026-11-10.
 
 Supahound reads a customer's Supabase edge logs through read-only OAuth scopes. It runs
 deterministic detectors on them every minute and groups findings into incidents per actor. A model
@@ -33,7 +33,8 @@ flowchart LR
   end
 
   CONS -->|OAuth token, analytics:read| LOGS
-  CONS -.->|database:read, planned| CAT
+  CONS -->|database:read, pg_policies only| CAT
+  WEB -->|projects:read, project picker| MGMT["Supabase Management API<br/>(project list)"]
   CONS -->|structured features only| GW
   CRON -->|scheduler role, IDs only| PG
   CONS -->|app role, withTenant| PG
@@ -54,6 +55,13 @@ message creates its own `pg` pool. Workers never share I/O across requests.
 | `apps/poller` | Cloudflare Worker | Cron → queue → `pollProject`, through two Hyperdrive configs |
 | `apps/web` | Cloudflare Worker | Next.js App Router via vinext: sign-in, onboarding, overview, Supabase connect, Send Email Hook |
 | `supabase/migrations` | Postgres 17 | Schema `supahound`, roles, forced RLS |
+| `supabase/setup` | Postgres 17 | Not migrations: `login-users.sql` creates the Hyperdrive login users (self-hosting) |
+
+The marketing site and legal pages are a separate Worker, `supahound-site`, in the private repo
+`FlywheelStudio/supahound-site` (decision 025). It serves `supahound.com`; the app serves
+`app.supahound.com`. The app has no public pages: `/` redirects to `/app`, and `robots.txt`
+disallows everything. Self-hosters run the two Workers on their own accounts
+([self-hosting.md](self-hosting.md)).
 
 `packages/core` exports its TypeScript source directly (`"./*": "./src/*.ts"`). The apps import it
 by path, such as `@supahound/core/db/repo`. No build step sits between them.
@@ -109,10 +117,13 @@ non-member gets the same 404 as a missing workspace (E2E UAT-W7).
   never asks for the service-role key.
 - **No attacker text in prompts.** User agents, emails, query values and IPs never reach a model.
   Only `llm.ts` may call a model, and ESLint blocks model imports everywhere else (`zdrGuard.test.ts`).
+- **Secrets never land in the repo.** The repo is public (decision 025). CI runs gitleaks with
+  `.gitleaks.toml` on every push and PR, GitHub push protection is on, and the ruleset on `develop`
+  and `main` requires that check.
 - **ZDR on every call** (decision 005). `providerOptions.gateway.zeroDataRetention = true` is set
   after any merge, so nothing can override it. A routing report without ZDR discards the output.
 - **Web hardening.** Users come only from `getClaims()`. The middleware rejects cross-origin
-  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. The Send Email
+  non-GET requests and sets `Cache-Control: private, no-store` on every response. The Send Email
   Hook checks its Standard Webhooks signature. The OAuth state is single-use, bound to the user and
   the workspace, and stored only as a hash.
 
@@ -131,7 +142,11 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `incidents` | Grouped findings per actor; severity, hits, summary and its source |
 | `service_role_networks` | Learned server ASNs per project (decision 003) |
 | `oauth_states` | Hashed OAuth state + PKCE verifier, 10-minute TTL, single use |
-| `audit_log` | Every query and model call, append-only |
+| `audit_log` | Every query and model call, append-only; kept when a project is removed (decision 022) |
+| `scan_domains` | A domain a tenant wants to scan, and its DNS-TXT challenge (decision 016) |
+| `scan_authorizations` | The accepted scope agreement per domain, append-only |
+| `scans`, `scan_jobs` | One scan of a verified domain, and its queued work |
+| `scan_findings` | Scan output: rule, fingerprint and last 4 characters, never the secret (decision 026) |
 
 ## Decisions
 

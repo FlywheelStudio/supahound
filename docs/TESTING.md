@@ -1,18 +1,21 @@
 # Testing
 
-Updated 2026-11-09. CI runs every tier below on each pull request
+Updated 2026-11-10. CI runs every tier below on each pull request
 ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)). A PR merges only when CI is green.
 
 ## Tiers
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 229 core (unit + Postgres), 31 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | within the 229 |
-| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 6 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 6 |
-| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 10 |
-| UAT, web journey | Sign-in → workspace → connect → incident, in a real browser | `apps/web/e2e/specs/journey.uat.spec.ts` | `pnpm e2e` | 10 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, scan scope and secrets, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 383 core, 68 web |
+| Postgres | RLS, isolation, repositories, the poller end to end, ownership refresh, login-user setup | `packages/core/test/db/` | `pnpm -r test` | 63 |
+| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR, scan runtime) | `apps/poller/test/` | `pnpm -r test` | 9 |
+| UAT, detection | PRD outcomes over the full poll pipeline (UAT-D1..D9) | `packages/core/test/uat/` | `pnpm -r test` | 9 |
+| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature, no marketing pages or legal links | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
+| UAT, web journey | Sign-in → workspace → connect → pick → incident, in a real browser (UAT-W1..W16) | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 16 |
+
+Totals on `develop` (2026-11-10, `ef354dc`): core 455, web 68, poller 9, E2E 27. The marketing
+site's 106 tests run in the private repo `FlywheelStudio/supahound-site`.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -106,7 +109,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
 | UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
 
-### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
+### Web journey (automated: W1–W10 `journey.uat.spec.ts`, W11–W15 `picker.uat.spec.ts`, W16 `ownership.uat.spec.ts`, in `apps/web/e2e/specs/`)
 
 | ID | Scenario |
 | --- | --- |
@@ -135,6 +138,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-M2 | Connect Supabase completes the real consent and stores a sealed token | Registered OAuth app | #4 |
 | UAT-M3 | The poller reads a live project's edge logs and records an `ok` run | Live token with `analytics:read` | #3 |
 | UAT-M4 | One explainer call routes with ZDR on both models | AI Gateway Pro key | #6 |
+| UAT-M5 | A self-hoster follows `docs/self-hosting.md` on clean accounts and reaches a first `ok` poll | Clean Cloudflare and Supabase accounts, OAuth app | #67 |
 
 ## Mutation checks on record
 
@@ -162,5 +166,15 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | A leak path must answer at its own path (#74) | `probeLeakPaths` drops the same-path check | 1 unit test fails |
 | An npmrc needs a known key (#74) | `leakShape` drops the known-key check | 1 unit test fails |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
+| Brand links are https only (#64) | `brandFrom` accepts any URL | 3 unit tests fail |
+| The sign-up page never echoes the plan id (#64) | The plan id goes into the copy | 2 unit tests fail |
+| A self-hosted copy shows no legal links (#64) | `TERMS_URL` set in `wrangler.jsonc` | 1 E2E check fails |
+| No model key, no model call (#65) | A blank key counts as a key | 2 unit tests fail |
+| Key rotation keeps old tokens (#65) | Rotation drops the old keys | 1 unit test fails |
+| Login users never get BYPASSRLS (#65) | `CREATE ROLE` grants BYPASSRLS | 1 Postgres test fails |
+| Each login user gets only its role (#65) | Both users get `supahound_app` | 2 Postgres tests fail |
+| The rerun works as Supabase's `postgres` (#65) | `ALTER ROLE` names NOBYPASSRLS | 1 Postgres test fails |
+| A lost Remove click is visible (#70) | Wrong id in the `?remove=` URL check | UAT-W14 fails |
+| gitleaks catches this repo's secrets (#63) | 8 planted secret types in a scratch clone | every custom rule fires |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

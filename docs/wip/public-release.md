@@ -11,8 +11,9 @@ Decision 025. Milestone "Public release", issues #63–#68.
 - **Public since 2026-11-10 (#68).** Erik chose to publish before the legal review. Secret scanning
   with push protection, private vulnerability reporting and the ruleset "develop and main" are on.
   UAT-W14 flake fixed (#70).
-- **Next step:** legal review of `CLA.md` and `LICENSE.md`, then the rehearsal (#67). `main` gets
-  the release through PR #77 (Erik merges `main`).
+- `main` has the release (PR #77). The marketing site is live on `supahound.com` and `www`.
+- **Next step:** legal review (#81), the app deploy to `app.supahound.com` (#82), then the
+  rehearsal (#67).
 
 ## Remaining
 
@@ -22,7 +23,7 @@ Decision 025. Milestone "Public release", issues #63–#68.
 2. **Legal review.** `CLA.md` is not a vetted template. `LICENSE.md` is the FSL template with the
    licensor filled in.
 3. **Never `@claude` on an outsider's issue or PR.**
-4. **Deploy the app** to `app.supahound.com` (needs #4 and #8). The marketing site is live on
+4. **Deploy the app** to `app.supahound.com` (#82; needs #4 and #8). The marketing site is live on
    `supahound.com` and `www.supahound.com` since 2026-11-10; its sign-up links point at the app and
    fail until the app ships.
 

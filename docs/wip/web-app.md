@@ -5,7 +5,7 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 
 ## Status — 2026-10-27
 
-- Built: `apps/web` (Next.js App Router on Workers, vinext 1.3.1, Wrangler config). Magic-link
+- Built: `apps/web` (Next.js App Router on Workers, vinext 1.4, Wrangler config). Magic-link
   sign-in, `/auth/confirm`, sign-out, the signed Send Email Hook route, onboarding step 1 (create
   workspace), workspace overview (projects, open incidents, setup checklist).
 - Built: Supabase OAuth connect. "Connect Supabase" (owners and admins) → Supabase consent →
@@ -14,7 +14,11 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Built: the project picker (#9, [features/project-picker.md](../features/project-picker.md)).
 - Built: ownership refresh (#10): the poller loads `pg_policies` on a project's first poll; the
   overview shows detector 2 coverage ([feature doc](../features/ownership-refresh.md)).
-- **Next step:** Stripe (#25), then alert email (#16).
+- Changed (decision 025): the marketing pages moved to the private repo `supahound-site`. The app
+  has no public pages; optional terms, privacy and support links come from `lib/brand.ts`. The
+  hosted app will serve `app.supahound.com`.
+- **Next step:** alert email (#16), then Stripe for the hosted product (#25). Billing stays off
+  in a self-hosted copy.
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
   need Supahound's Supabase project and a Hyperdrive config.
 
@@ -33,6 +37,9 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 
 ## Setup (Erik)
 
+The full, tested sequence is in [self-hosting.md](../self-hosting.md); the hosted app uses
+`APP_URL = https://app.supahound.com`. Short version:
+
 0. Register the Supabase OAuth app (PRD "This week" task) with scopes `analytics:read`,
    `database:read` and `projects:read` (the project picker lists projects), redirect URI `<APP_URL>/api/supabase/callback`. Put the client ID in both
    `wrangler.jsonc` files and `wrangler secret put SUPABASE_OAUTH_CLIENT_SECRET` in both Workers.
@@ -47,7 +54,8 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 5. Supabase → Settings → API → Exposed schemas: `supahound` must NOT be listed. All access goes
    through the Workers with the `supahound_app` role.
 6. Hyperdrive: `wrangler hyperdrive create supahound-app --caching-disabled --connection-string ...`
-   (Supabase direct or session connection, `supahound_app` login role). Put the ID in both
+   (Supabase direct or session connection, as `supahound_app_login` from
+   `supabase/setup/login-users.sql`). Put the ID in both
    `wrangler.jsonc` files.
 
 ## Verification log

@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-11-09. Source: the PRD (a private Flywheel document, decision 025),
+Updated 2026-11-10. Source: the PRD (a private Flywheel document, decision 025),
 "Milestones and next steps". Each phase is a
 [GitHub milestone](https://github.com/FlywheelStudio/supahound/milestones), and each item is an issue.
 No phase starts until the gate before it passes.
@@ -20,7 +20,12 @@ flowchart LR
 | [Paid launch](https://github.com/FlywheelStudio/supahound/milestone/4) | 2027-03-31 | Pricing live on V1; V2 starts | — |
 
 The [Scan funnel](https://github.com/FlywheelStudio/supahound/milestone/5) milestone (hackme.si, decision 016) is outside the PRD phases.
-Its gate: legal review before any active-scan work.
+Its gate: legal review before any active-scan work, and before the leak-path probe goes public
+(decision 026).
+
+The [Public release](https://github.com/FlywheelStudio/supahound/milestone/6) milestone (decision 025) is also outside the PRD
+phases. Done: the repo is public under FSL-1.1-ALv2, and the marketing site is live on
+`supahound.com`. Left: the self-hosting rehearsal (#67) and legal review (#81). The app deploy is #82.
 
 ## V1 scope and status
 
@@ -39,7 +44,8 @@ Its gate: legal review before any active-scan work.
 | Basic agency dashboard | Workspace overview built; agency view not built | #23 |
 | Tenant isolation, vault, poller | Built; needs Supahound's Supabase project | #8 |
 | ZDR explainer | Built; live gateway call pending | #6 |
-| Web sign-in and onboarding | Built; E2E UAT-W1..W10 in CI | #2 |
+| Web sign-in and onboarding | Built; E2E UAT-W1..W16 in CI; app not deployed yet | #2, #9, #10 |
+| Self-hosting | Guide and setup scripts built; rehearsal pending | #65, #67 |
 
 ## V2 (Paid launch milestone)
 

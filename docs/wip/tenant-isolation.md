@@ -5,10 +5,11 @@ path may read, write, decrypt or mix one tenant's data with another's.
 
 ## Status — 2026-10-27
 
-- Built: scope keys, schema + RLS, vault, repositories, poller, scheduler, worker. 19 Postgres
-  tests (isolation + poller) pass on a throwaway Postgres 17 cluster.
-- **Next step (issue #8):** create Supahound's Supabase project (decision 008), create the two
-  login roles, apply every file in `supabase/migrations/`, then run the poller
+- Built: scope keys, schema + RLS, vault, repositories, poller, scheduler, worker. The Postgres
+  suite (63 tests on 2026-11-10) passes on a throwaway Postgres 17 cluster.
+- **Next step (issue #8):** create Supahound's Supabase project (decision 008), apply every file in
+  `supabase/migrations/`, create the two login users with `supabase/setup/login-users.sql`
+  ([self-hosting.md](../self-hosting.md), steps 1–4), then run the poller
   (`pnpm --filter @supahound/poller dev`) against one project. Applying migrations to a shared
   database needs Erik's approval.
 - Built since: ownership refresh from `pg_policies` (#10, [feature doc](../features/ownership-refresh.md)),

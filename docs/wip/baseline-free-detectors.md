@@ -6,7 +6,8 @@ misuse) against one project.
 ## Status — 2026-10-27
 
 - Done: both detectors, PostgREST parser, per-command ownership from policies, log client, CLI.
-  127 tests pass. Typecheck and lint clean.
+  Ownership now refreshes from RLS policies in the poll (#10). Covered by the core suite (455
+  tests on 2026-11-10) and UAT-D1..D9.
 - **Next step:** run against one live Flywheel client project. Needs a token with `analytics:read` and a
   project ref from Erik. Order:
   1. `pnpm discover-keys --project <ref>`. Confirms the three unverified paths and the source column.
@@ -15,8 +16,9 @@ misuse) against one project.
      The rollup SQL would then drop all service traffic, and detector 4 would report zero findings,
      which reads as an all-clear.
   2. Fix `src/config/fields.ts` if a path differs. Set `SUPAHOUND_SOURCE_COLUMN` if `source` fails.
-  3. Export the project's `pg_policies` rows (SQL from `print-sql`) to `ownership.local.json`.
-  4. `pnpm scan --project <ref> --ownership ownership.local.json --minutes 60`. Review every finding.
+  3. Export the project's `pg_policies` rows (SQL from `pnpm -s print-sql`) to `ownership.local.json`.
+  4. `pnpm scan --project <ref> --ownership "$PWD/ownership.local.json" --minutes 60`. Review every
+     finding. The scan runs inside `packages/core`, so pass an absolute path and keep `.env` there.
 - After the live run: write `docs/features/baseline-free-detectors.md`, delete this file, and move
   the item to Completed in STATE.md.
 
