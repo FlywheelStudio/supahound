@@ -331,6 +331,45 @@ export async function listOpenIncidents(tx: TenantTx, limit = 50): Promise<Incid
   }));
 }
 
+export interface ConnectionSummary {
+  id: ConnectionId;
+  label: string;
+  createdAt: Date;
+}
+
+export async function listConnections(tx: TenantTx): Promise<ConnectionSummary[]> {
+  const rows = await tx.query<{ id: string; label: string; created_at: Date }>(
+    "SELECT id, label, created_at FROM supahound.connections WHERE tenant_id = $1 ORDER BY created_at, id",
+    [tx.tenantId],
+  );
+  return rows.map((r) => ({ id: connectionId(r.id), label: r.label, createdAt: r.created_at }));
+}
+
+// The project picker (issue #9). A ref already watched in this tenant is skipped, so a double
+// submit or two admins picking at once never fails and never duplicates. Returns the refs added.
+export async function watchProjects(
+  tx: TenantTx,
+  connection: ConnectionId,
+  projects: { ref: string; name: string }[],
+): Promise<string[]> {
+  if (projects.length === 0) return [];
+  const rows = await tx.query<{ supabase_ref: string }>(
+    `INSERT INTO supahound.projects (tenant_id, connection_id, supabase_ref, name)
+     SELECT $1, $2, p.ref, p.name FROM unnest($3::text[], $4::text[]) AS p(ref, name)
+     ON CONFLICT (tenant_id, supabase_ref) DO NOTHING
+     RETURNING supabase_ref`,
+    [tx.tenantId, connection, projects.map((p) => p.ref), projects.map((p) => p.name)],
+  );
+  return rows.map((r) => r.supabase_ref);
+}
+
+// Stops watching a project. Its incidents, findings and poll runs go with it (cascade); its
+// audit_log rows stay with project_id set to null (decision 022). The caller confirms the name.
+export async function removeProject(tx: TenantTx, id: ProjectId): Promise<boolean> {
+  const rows = await tx.query("DELETE FROM supahound.projects WHERE tenant_id = $1 AND id = $2 RETURNING id", [tx.tenantId, id]);
+  return rows.length === 1;
+}
+
 export async function countConnections(tx: TenantTx): Promise<number> {
   const rows = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM supahound.connections WHERE tenant_id = $1", [tx.tenantId]);
   return rows[0]?.n ?? 0;

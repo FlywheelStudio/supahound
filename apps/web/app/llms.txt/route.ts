@@ -21,7 +21,7 @@ export function GET() {
     "",
     "Supahound is in early access: features marked (coming soon) are not live yet.",
     "",
-    "Supahound is made by Flywheel Studio LLC (https://flywheel.so). It connects to a Supabase org with read-only OAuth (analytics:read, database:read), never asks for a service-role key, and stores no raw log rows.",
+    "Supahound is made by Flywheel Studio LLC (https://flywheel.so). It connects to a Supabase org with read-only OAuth (analytics:read, database:read, projects:read), never asks for a service-role key, and stores no raw log rows.",
     "",
     "## Plans",
     "",

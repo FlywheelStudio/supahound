@@ -6,9 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeAuth } from "./fakeAuth";
+import { startFakeManagement } from "./fakeManagement";
 import { startPostgres } from "./postgres";
 
-// Starts the whole E2E stack: Postgres 17 (TCP) → fake Supabase Auth → the BUILT web Worker
+// Starts the whole E2E stack: Postgres 17 (TCP) → fake Supabase Auth and Management API → the BUILT web Worker
 // under `wrangler dev`. Run `vite build` first (`pnpm e2e` does). Tests read connection details
 // from process.env, which Playwright passes on to its workers.
 
@@ -44,6 +45,7 @@ async function waitFor(url: string, child: ChildProcess, log: () => string, time
 export default async function globalSetup(): Promise<() => Promise<void>> {
   const pg = await startPostgres(await freePort());
   const auth = await startFakeAuth(await freePort(), APP_URL);
+  const mgmt = await startFakeManagement(await freePort());
   const masterKeys = `1:${randomBytes(32).toString("base64")}`;
 
   // Test-only values, written to a temp file outside the repo and deleted on teardown.
@@ -54,6 +56,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     `SUPABASE_URL=${auth.url}`,
     "SUPABASE_PUBLISHABLE_KEY=sb_publishable_e2e",
     "SUPABASE_OAUTH_CLIENT_ID=e2e-oauth-client",
+    `SUPABASE_API_URL=${mgmt.url}`,
     `SEND_EMAIL_HOOK_SECRET=${auth.hookSecret}`,
     "SUPABASE_OAUTH_CLIENT_SECRET=e2e-oauth-secret",
     `SUPAHOUND_MASTER_KEYS=${masterKeys}`,
@@ -84,12 +87,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   } catch (err) {
     wrangler.kill();
     await auth.stop();
+    await mgmt.stop();
     pg.stop();
     throw err;
   }
 
   process.env.E2E_APP_URL = APP_URL;
   process.env.E2E_AUTH_URL = auth.url;
+  process.env.E2E_MGMT_URL = mgmt.url;
   process.env.E2E_ADMIN_DB_URL = pg.adminUrl;
   process.env.E2E_APP_DB_URL = pg.appUrl;
   process.env.E2E_MASTER_KEYS = masterKeys;
@@ -100,6 +105,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     await new Promise((r) => setTimeout(r, 500));
     if (wrangler.exitCode === null) wrangler.kill("SIGKILL");
     await auth.stop();
+    await mgmt.stop();
     pg.stop();
     rmSync(dir, { recursive: true, force: true });
     if (process.env.E2E_DEBUG) process.stdout.write(output);

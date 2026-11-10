@@ -96,7 +96,7 @@ export const groupB: Platform[] = [
         },
         {
           q: "Does Supahound connect through the Supabase MCP server too?",
-          a: "No. Supahound uses read-only Supabase OAuth with the analytics:read and database:read scopes and never asks for a service-role key. It reads edge logs and the schema, not your Cursor workspace.",
+          a: "No. Supahound uses read-only Supabase OAuth with the read-only analytics:read, database:read and projects:read scopes and never asks for a service-role key. It reads edge logs and the schema, not your Cursor workspace.",
         },
       ],
     },

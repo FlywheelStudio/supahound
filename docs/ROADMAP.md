@@ -26,7 +26,7 @@ Its gate: legal review before any active-scan work.
 
 | V1 item (PRD) | Status | Issue |
 | --- | --- | --- |
-| Supabase OAuth connect, multi-project | Connect built; project picker not built | #4, #9 |
+| Supabase OAuth connect, multi-project | Connect and project picker built; live OAuth app pending | #4, #9 |
 | Posture scan | Not built | #11 |
 | Detector 1: query fingerprinting | Not built | #12 |
 | Detector 2: cross-tenant access | Built, 127 tests at prototype; live run pending | #3, #5 |
