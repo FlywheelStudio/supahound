@@ -94,3 +94,33 @@ export async function adminQuery<T extends pg.QueryResultRow>(sql: string, param
 }
 
 export const sha256Hex = (s: string) => createHash("sha256").update(s).digest("hex");
+
+// A Supabase connection with a static token (no refresh), as the OAuth callback would store it.
+export async function seedConnection(tenant: string, token: string): Promise<string> {
+  const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 1 });
+  const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: process.env.E2E_MASTER_KEYS });
+  try {
+    return await withTenant(app, tenantId(tenant), (tx) => repo.createConnection(tx, vault, { label: "Supabase", token }));
+  } finally {
+    await app.end();
+  }
+}
+
+// What the fake Management API answers for this token (support/fakeManagement.ts).
+export async function setSupabaseProjects(token: string, projects: { ref: string; name: string; status?: string }[], status = 200): Promise<void> {
+  const res = await fetch(`${process.env.E2E_MGMT_URL}/__test/projects`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, status, projects }),
+  });
+  if (!res.ok) throw new Error(`fake management: ${res.status}`);
+}
+
+export async function managementCalls(token: string): Promise<number> {
+  const calls = (await (await fetch(`${process.env.E2E_MGMT_URL}/__test/calls`)).json()) as { token: string }[];
+  return calls.filter((c) => c.token === token).length;
+}
+
+export async function userIdFor(email: string): Promise<string> {
+  const res = await fetch(`${process.env.E2E_AUTH_URL}/__test/user?email=${encodeURIComponent(email)}`);
+  if (!res.ok) throw new Error(`No fake Auth user for ${email}`);
+  return ((await res.json()) as { id: string }).id;
+}

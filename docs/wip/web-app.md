@@ -11,9 +11,10 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Built: Supabase OAuth connect. "Connect Supabase" (owners and admins) → Supabase consent →
   `/api/supabase/callback` → sealed credentials on a new connection. The poller refreshes tokens
   under the connection's row lock.
+- Built: the project picker (#9, [features/project-picker.md](../features/project-picker.md)).
 - Built: ownership refresh (#10): the poller loads `pg_policies` on a project's first poll; the
   overview shows detector 2 coverage ([feature doc](../features/ownership-refresh.md)).
-- **Next step:** the project picker (#9, PR #61). Then Stripe (#25), then alert email (#16).
+- **Next step:** Stripe (#25), then alert email (#16).
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
   need Supahound's Supabase project and a Hyperdrive config.
 
@@ -32,8 +33,8 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 
 ## Setup (Erik)
 
-0. Register the Supabase OAuth app (PRD "This week" task) with scopes `analytics:read` and
-   `database:read`, redirect URI `<APP_URL>/api/supabase/callback`. Put the client ID in both
+0. Register the Supabase OAuth app (PRD "This week" task) with scopes `analytics:read`,
+   `database:read` and `projects:read` (the project picker lists projects), redirect URI `<APP_URL>/api/supabase/callback`. Put the client ID in both
    `wrangler.jsonc` files and `wrangler secret put SUPABASE_OAUTH_CLIENT_SECRET` in both Workers.
 
 1. Supabase (Supahound project): Auth → Hooks → Send Email Hook → HTTPS,

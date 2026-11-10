@@ -81,7 +81,7 @@ export const groupA: Platform[] = [
         },
         {
           q: "Does Supahound need my service_role key?",
-          a: "No. Supahound never asks for a service_role or secret key. You authorize a Supabase organization through OAuth with two read-only scopes, analytics:read and database:read.",
+          a: "No. Supahound never asks for a service_role or secret key. You authorize a Supabase organization through OAuth with three read-only scopes: analytics:read, database:read and projects:read.",
         },
         {
           q: "Can Supahound block an attack on my Supabase project?",
@@ -183,7 +183,7 @@ export const groupA: Platform[] = [
         },
         {
           q: "Do I give Supahound the same access I gave Lovable?",
-          a: "No. Lovable writes migrations, deploys functions and stores secrets in your project. Supahound only reads: you authorize the organization with analytics:read and database:read, and it never asks for a service-role key.",
+          a: "No. Lovable writes migrations, deploys functions and stores secrets in your project. Supahound only reads: you authorize the organization with the read-only analytics:read, database:read and projects:read scopes, and it never asks for a service-role key.",
         },
       ],
     },

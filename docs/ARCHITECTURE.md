@@ -104,7 +104,8 @@ non-member gets the same 404 as a missing workspace (E2E UAT-W7).
 
 ## Security of the monitor
 
-- **Read-only by construction.** OAuth scopes only (`analytics:read`, `database:read`). Supahound
+- **Read-only by construction.** OAuth scopes only (`analytics:read`, `database:read`,
+  `projects:read`; decision 023). Supahound
   never asks for the service-role key.
 - **No attacker text in prompts.** User agents, emails, query values and IPs never reach a model.
   Only `llm.ts` may call a model, and ESLint blocks model imports everywhere else (`zdrGuard.test.ts`).

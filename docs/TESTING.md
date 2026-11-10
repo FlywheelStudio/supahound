@@ -35,7 +35,10 @@ fails if any suite reports skipped tests.
 2. **A fake Supabase Auth** (`support/fakeAuth.ts`). It issues ES256 tokens, and `getClaims()` verifies
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.
-3. **The built Worker** under `wrangler dev`, with test-only secrets in a temp env file.
+3. **A fake Supabase Management API** (`support/fakeManagement.ts`). It serves `GET /v1/projects`
+   per bearer token; an unknown token gets 401. The Worker reaches it through `SUPABASE_API_URL`,
+   because `page.route` cannot see server-side calls.
+4. **The built Worker** under `wrangler dev`, with test-only secrets in a temp env file.
 
 Nothing calls a real Supabase, Stripe or model API. UAT-W5 stops the browser at
 `api.supabase.com` with a route stub. UAT-W8 runs core's real `pollProject` against synthetic
@@ -86,6 +89,11 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W8 | The owner sees a critical incident after the poller catches a scrape; no raw IDs or user agents on the page |
 | UAT-W9 | Signing out ends the session |
 | UAT-W10 | The magic-link form gives the same answer for a known and an unknown address |
+| UAT-W11 | The owner picks a project; it shows "waiting for first poll"; inactive projects cannot be picked |
+| UAT-W12 | A forged pick adds only running projects Supabase lists, with Supabase's name, each once |
+| UAT-W13 | A member sees watched projects, gets no picker or Remove, triggers no Supabase call; a replayed owner form is refused |
+| UAT-W14 | Remove needs the exact name; it deletes the project and its incidents and keeps its audit rows |
+| UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
 | UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 
 ### Manual (needs a live service)
@@ -106,6 +114,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | No shared caching of signed-in pages | Middleware stops setting `private, no-store` | 3 E2E checks fail |
 | No second page for a repeat | Engine pages on every update at high or above | UAT-D4 fails |
 | Sign-in email HTML is escaped | `renderSignInEmail` drops `escapeHtml` | 2 unit tests fail |
+| Picks are checked against Supabase's list | `handleWatch` inserts the submitted refs | UAT-W12 fails |
+| Remove needs the exact name | `removalOutcome` ignores the typed name | UAT-W14 fails |
+| Removal keeps audit rows | Migration `20261109000000` left out | Postgres `projects.test.ts` fails |
 | Never-loaded ownership is not clean (#10) | The run records no unassessed detectors | 3 tests fail, including UAT-D8 |
 | Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
 | A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |

@@ -21,7 +21,7 @@ export const PRIVACY: Section[] = [
     heading: "What data do we collect?",
     bullets: [
       "Account data: your email address, sign-in events, workspace name and team memberships. Sign-in uses one-time email links; we store no passwords.",
-      "Supabase connection data: the OAuth tokens your Supabase org grants us, sealed with a key unique to your workspace. We request the analytics:read and database:read scopes only, and never ask for a service-role or secret key.",
+      "Supabase connection data: the OAuth tokens your Supabase org grants us, sealed with a key unique to your workspace. We request the read-only analytics:read, database:read and projects:read scopes only, and never ask for a service-role or secret key.",
       "Project metadata: project refs and names, and your Row Level Security policy definitions, which tell the detectors who owns which rows.",
       "Log data: Supahound reads your projects' edge logs through the Supabase Management API to run its detectors. We do not store raw log rows. We store findings and incidents: a pseudonymous actor identifier (such as a user ID), severity, counts, time ranges and structured evidence features such as enums, network ASNs and fingerprints. We never store raw user agents or query values.",
       "Query records: a list of every query Supahound runs against your project and every model call, kept as hashes and counts, never query results, so you can audit our access.",
