@@ -4,10 +4,12 @@ Decision 025. Milestone "Public release", issues #63–#68.
 
 ## Status — 2026-11-10
 
-- Done in PR #69: leak audit (#63), site split (#64), self-hosting (#65), public files (#66).
-- The private site repo exists: `FlywheelStudio/supahound-site` (main, CI on push).
-- **Next step:** Erik merges #61 and #62, then #69 (after `develop` is merged into it; the conflicts
-  are listed in the PR). Then the rehearsal (#67) and the publish (#68).
+- Merged 2026-11-10: #61, #62, then PR #69: leak audit (#63), site split (#64), self-hosting
+  (#65), public files (#66). On `develop`: core 352, web 68, poller 9 tests, 27 E2E, CI green.
+- The private site repo exists: `FlywheelStudio/supahound-site` (main, CI green). It holds #61's
+  content edits.
+- **Next step:** legal review of `CLA.md` and `LICENSE.md`, then the rehearsal (#67), then the
+  publish (#68). UAT-W14 flake: #70.
 
 ## Remaining
 

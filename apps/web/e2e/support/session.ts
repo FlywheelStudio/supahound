@@ -38,3 +38,10 @@ export function tenantFromUrl(page: Page): string {
   if (!m) throw new Error(`Not on a workspace page: ${page.url()}`);
   return m[1]!;
 }
+
+// Wait until a freshly loaded page can take a client-side link click (#70). `goto` and `reload`
+// return at the load event, but vinext's <Link> imports its navigation module on the first click;
+// a click in that window was lost once (UAT-W14). After network idle, every chunk has loaded.
+export async function settled(page: Page): Promise<void> {
+  await page.waitForLoadState("networkidle");
+}
