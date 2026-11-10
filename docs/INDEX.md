@@ -9,6 +9,7 @@
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
+| [wip/public-release.md](wip/public-release.md) | Public release: what PR #69 did, the rehearsal and the publish steps left |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
