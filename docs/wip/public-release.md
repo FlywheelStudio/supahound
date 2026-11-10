@@ -22,8 +22,9 @@ Decision 025. Milestone "Public release", issues #63–#68.
 2. **Legal review.** `CLA.md` is not a vetted template. `LICENSE.md` is the FSL template with the
    licensor filled in.
 3. **Never `@claude` on an outsider's issue or PR.**
-4. **Deploy** the site to `supahound.com` and the app to `app.supahound.com`; production deploys
-   need approval.
+4. **Deploy the app** to `app.supahound.com` (needs #4 and #8). The marketing site is live on
+   `supahound.com` and `www.supahound.com` since 2026-11-10; its sign-up links point at the app and
+   fail until the app ships.
 
 ## Build log
 
