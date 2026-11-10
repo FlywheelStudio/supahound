@@ -58,4 +58,5 @@ regexes = [
   '''REPLACE_ME''',
   '''REPLACE_WITH_''',
   '''postgres(?:ql)?://[^:@/\s]+:(?:postgres|password|secret|test|pass|changeme)@''',
+  '''postgres(?:ql)?://[^:@/\s]+:<[^>]+>@''',
 ]

@@ -2,6 +2,7 @@
 
 | Doc | Description |
 | --- | --- |
+| [../README.md](../README.md), [../CONTRIBUTING.md](../CONTRIBUTING.md), [../SECURITY.md](../SECURITY.md), [../CLA.md](../CLA.md), [../LICENSE.md](../LICENSE.md) | Public-repo front door: what it is, how to contribute, vulnerability reporting, the CLA, FSL-1.1-ALv2 |
 | [STATE.md](STATE.md) | In progress and completed; the backlog is in GitHub issues |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System diagram, packages, one poll step by step, isolation layers, data model |
 | [ROADMAP.md](ROADMAP.md) | Phases, gates, milestones, V1 scope status with issue links |

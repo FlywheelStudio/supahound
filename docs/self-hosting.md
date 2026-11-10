@@ -3,7 +3,7 @@
 Status: **alpha.** Nobody has run this guide from zero on clean accounts yet (#67). The steps
 match the code and the tests. The items under "Not verified yet" can still change.
 
-Supahound is fair source under [FSL-1.1-ALv2](../LICENSE). You may run it for your own apps and
+Supahound is fair source under [FSL-1.1-ALv2](../LICENSE.md). You may run it for your own apps and
 for your company. You may not offer it to others as a commercial hosted service (decision 025).
 Flywheel runs the hosted version.
 

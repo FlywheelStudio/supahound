@@ -1,6 +1,7 @@
 # Supahound
 
-Repository: [FlywheelStudio/supahound](https://github.com/FlywheelStudio/supahound) (private). Renamed from Guardbase (decision 015).
+Repository: [FlywheelStudio/supahound](https://github.com/FlywheelStudio/supahound). Fair source under
+FSL-1.1-ALv2 (`LICENSE.md`, decision 025); contributors sign `CLA.md`. Renamed from Guardbase (decision 015).
 
 **Supahound**: abnormal-traffic monitoring for Supabase apps. Customers connect their Supabase
 org (OAuth, read-only); a Cloudflare poller reads each project's edge logs, runs the detectors,
@@ -9,8 +10,10 @@ Workers handles sign-in (Supabase Auth magic links), onboarding and the dashboar
 Backend: Supahound's own Supabase Postgres (schema `supahound`, forced RLS, reached through
 Hyperdrive with caching off). Everything else runs on Cloudflare (decision 008).
 
-Product spec: [Supahound PRD](https://claude.ai/artifact/Qx6AaTtA4fn6HqPJ4DcSzj) (Claude Doc).
-Where the PRD and a decision record disagree, the decision wins (hosting: 008; models: 011).
+The public spec is the decision records plus `docs/ARCHITECTURE.md`. Flywheel's PRD is private;
+where it and a decision record disagree, the decision wins (hosting: 008; models: 011).
+Self-hosting: `docs/self-hosting.md`. The marketing site and legal pages are in the private repo
+`FlywheelStudio/supahound-site` (decision 025); this repo holds the product only.
 
 Orient in this order: `docs/INDEX.md` → `docs/STATE.md` → the active WIP doc → the issue.
 `docs/ARCHITECTURE.md` explains the system; `docs/ROADMAP.md` maps phases to milestones.
@@ -20,7 +23,8 @@ uses the three-branch model below instead of a main-only flow.
 
 ## Workflow (decision 019, `docs/WORKFLOW.md`)
 
-- **Ask before you do any work.** Confirm scope and approach with Erik first.
+- **Ask before you do any work.** Confirm scope and approach with the person you work for first
+  (Erik in Flywheel sessions; outside contributors: the issue's maintainer).
 - **Check branches first.** `git fetch && git branch -a`. If the work belongs on an open branch, use it.
 - **Three branches:** one `feature/<slug>` (or `fix/<slug>`), `develop`, `main` (production).
   Feature PRs target `develop`. Every branch ends merged or deleted; no work left outstanding.
@@ -47,6 +51,8 @@ pnpm --filter @supahound/web e2e:only     # Playwright only, on an existing buil
 
 pnpm scan --file test/fixtures/events.ndjson --ownership test/fixtures/policies.json   # core CLI
 pnpm discover-keys --project <ref>        # PRD task 1: which auth fields exist in edge logs
+pnpm -s print-sql                         # the rollup, key-discovery and pg_policies SQL
+pnpm -s master-key [--rotate]             # a new SUPAHOUND_MASTER_KEYS value (self-hosting)
 pnpm --filter @supahound/web dev          # web app (needs .dev.vars, see apps/web/wrangler.jsonc)
 pnpm --filter @supahound/poller dev       # poller Worker
 pnpm --filter @supahound/<app> types      # regenerate Worker binding types after config changes
@@ -79,11 +85,12 @@ prints the wrangler output. Prove each new check can fail before you trust it (d
 | `packages/core/src/explainer/` | Features, validator, template; `llm.ts` is the ONLY model caller (ZDR) |
 | `packages/core/src/poller/` | One tenant-scoped poll; scheduler helpers |
 | `apps/poller/` | Cloudflare Worker: cron → queue → poll, via Hyperdrive |
-| `apps/web/` | Next.js on Workers (vinext): auth, onboarding, dashboard, Supabase connect, email hook |
+| `apps/web/` | Next.js on Workers (vinext): auth, onboarding, dashboard, Supabase connect, email hook. No marketing pages; optional brand links in `lib/brand.ts` |
 | `supabase/migrations/` | Postgres schema with forced RLS (apply to shared DBs only with approval) |
+| `supabase/setup/` | Not migrations: the login-user SQL for self-hosters (passwords never go in git) |
 | `packages/core/test/db/`, `test/uat/` | Postgres suites; detection UAT scenarios (UAT-D*) |
 | `apps/web/e2e/` | Playwright: signed-out checks, web UAT journey (UAT-W*), fake Auth, Postgres setup |
-| `.github/` | CI, PR hygiene, labeler, Claude Action, Dependabot, issue and PR templates |
+| `.github/` | CI (with the gitleaks secret scan, `.gitleaks.toml`), PR hygiene, CLA check, labeler, Claude Action, Dependabot, templates |
 | `docs/` | INDEX, STATE, ARCHITECTURE, ROADMAP, TESTING, WORKFLOW, decisions, WIP and feature docs |
 
 ## Environment
@@ -94,6 +101,11 @@ Local values go in `.dev.vars` (git-ignored). Hyperdrive local strings:
 
 ## Rules specific to this repo
 
+- **This repo is public.** Never put secrets, client names, customer data or internal-only notes in
+  code, docs, issues or PRs. CI runs gitleaks on every push; add a rule to `.gitleaks.toml` for any
+  new secret format.
+- A shipped feature that the marketing site shows as "Coming soon" flips to live in
+  `FlywheelStudio/supahound-site` (`content/features.ts`) in a follow-up PR there.
 - Never commit real log rows. They hold user IDs, IPs and emails. Name local exports `*.local.ndjson`
   (git-ignored).
 - Detector evidence carries structured features only: enums, counts, ASNs, fingerprints. No raw user
