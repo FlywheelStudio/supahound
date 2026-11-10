@@ -19,7 +19,7 @@ This file tracks only what is in progress and what is done.
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
 | GitHub workflow: CI, templates, labels, milestones, issues, E2E + UAT, project docs (chore, no feature doc) | #2 | 2026-11-09, PR #1 into `develop` | [WORKFLOW.md](WORKFLOW.md), [TESTING.md](TESTING.md), decisions 019 and 020 |
-| Marketing site (supahound.com): 62 pages, SEO/AEO, Coming soon registry | #34, #40 | 2026-11-09, PRs #45 and #53 into `develop` | [features/marketing-site.md](features/marketing-site.md), decisions 017 and 021 |
+| Marketing site (supahound.com): 62 pages, SEO/AEO, Coming soon registry | #34, #40 | 2026-11-09, PRs #45 and #53 into `develop` | Moved to the private repo `FlywheelStudio/supahound-site` (decision 025); decisions 017 and 021 |
 
 A feature moves here when its feature doc exists in `docs/features/`.
 

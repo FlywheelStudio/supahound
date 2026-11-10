@@ -7,7 +7,6 @@
 | [ROADMAP.md](ROADMAP.md) | Phases, gates, milestones, V1 scope status with issue links |
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
-| [features/marketing-site.md](features/marketing-site.md) | Marketing site: pages, content model, SEO/AEO, middleware allowlist, Coming soon registry, tests |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone built, passive + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
@@ -29,7 +28,7 @@
 | [decisions/014-email-cloudflare.md](decisions/014-email-cloudflare.md) | Cloudflare Email Service for magic links, alerts and digests |
 | [decisions/015-name-supahound.md](decisions/015-name-supahound.md) | The product is named Supahound; every identifier follows |
 | [decisions/016-scan-funnel.md](decisions/016-scan-funnel.md) | hackme.si scan funnel: shared tenancy, DNS-TXT + scope-lock gates, passive first |
-| [decisions/017-marketing-site.md](decisions/017-marketing-site.md) | Marketing site in the web app on supahound.com; public-path middleware allowlist |
+| [decisions/017-marketing-site.md](decisions/017-marketing-site.md) | Marketing site in the web app on supahound.com (moved to a private repo by 025) |
 | [decisions/018-vercel-ai-sdk.md](decisions/018-vercel-ai-sdk.md) | Keep the Vercel AI SDK + Vercel AI Gateway; Cloudflare AI Gateway declined on ZDR coverage |
 | [decisions/019-github-issues-and-three-branches.md](decisions/019-github-issues-and-three-branches.md) | GitHub issues hold the work; feature / develop / main; CI gates merges |
 | [decisions/020-e2e-with-fake-supabase-auth.md](decisions/020-e2e-with-fake-supabase-auth.md) | E2E runs the built Worker, Postgres and a fake Supabase Auth |

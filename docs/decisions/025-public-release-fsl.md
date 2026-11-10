@@ -72,6 +72,10 @@ selling a hosted Supahound with its own paid plans (decision 013). Erik's terms,
   The issue, PR, comment and review text (68 issues and PRs) also scanned clean. The Actions secrets are
   `CLAUDE_CODE_OAUTH_TOKEN` only.
 - CI runs the same gitleaks scan on every push and PR.
+- The Coming-soon registry (decision 021) moved with the site. A feature that ships in this repo
+  flips to live in `supahound-site` in a follow-up PR there.
+- The app has no public pages: `/` redirects to `/app`, `robots.txt` disallows everything, and
+  every response is `private, no-store`. The sign-up page no longer names plans or prices.
 - Decision records keep their wording, including quotes from Erik. Records are never rewritten
   (workspace rule); later records supersede them.
 - The PRD is a private Flywheel document. Public docs no longer link to it; the decision records
