@@ -14,6 +14,7 @@
 | [wip/public-release.md](wip/public-release.md) | Public release: what PR #69 did, the rehearsal and the publish steps left |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone and secrets scanner built, other passive checks + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
+| [wip/billing.md](wip/billing.md) | Billing: validated card ($1 hold), 7-day trial, the gate, Stripe webhooks |
 | [wip/web-app.md](wip/web-app.md) | Web app: magic-link auth, onboarding, dashboard, setup steps |
 | [wip/tenant-isolation.md](wip/tenant-isolation.md) | Multi-tenant storage, RLS, token vault, poller |
 | [wip/incident-explainer.md](wip/incident-explainer.md) | Incident engine and ZDR-only LLM explainer |
@@ -44,3 +45,4 @@
 | [decisions/025-public-release-fsl.md](decisions/025-public-release-fsl.md) | Public repo under FSL-1.1-ALv2 (fair source), short CLA, marketing site to a private repo |
 | [decisions/026-scan-secrets-leak-paths.md](decisions/026-scan-secrets-leak-paths.md) | Scan funnel secrets scanner: client code plus a fixed leak-path list; scope on every hop; no secret in evidence (amends 016) |
 | [decisions/027-hosted-deploy-config-private.md](decisions/027-hosted-deploy-config-private.md) | Flywheel's hosted deploy config in a private repo; public `wrangler.jsonc` files stay templates; deploys from a fresh clone |
+| [decisions/028-card-validated-trial.md](decisions/028-card-validated-trial.md) | A validated card ($1 hold, released) before any use; 7-day trial; per project $19.99 (Starter) or $99 (Pro, above 1M requests/30 days); Enterprise above 10M (supersedes 013's plans) |

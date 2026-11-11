@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { BillingMode } from "../db/billing.js";
 import { dueProjects } from "../db/repo.js";
 import { scopeKey, type ProjectScope } from "../tenancy/scope.js";
 import { pollProject, type PollDeps, type PollOutcome } from "./pollProject.js";
@@ -9,6 +10,7 @@ import { pollProject, type PollDeps, type PollOutcome } from "./pollProject.js";
 
 export interface SchedulerDeps extends PollDeps {
   scheduler: Pool;
+  billing: BillingMode;
   concurrency?: number;
   batchSize?: number;
 }
@@ -19,7 +21,7 @@ export interface JobResult {
 }
 
 export async function runDuePolls(deps: SchedulerDeps): Promise<JobResult[]> {
-  const scopes = await dueProjects(deps.scheduler, deps.intervalSeconds ?? 60, deps.batchSize ?? 200);
+  const scopes = await dueProjects(deps.scheduler, deps.intervalSeconds ?? 60, deps.batchSize ?? 200, deps.billing);
   const queue = [...new Map(scopes.map((s) => [scopeKey(s), s])).values()];
   const results: JobResult[] = [];
 

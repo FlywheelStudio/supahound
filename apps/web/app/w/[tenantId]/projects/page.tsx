@@ -1,5 +1,5 @@
 import { listConnections, listProjects, type ProjectSummary } from "@supahound/core/db/repo";
-import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { NotAMemberError } from "@supahound/core/db/user";
 import { accessTokenInTx } from "@supahound/core/supabase/credentials";
 import { isPickable, listSupabaseProjects, ManagementApiError, type SupabaseProject } from "@supahound/core/supabase/management";
 import { OAuthError } from "@supahound/core/supabase/oauth";
@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { withPool } from "../../../../lib/db";
+import { paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { requireUser } from "../../../../lib/supabase";
 import { removeProjectAction, watchProjectsAction } from "./actions";
@@ -49,7 +50,7 @@ export default async function Projects({
   // Membership, watched projects and connection tokens in one transaction. Members get no token,
   // so their visit never calls Supabase. The Supabase calls run after the transaction commits.
   const data = await withPool((pool) =>
-    withTenantForUser(pool, user.id, tenant, async (tx, role) => {
+    paidTenant(pool, user.id, tenant, async (tx, role) => {
       const watched = await listProjects(tx);
       const connections = await listConnections(tx);
       const tokens: { connectionId: ConnectionId; label: string; token: string | null }[] = [];
@@ -68,6 +69,7 @@ export default async function Projects({
       return { role, watched, connections: connections.length, tokens };
     }),
   ).catch((err: unknown) => {
+    toBillingIfUnpaid(err);
     if (err instanceof NotAMemberError) notFound();
     throw err;
   });

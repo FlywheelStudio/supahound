@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { adminQuery, pollAttack, sha256Hex } from "../support/seed";
-import { requestMagicLink, signIn, tenantFromUrl, uniqueEmail, WORKSPACE_URL } from "../support/session";
+import { WORKSPACE_URL, createPaidWorkspace, requestMagicLink, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // User acceptance scenarios for the web app (docs/testing.md, UAT-W*). Each runs the real
 // Worker, real Postgres with forced RLS, and Supabase Auth's token checks against a fake server.
@@ -32,8 +32,7 @@ test.describe("UAT: from email to a watched workspace", () => {
   test("UAT-W4 a new user creates a workspace and sees the setup checklist", async ({ page }) => {
     await signIn(page, uniqueEmail("w4"));
     await page.getByLabel("Workspace name").fill("Acme Studio");
-    await page.getByRole("button", { name: "Create workspace" }).click();
-    await expect(page).toHaveURL(WORKSPACE_URL);
+    await createPaidWorkspace(page);
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Finish setup" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect Supabase" })).toBeVisible();
@@ -50,8 +49,7 @@ test.describe("UAT: from email to a watched workspace", () => {
   test("UAT-W5 Connect Supabase sends the owner to Supabase consent with PKCE and a bound state", async ({ page }) => {
     await signIn(page, uniqueEmail("w5"));
     await page.getByLabel("Workspace name").fill("Connect Co");
-    await page.getByRole("button", { name: "Create workspace" }).click();
-    await expect(page).toHaveURL(WORKSPACE_URL);
+    await createPaidWorkspace(page);
     const tenant = tenantFromUrl(page);
 
     // Stop at Supabase's door: never call the real Management API from a test.
@@ -88,8 +86,7 @@ test.describe("UAT: from email to a watched workspace", () => {
   test("UAT-W6 a callback with a forged state does not connect anything", async ({ page }) => {
     await signIn(page, uniqueEmail("w6"));
     await page.getByLabel("Workspace name").fill("Forged Co");
-    await page.getByRole("button", { name: "Create workspace" }).click();
-    await expect(page).toHaveURL(WORKSPACE_URL);
+    await createPaidWorkspace(page);
     const tenant = tenantFromUrl(page);
     await page.goto(`/api/supabase/callback?code=abc&state=${tenant}.${"f".repeat(43)}`);
     await expect(page.getByRole("status")).toHaveText(/failed or the link expired|Connecting Supabase failed/);
@@ -100,8 +97,7 @@ test.describe("UAT: from email to a watched workspace", () => {
   test("UAT-W7 another user cannot open my workspace (same 404 as a missing one)", async ({ page, browser }) => {
     await signIn(page, uniqueEmail("w7-owner"));
     await page.getByLabel("Workspace name").fill("Private Co");
-    await page.getByRole("button", { name: "Create workspace" }).click();
-    await expect(page).toHaveURL(WORKSPACE_URL);
+    await createPaidWorkspace(page);
     const tenant = tenantFromUrl(page);
 
     const intruder = await browser.newPage();
@@ -117,8 +113,7 @@ test.describe("UAT: from email to a watched workspace", () => {
   test("UAT-W8 the owner sees a critical incident after the poller catches a scrape", async ({ page }) => {
     await signIn(page, uniqueEmail("w8"));
     await page.getByLabel("Workspace name").fill("Agency One");
-    await page.getByRole("button", { name: "Create workspace" }).click();
-    await expect(page).toHaveURL(WORKSPACE_URL);
+    await createPaidWorkspace(page);
     const tenant = tenantFromUrl(page);
 
     await pollAttack(tenant, "Client app");
@@ -138,8 +133,7 @@ test.describe("UAT: from email to a watched workspace", () => {
   test("UAT-W9 signing out ends the session", async ({ page }) => {
     await signIn(page, uniqueEmail("w9"));
     await page.getByLabel("Workspace name").fill("Bye Co");
-    await page.getByRole("button", { name: "Create workspace" }).click();
-    await expect(page).toHaveURL(WORKSPACE_URL);
+    await createPaidWorkspace(page);
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.goto("/app");
     await expect(page).toHaveURL(/\/login$/);

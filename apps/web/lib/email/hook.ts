@@ -3,7 +3,8 @@ import { confirmUrl, isSignInType, renderSignInEmail, type RenderedEmail } from 
 
 // Supabase Auth Send Email Hook: https://supabase.com/docs/guides/auth/auth-hooks/send-email-hook
 // Supabase signs the request (Standard Webhooks). We verify it, build our own link, and send
-// through Cloudflare Email Service. A 200 with an empty body tells Supabase the email went out.
+// through Cloudflare Email Service. Success is 200 with `{}` as application/json: Supabase rejects
+// any other content type and rolls back the sign-up, which kills the link already sent (#87).
 
 export interface HookDeps {
   // "v1,whsec_<base64>" as Supabase shows it.
@@ -51,5 +52,5 @@ export async function handleSendEmailHook(body: string, headers: Headers, deps: 
   } catch {
     return hookError(502, "email send failed");
   }
-  return new Response(null, { status: 200 });
+  return Response.json({}, { status: 200 });
 }

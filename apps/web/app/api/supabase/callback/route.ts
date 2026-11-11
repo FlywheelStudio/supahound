@@ -1,9 +1,10 @@
 import { consumeOAuthState, createConnection } from "@supahound/core/db/repo";
-import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { NotAMemberError } from "@supahound/core/db/user";
 import { exchangeCode } from "@supahound/core/supabase/oauth";
 import { NextResponse, type NextRequest } from "next/server";
 import { handleOAuthCallback } from "../../../../lib/connect";
 import { withPool } from "../../../../lib/db";
+import { paidTenant } from "../../../../lib/billing";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { currentUser } from "../../../../lib/supabase";
 
@@ -12,10 +13,10 @@ export async function GET(request: NextRequest) {
   const user = await currentUser();
   const path = await withPool((pool) =>
     handleOAuthCallback(request.nextUrl.searchParams, user?.id ?? null, {
-      consume: (u, t, hash) => withTenantForUser(pool, u, t, (tx) => consumeOAuthState(tx, u, hash, new Date())),
+      consume: (u, t, hash) => paidTenant(pool, u, t, (tx) => consumeOAuthState(tx, u, hash, new Date())),
       exchange: (code, verifier) => exchangeCode(oauthClient(), code, verifier),
       store: (u, t, credentials) =>
-        withTenantForUser(pool, u, t, (tx) => createConnection(tx, vault(), { label: "Supabase", token: JSON.stringify(credentials) })).then(() => undefined),
+        paidTenant(pool, u, t, (tx) => createConnection(tx, vault(), { label: "Supabase", token: JSON.stringify(credentials) })).then(() => undefined),
       isNotAMember: (err) => err instanceof NotAMemberError,
     }),
   );

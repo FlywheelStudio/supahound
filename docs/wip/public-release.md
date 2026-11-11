@@ -19,8 +19,8 @@ Decision 025. Milestone "Public release", issues #63–#68.
 1. **Rehearsal (#67).** Follow `docs/self-hosting.md` on clean Cloudflare and Supabase accounts. It
    is blocked on the OAuth app (#4) and a live database (#8). Settle the four items under "Not
    verified yet" in the guide.
-2. **Legal review.** `CLA.md` is not a vetted template. `LICENSE.md` is the FSL template with the
-   licensor filled in.
+2. **Legal review: done.** Erik completed it on 2026-11-11 (#81): `CLA.md`, `LICENSE.md`, and the
+   site's Terms and Privacy policy, including the billing terms of decision 028.
 3. **Never `@claude` on an outsider's issue or PR.**
 4. **Finish the app deploy (#82).** Both Workers run on `app.supahound.com` since 2026-11-10, from
    Flywheel's private deploy repo (decision 027). Left: the OAuth app (#4), then Erik's sign-in
