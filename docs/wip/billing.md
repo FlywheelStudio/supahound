@@ -56,8 +56,7 @@ Migration, `packages/core/src/{billing,db}`, `apps/web/app/w/[tenantId]/**`,
   staff join it. Decision 029, issue #94: exempt while the sole owner's verified email is on
   `SUPAHOUND_BILLING_EXEMPT_DOMAINS`; migration `20261111010000_billing_exempt.sql` adds
   `exempt_owner`/`exempt_at` and a membership trigger that clears them when the owners change.
-  The one staff subscription that existed before this gets a 100%-off coupon in Stripe (Erik, by
-  hand), so its trial end charges nothing.
+  A staff subscription made before this keeps running until its owner cancels it.
 
 ## Next
 
@@ -66,5 +65,6 @@ Migration, `packages/core/src/{billing,db}`, `apps/web/app/w/[tenantId]/**`,
 3. Live cutover: the same script with a live key, after Erik approves (CLAUDE.md).
 4. SMS alerts: an issue and a provider decision before Pro's "coming soon" can flip.
 5. Staff exemption (#94): apply the migration to production, set the domain list in the private
-   deploy config, deploy (each needs Erik's approval). Then the staff owner opens the billing page
-   once and cancels the old Stripe subscription.
+   deploy config, deploy (each needs Erik's approval), in that order: the new code reads the new
+   columns, so code before migration breaks every gated page. Then the staff owner opens the
+   billing page once (grants the exemption, proves the list parsed) and cancels any old subscription.

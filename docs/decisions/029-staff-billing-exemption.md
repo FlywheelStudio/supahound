@@ -48,8 +48,7 @@ member joins it, for example to help the customer.
 - **Hard-code the domain in the public code.** Rejected: self-hosters would inherit it, and a
   change would need a release.
 - **A 100%-off Stripe coupon per staff workspace.** Still needs a card and a $1 hold for every
-  workspace, and someone must add the coupon by hand each time. The hosted deploy uses one only for
-  a staff subscription that existed before this decision.
+  workspace, and someone must add the coupon by hand each time.
 - **Set the status to `active` in the database.** Rejected: it hides that the workspace is exempt,
   and the billing page would offer a Billing Portal with no Stripe customer.
 
