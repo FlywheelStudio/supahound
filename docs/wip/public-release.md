@@ -19,12 +19,12 @@ Decision 025. Milestone "Public release", issues #63–#68.
 1. **Rehearsal (#67).** Follow `docs/self-hosting.md` on clean Cloudflare and Supabase accounts. It
    is blocked on the OAuth app (#4) and a live database (#8). Settle the four items under "Not
    verified yet" in the guide.
-2. **Legal review.** `CLA.md` is not a vetted template. `LICENSE.md` is the FSL template with the
-   licensor filled in.
+2. **Legal review: done.** Erik completed it on 2026-11-11 (#81): `CLA.md`, `LICENSE.md`, and the
+   site's Terms and Privacy policy, including the billing terms of decision 028.
 3. **Never `@claude` on an outsider's issue or PR.**
-4. **Deploy the app** to `app.supahound.com` (needs #4 and #8). The marketing site is live on
-   `supahound.com` and `www.supahound.com` since 2026-11-10; its sign-up links point at the app and
-   fail until the app ships.
+4. **Finish the app deploy (#82).** Both Workers run on `app.supahound.com` since 2026-11-10, from
+   Flywheel's private deploy repo (decision 027). Left: the OAuth app (#4), then Erik's sign-in
+   and connect test. The marketing site's sign-up links now reach the app.
 
 ## Build log
 
@@ -38,3 +38,7 @@ Decision 025. Milestone "Public release", issues #63–#68.
   NOSUPERUSER or NOBYPASSRLS in `ALTER ROLE`. The rerun path now changes only the password and
   refuses an existing user with elevated attributes.
 - `claude.yml` now refuses fork PRs and outsider-authored issues, not only outsider commenters.
+- First production deploy (2026-11-10): the six migrations applied to Supahound's Supabase project
+  and matched a local Postgres 17 on a catalog fingerprint (columns, constraints, indexes,
+  policies, forced RLS, functions, grants). `anon`, `authenticated` and `service_role` cannot use
+  schema `supahound`. The direct database host had IPv6 only; Hyperdrive uses the session pooler.
