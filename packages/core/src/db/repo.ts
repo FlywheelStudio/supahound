@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { POLLABLE_STATUSES } from "../billing/policy.js";
+import type { AlertLevel } from "../alerts/email.js";
 import type { Finding, Severity } from "../detectors/finding.js";
 import type { OwnershipMap } from "../ownership/ownership.js";
 import { connectionId, projectId, projectScope, tenantId, type ConnectionId, type ProjectId, type ProjectScope, type TenantId } from "../tenancy/scope.js";
@@ -54,6 +55,7 @@ export async function createProject(
 
 export interface ProjectRecord {
   scope: ProjectScope;
+  name: string;
   connectionId: ConnectionId;
   supabaseRef: string;
   ownership: OwnershipMap;
@@ -63,15 +65,18 @@ export interface ProjectRecord {
   ownershipError: string | null;
   expectedAsns: number[];
   paused: boolean;
+  // The lowest severity that emails members, or "off" (decision 030).
+  emailAlerts: AlertLevel;
 }
 
 export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRecord | null> {
   const rows = await tx.query<{
     connection_id: string; supabase_ref: string; ownership: OwnershipMap; expected_asns: number[]; paused: boolean;
     ownership_refreshed_at: Date | null; ownership_attempted_at: Date | null; ownership_error: string | null;
+    email_alerts: AlertLevel; name: string;
   }>(
-    `SELECT connection_id, supabase_ref, ownership, expected_asns, paused,
-            ownership_refreshed_at, ownership_attempted_at, ownership_error
+    `SELECT name, connection_id, supabase_ref, ownership, expected_asns, paused,
+            ownership_refreshed_at, ownership_attempted_at, ownership_error, email_alerts
      FROM supahound.projects WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, id],
   );
@@ -79,6 +84,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
   if (!r) return null;
   return {
     scope: projectScope(tx.tenantId, id),
+    name: r.name,
     connectionId: connectionId(r.connection_id),
     supabaseRef: r.supabase_ref,
     ownership: r.ownership,
@@ -87,6 +93,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
     ownershipError: r.ownership_error,
     expectedAsns: r.expected_asns,
     paused: r.paused,
+    emailAlerts: r.email_alerts,
   };
 }
 
@@ -235,20 +242,23 @@ export interface IncidentRecord {
   hits: number;
   openedAt: Date;
   lastSeenAt: Date;
+  // The severity of the last alert email; null when none went out (decision 030).
+  alertedSeverity?: Severity | null;
 }
 
 export async function openIncidents(tx: TenantTx, id: ProjectId): Promise<IncidentRecord[]> {
   const rows = await tx.query<{
     id: string; actor: string; severity: Severity; detectors: string[]; signals: string[];
-    finding_count: number; hits: number; opened_at: Date; last_seen_at: Date;
+    finding_count: number; hits: number; opened_at: Date; last_seen_at: Date; alerted_severity: Severity | null;
   }>(
-    `SELECT id, actor, severity, detectors, signals, finding_count, hits, opened_at, last_seen_at
+    `SELECT id, actor, severity, detectors, signals, finding_count, hits, opened_at, last_seen_at, alerted_severity
      FROM supahound.incidents WHERE tenant_id = $1 AND project_id = $2 AND status = 'open'`,
     [tx.tenantId, id],
   );
   return rows.map((r) => ({
     id: r.id, actor: r.actor, severity: r.severity, detectors: r.detectors, signals: r.signals,
     findingCount: r.finding_count, hits: r.hits, openedAt: r.opened_at, lastSeenAt: r.last_seen_at,
+    alertedSeverity: r.alerted_severity,
   }));
 }
 
@@ -292,7 +302,7 @@ export async function setIncidentSummary(
   );
 }
 
-export type AuditAction = "logs_query" | "policies_query" | "model_call";
+export type AuditAction = "logs_query" | "policies_query" | "model_call" | "alert_email";
 
 export async function appendAudit(
   tx: TenantTx,
@@ -355,6 +365,7 @@ export interface ProjectSummary {
   // Detector 2 coverage (decision 024): "unable_to_assess" when the latest finished run lists it as
   // unassessed; "no_owned_tables" when the policies loaded but scope no table to an owner.
   crossTenant: "assessed" | "unable_to_assess" | "no_owned_tables" | null;
+  emailAlerts: AlertLevel;
 }
 
 function crossTenantCoverage(lastUnassessed: string[] | null, loaded: boolean, empty: boolean): ProjectSummary["crossTenant"] {
@@ -367,9 +378,9 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
   const rows = await tx.query<{
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
-    last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean;
+    last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean; email_alerts: AlertLevel;
   }>(
-    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at,
+    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts,
             p.ownership_refreshed_at IS NOT NULL AS ownership_loaded,
             p.ownership = '{}'::jsonb AS ownership_empty,
             (SELECT r.unassessed_detectors FROM supahound.poll_runs r
@@ -386,6 +397,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     id: projectId(r.id), name: r.name, supabaseRef: r.supabase_ref, paused: r.paused,
     lastPolledAt: r.last_polled_at, openIncidents: r.open_incidents, lastRunStatus: r.last_run_status,
     crossTenant: crossTenantCoverage(r.last_unassessed, r.ownership_loaded, r.ownership_empty),
+    emailAlerts: r.email_alerts,
   }));
 }
 
@@ -484,4 +496,95 @@ export async function consumeOAuthState(tx: TenantTx, userId: string, stateHash:
     [tx.tenantId, stateHash, userId, now],
   );
   return rows[0]?.code_verifier ?? null;
+}
+
+// Incident alert email (issue #16, decision 030). The incident row is the outbox.
+
+// Open incidents of this project that should email now: at or above the project's threshold,
+// with no email yet at this severity or higher. A failed send leaves the row pending, so the
+// next poll retries it; an escalation makes it pending again.
+export interface PendingAlert {
+  id: string;
+  actor: string;
+  severity: Severity;
+  alertedSeverity: Severity | null;
+  detectors: string[];
+  signals: string[];
+  findingCount: number;
+  hits: number;
+  openedAt: Date;
+  lastSeenAt: Date;
+  summary: { summary: string; likelyImpact: string; nextSteps: string[] } | null;
+}
+
+const RANK_SQL = (col: string) => `array_position(ARRAY['low','medium','high','critical']::text[], ${col})`;
+
+export async function pendingAlerts(tx: TenantTx, id: ProjectId): Promise<PendingAlert[]> {
+  const rows = await tx.query<{
+    id: string; actor: string; severity: Severity; alerted_severity: Severity | null; detectors: string[];
+    signals: string[]; finding_count: number; hits: number; opened_at: Date; last_seen_at: Date;
+    summary: PendingAlert["summary"];
+  }>(
+    `SELECT i.id, i.actor, i.severity, i.alerted_severity, i.detectors, i.signals, i.finding_count, i.hits,
+            i.opened_at, i.last_seen_at, i.summary
+     FROM supahound.incidents i
+     JOIN supahound.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND i.status = 'open' AND p.email_alerts <> 'off'
+       AND ${RANK_SQL("i.severity")} >= ${RANK_SQL("p.email_alerts")}
+       AND (i.alerted_severity IS NULL OR ${RANK_SQL("i.alerted_severity")} < ${RANK_SQL("i.severity")})
+     ORDER BY ${RANK_SQL("i.severity")} DESC, i.opened_at`,
+    [tx.tenantId, id],
+  );
+  return rows.map((r) => ({
+    id: r.id, actor: r.actor, severity: r.severity, alertedSeverity: r.alerted_severity, detectors: r.detectors,
+    signals: r.signals, findingCount: r.finding_count, hits: r.hits, openedAt: r.opened_at, lastSeenAt: r.last_seen_at,
+    summary: r.summary,
+  }));
+}
+
+// Records that an email went out at this severity. Never lowers a recorded severity.
+export async function markAlerted(tx: TenantTx, incidentId: string, severity: Severity): Promise<void> {
+  await tx.query(
+    `UPDATE supahound.incidents SET alerted_severity = $3
+     WHERE tenant_id = $1 AND id = $2
+       AND (alerted_severity IS NULL OR ${RANK_SQL("alerted_severity")} < ${RANK_SQL("$3::text")})`,
+    [tx.tenantId, incidentId, severity],
+  );
+}
+
+// Every member of the tenant with a known address, deduplicated.
+export async function alertRecipients(tx: TenantTx): Promise<string[]> {
+  const rows = await tx.query<{ email: string }>(
+    `SELECT DISTINCT lower(email) AS email FROM supahound.memberships
+     WHERE tenant_id = $1 AND email IS NOT NULL ORDER BY 1`,
+    [tx.tenantId],
+  );
+  return rows.map((r) => r.email);
+}
+
+const EMAIL_RE = /^[^\s@<>,;"]+@[^\s@<>,;"]+$/;
+
+export function isStorableEmail(email: string | null | undefined): email is string {
+  return typeof email === "string" && email.length >= 3 && email.length <= 320 && EMAIL_RE.test(email);
+}
+
+// Copies the signed-in member's address (from verified JWT claims only) onto their membership in
+// this tenant. Writes only when it changed. Returns true when it wrote.
+export async function recordMemberEmail(tx: TenantTx, user: string, email: string | null | undefined): Promise<boolean> {
+  if (!isStorableEmail(email)) return false;
+  const rows = await tx.query(
+    `UPDATE supahound.memberships SET email = $3
+     WHERE tenant_id = $1 AND user_id = $2 AND email IS DISTINCT FROM $3 RETURNING user_id`,
+    [tx.tenantId, user, email],
+  );
+  return rows.length === 1;
+}
+
+// Sets a project's alert threshold. The caller checks the member's role.
+export async function setEmailAlerts(tx: TenantTx, id: ProjectId, level: AlertLevel): Promise<boolean> {
+  const rows = await tx.query(
+    "UPDATE supahound.projects SET email_alerts = $3 WHERE tenant_id = $1 AND id = $2 RETURNING id",
+    [tx.tenantId, id, level],
+  );
+  return rows.length === 1;
 }

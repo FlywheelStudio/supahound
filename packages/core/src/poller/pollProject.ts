@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { alertDue, renderIncidentEmail, type RenderedEmail } from "../alerts/email.js";
 import type { Pool } from "pg";
 import * as repo from "../db/repo.js";
 import { withTenant } from "../db/tenant.js";
@@ -37,10 +38,27 @@ export interface PollDeps {
   intervalSeconds?: number;
   // Settings such as SUPAHOUND_SOURCE_COLUMN (Workers: the env binding; Node: process.env).
   env?: EnvVars;
+  // Incident alert email (decision 030). Null or absent: no email is sent and alerts stay pending.
+  alerts?: AlertDeps | null;
 }
 
+export interface OutgoingEmail extends RenderedEmail {
+  to: string;
+  from: { email: string; name: string };
+}
+
+export interface AlertDeps {
+  send: (message: OutgoingEmail) => Promise<unknown>;
+  from: { email: string; name: string };
+  // The web app's origin, for the dashboard and settings links.
+  appUrl: string;
+}
+
+// Bounds the Worker's time and subrequests; the rest stay pending for the next poll.
+export const MAX_ALERTS_PER_POLL = 10;
+
 export type PollOutcome =
-  | { status: "ok"; findings: number; notified: number }
+  | { status: "ok"; findings: number; notified: number; emailed: number }
   | { status: "unable_to_assess"; errorCode: string }
   | { status: "skipped"; reason: "not_found" | "paused" | "claimed_elsewhere" | "nothing_new" };
 
@@ -203,11 +221,18 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   }));
   const { updates, resolved } = applyFindings(scope, openIncidents, findings, now);
 
-  // 4. Explain incidents that page, one model call per incident, outside any transaction.
-  // An explainer failure never costs the findings or the alert: it falls back to template text.
+  // 4. Explain incidents that page or will email, one model call per incident, outside any
+  // transaction. An explainer failure never costs the findings or the alert: it falls back to
+  // template text.
+  // An incident is explained once per severity: when it opens or its severity changes. A pending
+  // alert that keeps failing to send reuses its stored explanation; it never calls the model again.
+  const before = new Map(loaded.open.map((o) => [o.id, o]));
   const explained = new Map<number, ExplainResult>();
   for (const [i, u] of updates.entries()) {
-    if (!u.notify) continue;
+    const prev = u.incident.id ? before.get(u.incident.id) : undefined;
+    const changed = !prev || prev.severity !== u.incident.severity;
+    const willEmail = changed && alertDue(u.incident.severity, prev?.alertedSeverity ?? null, project.emailAlerts);
+    if (!u.notify && !willEmail) continue;
     const features = buildFeatures(u.incident, u.findings);
     try {
       explained.set(i, await deps.explain(features));
@@ -246,5 +271,76 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     await repo.finishPollRun(tx, runId, { status: "ok", templates: events.length, findings: findings.length, unassessedDetectors });
   });
 
-  return { status: "ok", findings: findings.length, notified: explained.size };
+  // 6. Email pending alerts, after the save, so an email never describes unsaved state.
+  const emailed = await sendPendingAlerts(scope, deps);
+
+  return { status: "ok", findings: findings.length, notified: explained.size, emailed };
+}
+
+const severityRank = { low: 1, medium: 2, high: 3, critical: 4 } as const;
+
+// Sends each pending alert of one project to every member with an address, one email per
+// recipient (members never see each other's addresses). An incident is marked alerted when at
+// least one email went out, or when there is nobody to send to; otherwise it stays pending and
+// the next poll retries it. Every attempt is audited with counts only. Never throws: a failure
+// here must not fail a poll whose results are already saved.
+export async function sendPendingAlerts(scope: ProjectScope, deps: PollDeps): Promise<number> {
+  const alerts = deps.alerts;
+  if (!alerts) return 0;
+  try {
+    const loaded = await withTenant(deps.app, scope.tenantId, async (tx) => {
+      const project = await repo.getProject(tx, scope.projectId);
+      if (!project) return null;
+      return { project, pending: await repo.pendingAlerts(tx, scope.projectId), recipients: await repo.alertRecipients(tx) };
+    });
+    if (!loaded || loaded.pending.length === 0) return 0;
+
+    const base = new URL(`/w/${scope.tenantId}`, alerts.appUrl).toString();
+    const settingsUrl = new URL(`/w/${scope.tenantId}/projects`, alerts.appUrl).toString();
+    let emailed = 0;
+    for (const a of loaded.pending.slice(0, MAX_ALERTS_PER_POLL)) {
+      const rendered = renderIncidentEmail({
+        projectName: loaded.project.name,
+        incident: a,
+        previousSeverity: a.alertedSeverity,
+        explanation: a.summary,
+        dashboardUrl: base,
+        settingsUrl,
+      });
+      let sent = 0;
+      let failed = 0;
+      for (const to of loaded.recipients) {
+        try {
+          await alerts.send({ to, from: alerts.from, ...rendered });
+          sent += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      const done = sent > 0 || loaded.recipients.length === 0;
+      const outcome = loaded.recipients.length === 0 ? "no_recipients" : sent === 0 ? "failed" : failed > 0 ? "partial" : "sent";
+      await withTenant(deps.app, scope.tenantId, async (tx) => {
+        if (done) await repo.markAlerted(tx, a.id, a.severity);
+        await repo.appendAudit(tx, {
+          projectId: scope.projectId,
+          action: "alert_email",
+          detail: {
+            incident_id: a.id,
+            severity: a.severity,
+            escalated: a.alertedSeverity !== null && severityRank[a.severity] > severityRank[a.alertedSeverity],
+            recipients: loaded.recipients.length,
+            sent,
+            failed,
+            outcome,
+          },
+        });
+      });
+      if (sent > 0) emailed += 1;
+    }
+    return emailed;
+  } catch {
+    // IDs only, never error text (it can hold addresses or SQL).
+    console.log(JSON.stringify({ event: "alert_email_crashed", project_id: scope.projectId }));
+    return 0;
+  }
 }

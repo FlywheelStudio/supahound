@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { tenantId, type TenantId, type UserId } from "../tenancy/scope.js";
+import { isStorableEmail } from "./repo.js";
 import { TenantTx } from "./tenant.js";
 
 // Entry points for signed-in users (decision 009). The user ID must come from a verified
@@ -55,11 +56,15 @@ export async function listWorkspaces(pool: Pool, user: UserId): Promise<Workspac
 }
 
 // Creates a tenant with the user as its owner.
-export async function createWorkspace(pool: Pool, user: UserId, name: string): Promise<TenantId> {
+// email: the owner's address from verified JWT claims, for incident alerts (decision 030).
+export async function createWorkspace(pool: Pool, user: UserId, name: string, email?: string | null): Promise<TenantId> {
   const id = tenantId(randomUUID());
   await transaction(pool, { "app.tenant_id": id, "app.user_id": user }, async (client) => {
     await client.query("INSERT INTO supahound.tenants (id, name) VALUES ($1, $2)", [id, name]);
-    await client.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [id, user]);
+    await client.query(
+      "INSERT INTO supahound.memberships (tenant_id, user_id, role, email) VALUES ($1, $2, 'owner', $3)",
+      [id, user, isStorableEmail(email) ? email : null],
+    );
   });
   return id;
 }

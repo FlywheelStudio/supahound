@@ -9,6 +9,7 @@
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
+| [features/incident-alert-email.md](features/incident-alert-email.md) | Incident alert email (#16): every member, threshold per project, the incident row as outbox, tests |
 | [features/ownership-refresh.md](features/ownership-refresh.md) | Ownership refresh (#10): RLS policies read in the poll, detector 2 coverage states, tests |
 | [features/project-picker.md](features/project-picker.md) | Project picker (#9): pick and remove watched projects, Management API client, tests |
 | [wip/public-release.md](wip/public-release.md) | Public release: what PR #69 did, the rehearsal and the publish steps left |
@@ -46,3 +47,4 @@
 | [decisions/026-scan-secrets-leak-paths.md](decisions/026-scan-secrets-leak-paths.md) | Scan funnel secrets scanner: client code plus a fixed leak-path list; scope on every hop; no secret in evidence (amends 016) |
 | [decisions/027-hosted-deploy-config-private.md](decisions/027-hosted-deploy-config-private.md) | Flywheel's hosted deploy config in a private repo; public `wrangler.jsonc` files stay templates; deploys from a fresh clone |
 | [decisions/028-card-validated-trial.md](decisions/028-card-validated-trial.md) | A validated card ($1 hold, released) before any use; 7-day trial; per project $19.99 (Starter) or $99 (Pro, above 1M requests/30 days); Enterprise above 10M (supersedes 013's plans) |
+| [decisions/030-incident-alert-email.md](decisions/030-incident-alert-email.md) | Incident alerts email every member; every severity by default, changeable per project; the incident row is the outbox (builds on 014) |

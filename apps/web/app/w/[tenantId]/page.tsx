@@ -1,6 +1,6 @@
 import { needsEnterprise, PRICE_LABEL, seatsFor } from "@supahound/core/billing/policy";
 import { getBilling, projectTiers } from "@supahound/core/db/billing";
-import { countConnections, listOpenIncidents, listProjects } from "@supahound/core/db/repo";
+import { countConnections, listOpenIncidents, listProjects, recordMemberEmail } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import Link from "next/link";
@@ -48,6 +48,8 @@ export default async function Workspace({
   // the same 404 as a workspace that does not exist.
   const data = await withPool((pool) =>
     paidTenant(pool, user.id, tenant, async (tx, role, access) => ({
+      // Alerts go to the address in the verified JWT; copied here, written only when it changed.
+      emailRecorded: await recordMemberEmail(tx, user.id, user.email),
       role,
       access,
       billing: await getBilling(tx),

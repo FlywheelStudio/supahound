@@ -75,7 +75,7 @@ describe("queue handlers", () => {
     await handleMessages([good, bad, crash], async (scope) => {
       seen.push(scope.tenantId);
       if (scope.tenantId.startsWith("bbbb")) throw new Error("boom");
-      return { status: "ok", findings: 0, notified: 0 };
+      return { status: "ok", findings: 0, notified: 0, emailed: 0 };
     });
     expect([good.state, bad.state, crash.state]).toEqual(["ack", "ack", "retry"]);
     expect(seen).toEqual([SCOPE.tenantId, "bbbbbbbb-0000-4000-8000-000000000002"]);
@@ -103,7 +103,7 @@ describe("queue handlers", () => {
     const failing = msg({ kind: "usage", tenantId: "bbbbbbbb-0000-4000-8000-000000000002" });
     const counted: string[] = [];
     let polls = 0;
-    await handleMessages([usage, failing], async () => { polls++; return { status: "ok", findings: 0, notified: 0 }; }, async (t) => {
+    await handleMessages([usage, failing], async () => { polls++; return { status: "ok", findings: 0, notified: 0, emailed: 0 }; }, async (t) => {
       if (t.startsWith("bbbb")) throw new Error("Stripe is down");
       counted.push(t);
     });
