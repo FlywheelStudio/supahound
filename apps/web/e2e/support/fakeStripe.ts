@@ -100,14 +100,6 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
     s.payment_status = c.approved ? "unpaid" : "unpaid";
   }
 
-  function subscriptionItemOwner(itemId: string): Obj | null {
-    for (const sub of subscriptions.values()) {
-      const item = ((sub.items as Obj).data as Obj[])[0]!;
-      if (item.id === itemId) return sub;
-    }
-    return null;
-  }
-
   const server: Server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://x");
@@ -226,29 +218,35 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
         return ok({ object: "list", data, has_more: false, url: "/v1/subscriptions" });
       }
       if (req.method === "POST" && path === "/v1/subscriptions") {
-        const item = (body.items as Obj[])[0]!;
         const trialEnd = Math.floor(Date.now() / 1000) + Number(body.trial_period_days) * 86_400;
         const sub: Obj = {
           id: id("sub"), object: "subscription", customer: body.customer, status: "trialing", trial_end: trialEnd,
           cancel_at_period_end: false, metadata: body.metadata ?? {}, default_payment_method: body.default_payment_method,
           trial_period_days: Number(body.trial_period_days),
-          items: { object: "list", data: [{ id: id("si"), quantity: Number(item.quantity), current_period_end: trialEnd, price: { id: item.price } }] },
+          items: { object: "list", data: (body.items as Obj[]).map((item) => ({
+            id: id("si"), quantity: Number(item.quantity), current_period_end: trialEnd, price: { id: item.price },
+          })) },
         };
         subscriptions.set(String(sub.id), sub);
+        return ok(sub);
+      }
+      const subUpdate = /^\/v1\/subscriptions\/(sub_[a-z0-9]+)$/.exec(path);
+      if (req.method === "POST" && subUpdate) {
+        const sub = subscriptions.get(subUpdate[1]!);
+        if (!sub) return error(404, "resource_missing", "No such subscription");
+        const data = (sub.items as Obj).data as Obj[];
+        for (const change of (body.items as Obj[] | undefined) ?? []) {
+          const existing = data.find((i) => i.id === change.id);
+          if (existing) existing.quantity = Number(change.quantity);
+          else data.push({ id: id("si"), quantity: Number(change.quantity), price: { id: change.price } });
+        }
+        sub.last_proration_behavior = body.proration_behavior;
         return ok(sub);
       }
       const subGet = /^\/v1\/subscriptions\/(sub_[a-z0-9]+)$/.exec(path);
       if (req.method === "GET" && subGet) {
         const s = subscriptions.get(subGet[1]!);
         return s ? ok(s) : error(404, "resource_missing", "No such subscription");
-      }
-      const itemPost = /^\/v1\/subscription_items\/(si_[a-z0-9]+)$/.exec(path);
-      if (req.method === "POST" && itemPost) {
-        const sub = subscriptionItemOwner(itemPost[1]!);
-        if (!sub) return error(404, "resource_missing", "No such subscription item");
-        const item = ((sub.items as Obj).data as Obj[])[0]!;
-        item.quantity = Number(body.quantity);
-        return ok(item);
       }
       if (req.method === "POST" && path === "/v1/billing_portal/sessions") {
         return ok({ id: id("bps"), object: "billing_portal.session", url: `http://127.0.0.1:${port}/portal` });

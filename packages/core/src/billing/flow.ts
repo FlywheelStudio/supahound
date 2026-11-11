@@ -1,12 +1,12 @@
 import type { Pool } from "pg";
 import {
-  acceptBillingTerms, countWatchedProjects, getBilling, isStripeEventProcessed, claimStripeEvent, recordCardRejected,
-  saveSeats, saveSubscription, setStripeCustomer, type SubscriptionSnapshot,
+  acceptBillingTerms, claimStripeEvent, getBilling, isStripeEventProcessed, projectTiers, recordCardRejected,
+  refreshProjectTiers, saveSeats, saveSubscription, setStripeCustomer, type SubscriptionSnapshot,
 } from "../db/billing.js";
 import { withTenant } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
 import { tenantId as parseTenantId, type TenantId, type UserId } from "../tenancy/scope.js";
-import { accessFor, checkCard, isPlan, seatsFor, TERMS_VERSION, type CardEvidence, type CardRejection, type Plan } from "./policy.js";
+import { accessFor, checkCard, seatsFor, TERMS_VERSION, type CardEvidence, type CardRejection, type Seats } from "./policy.js";
 
 // The billing flow (decision 028). Stripe sits behind StripeGateway, so the flow runs against a
 // fake in tests. No Stripe call ever runs inside a tenant transaction.
@@ -15,7 +15,6 @@ export interface VerificationSession {
   id: string;
   status: "open" | "complete" | "expired";
   tenant: string | null; // metadata.tenant_id, set by our server when it created the session
-  plan: string | null;
   customerId: string | null;
   hold: (CardEvidence & { paymentIntentId: string; releasable: boolean; paymentMethodId: string | null }) | null;
 }
@@ -23,18 +22,20 @@ export interface VerificationSession {
 export interface StripeGateway {
   createCustomer(input: { tenant: TenantId; email: string | null; idempotencyKey: string }): Promise<{ id: string }>;
   createVerificationCheckout(input: {
-    tenant: TenantId; customerId: string; plan: Plan; successUrl: string; cancelUrl: string;
+    tenant: TenantId; customerId: string; successUrl: string; cancelUrl: string;
   }): Promise<{ id: string; url: string }>;
   getVerificationSession(id: string): Promise<VerificationSession>;
   releaseHold(paymentIntentId: string): Promise<void>;
   // The customer's subscription that is not canceled, if one exists.
   liveSubscription(customerId: string): Promise<(SubscriptionSnapshot & { cardVerifiedAt: Date | null }) | null>;
   createTrialSubscription(input: {
-    tenant: TenantId; customerId: string; plan: Plan; seats: number; paymentMethodId: string;
+    tenant: TenantId; customerId: string; seats: Seats; paymentMethodId: string;
     cardVerifiedAt: Date; idempotencyKey: string;
   }): Promise<SubscriptionSnapshot>;
   getSubscription(id: string): Promise<SubscriptionSnapshot & { tenant: string | null; cardVerifiedAt: Date | null }>;
-  setSeats(subscriptionId: string, seats: number): Promise<void>;
+  // prorate: true when the customer adds or removes a project (charged now, pro rata); false when
+  // a project changes tier from its usage, which takes effect at the next renewal (decision 028).
+  setSeats(subscriptionId: string, seats: Seats, prorate: boolean): Promise<void>;
   portalUrl(customerId: string, returnUrl: string): Promise<string>;
 }
 
@@ -60,7 +61,7 @@ export const billingPath = (tenant: TenantId, error?: string) => `/w/${tenant}/b
 // send the browser: Stripe Checkout, or back to one of our pages.
 export async function startCheckout(
   deps: FlowDeps,
-  input: { user: UserId; email: string | null; tenant: TenantId; plan: Plan; acceptedTerms: boolean },
+  input: { user: UserId; email: string | null; tenant: TenantId; acceptedTerms: boolean },
 ): Promise<string> {
   const { tenant } = input;
   const state: { next: string } | { customerId: string | null } = await withTenantForUser(deps.pool, input.user, tenant, async (tx, role) => {
@@ -68,7 +69,7 @@ export async function startCheckout(
     const billing = await getBilling(tx);
     if (accessFor(billing.status) !== "blocked") return { next: `/w/${tenant}` };
     if (!input.acceptedTerms) return { next: billingPath(tenant, "terms") };
-    await acceptBillingTerms(tx, input.plan, TERMS_VERSION, deps.now());
+    await acceptBillingTerms(tx, TERMS_VERSION, deps.now());
     return { customerId: billing.customerId };
   });
   if ("next" in state) return state.next;
@@ -80,7 +81,7 @@ export async function startCheckout(
     await withTenant(deps.pool, tenant, (tx) => setStripeCustomer(tx, customerId!));
   }
   const session = await deps.stripe.createVerificationCheckout({
-    tenant, customerId, plan: input.plan,
+    tenant, customerId,
     successUrl: `${deps.appUrl}/w/${tenant}/billing/return?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${deps.appUrl}${billingPath(tenant, "canceled")}`,
   });
@@ -116,7 +117,6 @@ export async function completeVerification(
     return { tenant, result: "not_authorized" };
   }
 
-  const plan: Plan = isPlan(s.plan) ? s.plan : billing.plan ?? "builder";
   // Reuse a live subscription: a retry after the idempotency window must not start a second one.
   const existing = await deps.stripe.liveSubscription(s.customerId);
   const now = deps.now();
@@ -126,9 +126,9 @@ export async function completeVerification(
     sub = existing;
     verifiedAt = existing.cardVerifiedAt ?? now;
   } else {
-    const projects = await withTenant(deps.pool, tenant, (tx) => countWatchedProjects(tx));
+    const tiers = await withTenant(deps.pool, tenant, (tx) => projectTiers(tx));
     sub = await deps.stripe.createTrialSubscription({
-      tenant, customerId: s.customerId, plan, seats: seatsFor(plan, projects), paymentMethodId: s.hold.paymentMethodId,
+      tenant, customerId: s.customerId, seats: seatsFor(tiers.map((t) => t.tier)), paymentMethodId: s.hold.paymentMethodId,
       cardVerifiedAt: now, idempotencyKey: `trial-${s.id}`,
     });
     verifiedAt = now;
@@ -155,18 +155,27 @@ export async function refreshSubscription(deps: FlowDeps, subscriptionId: string
   return saved ? tenant : null;
 }
 
-// Bills the current number of watched projects. Called after the picker adds or removes one, and
-// when the overview sees the count drift from the stored seats.
-export async function syncSeats(deps: FlowDeps, tenant: TenantId): Promise<void> {
+// Bills one seat per watched project at its tier. Called after the picker adds or removes a
+// project (prorate: true), after the daily usage count (prorate: false), and when the overview
+// sees the stored seats drift from the projects.
+export async function syncSeats(deps: FlowDeps, tenant: TenantId, prorate: boolean): Promise<void> {
   const want = await withTenant(deps.pool, tenant, async (tx) => {
     const billing = await getBilling(tx);
-    if (!billing.subscriptionId || !billing.plan || accessFor(billing.status) === "blocked") return null;
-    const seats = seatsFor(billing.plan, await countWatchedProjects(tx));
-    return seats === billing.seats ? null : { subscriptionId: billing.subscriptionId, seats };
+    if (!billing.subscriptionId || accessFor(billing.status) === "blocked") return null;
+    const seats = seatsFor((await projectTiers(tx)).map((t) => t.tier));
+    const same = billing.seats && billing.seats.starter === seats.starter && billing.seats.pro === seats.pro;
+    return same ? null : { subscriptionId: billing.subscriptionId, seats };
   });
   if (!want) return;
-  await deps.stripe.setSeats(want.subscriptionId, want.seats);
+  await deps.stripe.setSeats(want.subscriptionId, want.seats, prorate);
   await withTenant(deps.pool, tenant, (tx) => saveSeats(tx, want.seats));
+}
+
+// After the daily usage count: set each project's tier from its last 30 days, then bill the new
+// tiers from the next renewal. A project above the Enterprise line stays on Pro (decision 028).
+export async function applyUsageTiers(deps: FlowDeps, tenant: TenantId, today: string): Promise<void> {
+  await withTenant(deps.pool, tenant, (tx) => refreshProjectTiers(tx, today));
+  await syncSeats(deps, tenant, false);
 }
 
 // A verified Stripe event, reduced to what the flow needs (apps/web/lib/stripe.ts builds it).

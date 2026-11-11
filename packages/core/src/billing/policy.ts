@@ -1,10 +1,12 @@
 // Billing rules (decision 028). Pure functions: no Stripe, no database.
 
-export type Plan = "builder" | "agency";
-export const PLANS: readonly Plan[] = ["builder", "agency"];
+// Per-project pricing by traffic (decision 028, revised 2026-11-10). Each watched project bills
+// at its own tier, set from its edge-log requests in the last 30 days.
+export type Tier = "starter" | "pro";
+export const TIERS: readonly Tier[] = ["starter", "pro"];
 
-export function isPlan(v: unknown): v is Plan {
-  return v === "builder" || v === "agency";
+export function isTier(v: unknown): v is Tier {
+  return v === "starter" || v === "pro";
 }
 
 export const TRIAL_DAYS = 7;
@@ -12,15 +14,35 @@ export const TRIAL_DAYS = 7;
 export const VERIFICATION_HOLD_CENTS = 100;
 export const VERIFICATION_CURRENCY = "usd";
 // Bump when the billing terms on the billing page change; stored with each acceptance.
-export const TERMS_VERSION = "2026-11-10";
+export const TERMS_VERSION = "2026-11-10.2";
 
-const MIN_SEATS: Record<Plan, number> = { builder: 1, agency: 10 };
-export const PRICE_PER_SEAT_USD: Record<Plan, number> = { builder: 29, agency: 19 };
+export const PRICE_CENTS: Record<Tier, number> = { starter: 1999, pro: 9900 };
+export const PRICE_LABEL: Record<Tier, string> = { starter: "$19.99", pro: "$99" };
+// Requests in 30 days at which a project moves up. Above ENTERPRISE it stays on Pro and is
+// flagged for an Enterprise conversation; nothing above Pro is charged automatically.
+export const PRO_FROM_REQUESTS = 1_000_000;
+export const ENTERPRISE_FROM_REQUESTS = 10_000_000;
+export const USAGE_WINDOW_DAYS = 30;
 
-// Seats billed for a number of watched projects: Builder at least 1, Agency at least 10.
-export function seatsFor(plan: Plan, projects: number): number {
-  if (!Number.isInteger(projects) || projects < 0) throw new Error(`Invalid project count: ${projects}`);
-  return Math.max(MIN_SEATS[plan], projects);
+export function tierFor(requests30d: number | null): Tier {
+  return requests30d !== null && requests30d > PRO_FROM_REQUESTS ? "pro" : "starter";
+}
+
+export function needsEnterprise(requests30d: number | null): boolean {
+  return requests30d !== null && requests30d > ENTERPRISE_FROM_REQUESTS;
+}
+
+export interface Seats {
+  starter: number;
+  pro: number;
+}
+
+// Seats billed for a workspace: one per watched project at its tier, and at least one Starter
+// seat, so a validated workspace with no projects still pays $19.99 after the trial.
+export function seatsFor(tiers: readonly Tier[]): Seats {
+  const pro = tiers.filter((t) => t === "pro").length;
+  const starter = tiers.length - pro;
+  return { starter: tiers.length === 0 ? 1 : starter, pro };
 }
 
 // Stripe subscription statuses, plus "none" before any subscription exists.

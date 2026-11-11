@@ -1,7 +1,6 @@
 "use server";
 
 import { billingPath, startCheckout } from "@supahound/core/billing/flow";
-import { isPlan } from "@supahound/core/billing/policy";
 import { getBilling } from "@supahound/core/db/billing";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId, type TenantId } from "@supahound/core/tenancy/scope";
@@ -30,10 +29,8 @@ function memberOr404(err: unknown): never {
 export async function startCheckoutAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const tenant = tenantOr404(formData.get("tenantId"));
-  const planValue = formData.get("plan");
-  const plan = isPlan(planValue) ? planValue : "builder";
   const next = await withPool((pool) =>
-    startCheckout(flowDeps(pool), { user: user.id, email: user.email, tenant, plan, acceptedTerms: formData.get("terms") === "on" }),
+    startCheckout(flowDeps(pool), { user: user.id, email: user.email, tenant, acceptedTerms: formData.get("terms") === "on" }),
   ).catch(memberOr404);
   redirect(next);
 }

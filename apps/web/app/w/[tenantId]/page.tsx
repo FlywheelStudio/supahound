@@ -1,5 +1,5 @@
-import { seatsFor } from "@supahound/core/billing/policy";
-import { getBilling } from "@supahound/core/db/billing";
+import { needsEnterprise, PRICE_LABEL, seatsFor } from "@supahound/core/billing/policy";
+import { getBilling, projectTiers } from "@supahound/core/db/billing";
 import { countConnections, listOpenIncidents, listProjects } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
@@ -51,13 +51,15 @@ export default async function Workspace({
       role,
       access,
       billing: await getBilling(tx),
+      tiers: await projectTiers(tx),
       projects: await listProjects(tx),
       incidents: await listOpenIncidents(tx, 20),
       connections: await countConnections(tx),
     })).then(async (d) => {
       // The picker syncs seats; this catches a sync that failed after the picker committed.
-      if (d.billing.plan && d.billing.seats !== null && d.billing.seats !== seatsFor(d.billing.plan, d.projects.length)) {
-        await syncSeatsAfterChange(pool, tenant);
+      const want = seatsFor(d.tiers.map((t) => t.tier));
+      if (d.billing.seats && (d.billing.seats.starter !== want.starter || d.billing.seats.pro !== want.pro)) {
+        await syncSeatsAfterChange(pool, tenant, false);
       }
       return d;
     }),
@@ -94,6 +96,11 @@ export default async function Workspace({
         <p className="mb-6 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
           Your free trial ends on {data.billing.trialEnd.toISOString().slice(0, 10)}.{" "}
           <Link href={`/w/${tenant}/billing`} className="underline">Billing</Link>
+        </p>
+      )}
+      {data.tiers.some((t) => needsEnterprise(t.requests30d)) && (
+        <p className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          A project here sends more than 10 million requests a month. It stays on Pro, and we will contact you about Enterprise.
         </p>
       )}
       {notice && (
@@ -165,6 +172,12 @@ export default async function Workspace({
                   <div className="flex justify-between">
                     <span className="font-medium">{p.name}</span>
                     <span className="text-sm text-slate-500">
+                      {(() => {
+                        const t = data.tiers.find((x) => x.id === p.id);
+                        if (!t || mode() === "off") return null;
+                        const usage = t.requests30d === null ? "usage counted daily" : `${t.requests30d.toLocaleString("en-US")} requests in 30 days`;
+                        return `${t.tier === "pro" ? "Pro" : "Starter"} ${PRICE_LABEL[t.tier]}/mo · ${usage} · `;
+                      })()}
                       {p.paused ? "paused" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
                       {" · "}{p.openIncidents} open
                     </span>

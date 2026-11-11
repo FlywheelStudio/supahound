@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { describe, expect, it } from "vitest";
 import { checkCard } from "@supahound/core/billing/policy";
-import { billingEventFromStripe, sessionFromStripe, subscriptionFromStripe, termsText } from "../lib/stripeMap";
+import { billingEventFromStripe, sessionFromStripe, subscriptionFromStripe, termsText } from "@supahound/core/billing/stripeMap";
 import { verifyStripeEvent } from "../lib/stripeWebhook";
 
 // Stripe objects → the billing flow's inputs (decision 028), and the webhook signature check.
@@ -19,7 +19,7 @@ function session(over: { charge?: Record<string, unknown> | null; piStatus?: str
     : over.charge;
   return {
     id: "cs_test_1", object: "checkout.session", status: over.status ?? "complete", customer: "cus_1",
-    metadata: over.meta ?? { tenant_id: TENANT, plan: "builder", purpose: "card_verification" },
+    metadata: over.meta ?? { tenant_id: TENANT, purpose: "card_verification" },
     payment_intent: { id: "pi_1", status: over.piStatus ?? "requires_capture", payment_method: "pm_1", latest_charge: charge },
   };
 }
@@ -29,7 +29,7 @@ const verdict = (s: Record<string, unknown>) => checkCard(sessionFromStripe(s).h
 describe("sessionFromStripe", () => {
   it("reads an approved card hold", () => {
     const s = sessionFromStripe(session());
-    expect(s).toMatchObject({ id: "cs_test_1", status: "complete", tenant: TENANT, plan: "builder", customerId: "cus_1" });
+    expect(s).toMatchObject({ id: "cs_test_1", status: "complete", tenant: TENANT, customerId: "cus_1" });
     expect(s.hold).toEqual({
       paymentIntentId: "pi_1", releasable: true, paymentMethodId: "pm_1",
       approvedByIssuer: true, captured: false, cvcCheck: "pass", funding: "credit",
@@ -67,22 +67,27 @@ describe("sessionFromStripe", () => {
 });
 
 describe("subscriptionFromStripe", () => {
+  const PRICES = { starter: "price_starter", pro: "price_pro" };
   const sub = {
     id: "sub_1", customer: "cus_1", status: "trialing", trial_end: 1_800_000_000, cancel_at_period_end: false,
-    metadata: { tenant_id: TENANT, plan: "agency", card_verified_at: "2026-11-10T12:00:00.000Z" },
-    items: { data: [{ id: "si_1", quantity: 12, current_period_end: 1_800_000_000, price: { id: "price_agency" } }] },
+    metadata: { tenant_id: TENANT, card_verified_at: "2026-11-10T12:00:00.000Z" },
+    items: { data: [
+      { id: "si_1", quantity: 3, current_period_end: 1_800_000_000, price: { id: "price_starter" } },
+      { id: "si_2", quantity: 1, current_period_end: 1_800_000_000, price: { id: "price_pro" } },
+      { id: "si_3", quantity: 9, price: { id: "price_someone_elses" } },
+    ] },
   };
 
-  it("reads status, seats, dates, tenant and the verification time", () => {
-    expect(subscriptionFromStripe(sub, () => null)).toEqual({
-      id: "sub_1", customerId: "cus_1", plan: "agency", status: "trialing", seats: 12,
+  it("reads status, seats per tier, dates, tenant and the verification time", () => {
+    expect(subscriptionFromStripe(sub, PRICES)).toEqual({
+      id: "sub_1", customerId: "cus_1", status: "trialing", seats: { starter: 3, pro: 1 },
       trialEnd: new Date(1_800_000_000_000), currentPeriodEnd: new Date(1_800_000_000_000), cancelAtPeriodEnd: false,
       tenant: TENANT, cardVerifiedAt: new Date("2026-11-10T12:00:00.000Z"),
     });
   });
 
   it("treats a status it does not know as canceled, which closes the gate", () => {
-    expect(subscriptionFromStripe({ ...sub, status: "something_new" }, () => null).status).toBe("canceled");
+    expect(subscriptionFromStripe({ ...sub, status: "something_new" }, PRICES).status).toBe("canceled");
   });
 });
 
@@ -127,10 +132,9 @@ describe("verifyStripeEvent", () => {
 });
 
 describe("termsText", () => {
-  it("states the hold, the trial, the price after it, the minimum and how to cancel", () => {
-    for (const [plan, price, min] of [["builder", "$29", "1 project minimum"], ["agency", "$19", "10 projects minimum"]] as const) {
-      const t = termsText(plan);
-      for (const part of ["$1 hold", "release it at once", "7 days", price, min, "until you cancel", "pay nothing"]) expect(t, plan).toContain(part);
-    }
+  it("states the hold, the trial, both prices, the thresholds, the minimum and how to cancel", () => {
+    const t = termsText();
+    for (const part of ["$1 hold", "release it at once", "7 days", "$19.99", "$99", "1 million", "10 million", "Enterprise",
+      "at least one project", "next monthly charge", "pay nothing"]) expect(t).toContain(part);
   });
 });

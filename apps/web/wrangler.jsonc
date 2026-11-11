@@ -39,8 +39,11 @@
     // without billing. Required; there is no default. With "stripe", also set the two price IDs and
     // the secrets STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET (webhook: <APP_URL>/api/stripe/webhook).
     "SUPAHOUND_BILLING": "off",
-    "STRIPE_PRICE_BUILDER": "",
-    "STRIPE_PRICE_AGENCY": "",
+    // Monthly per-project prices: Starter ($19.99) and Pro ($99) (decision 028).
+    "STRIPE_PRICE_STARTER": "",
+    "STRIPE_PRICE_PRO": "",
+    // A Billing Portal configuration ID; empty uses the account's default.
+    "STRIPE_PORTAL_CONFIGURATION": "",
     // Only E2E points this at a fake.
     "STRIPE_API_URL": "https://api.stripe.com"
   },

@@ -1,6 +1,9 @@
 import type { Pool } from "pg";
-import { accessFor, isBillingStatus, isPlan, type Access, type BillingStatus, type CardRejection, type Plan } from "../billing/policy.js";
-import type { TenantId, UserId } from "../tenancy/scope.js";
+import {
+  accessFor, isBillingStatus, isTier, tierFor, USAGE_WINDOW_DAYS,
+  type Access, type BillingStatus, type CardRejection, type Seats, type Tier,
+} from "../billing/policy.js";
+import type { ProjectId, TenantId, UserId } from "../tenancy/scope.js";
 import type { TenantTx } from "./tenant.js";
 import { withTenantForUser, type Role } from "./user.js";
 
@@ -24,10 +27,9 @@ export class PaymentRequiredError extends Error {
 
 export interface BillingAccount {
   customerId: string | null;
-  plan: Plan | null;
   status: BillingStatus;
   subscriptionId: string | null;
-  seats: number | null;
+  seats: Seats | null;
   trialEnd: Date | null;
   currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
@@ -39,10 +41,10 @@ export interface BillingAccount {
 
 interface Row {
   stripe_customer_id: string | null;
-  plan: string | null;
   status: string;
   subscription_id: string | null;
-  seats: number | null;
+  starter_seats: number | null;
+  pro_seats: number | null;
   trial_end: Date | null;
   current_period_end: Date | null;
   cancel_at_period_end: boolean;
@@ -53,15 +55,14 @@ interface Row {
 }
 
 const NONE: BillingAccount = {
-  customerId: null, plan: null, status: "none", subscriptionId: null, seats: null, trialEnd: null,
-  currentPeriodEnd: null, cancelAtPeriodEnd: false, cardVerifiedAt: null, verificationError: null,
-  termsVersion: null, termsAcceptedAt: null,
+  customerId: null, status: "none", subscriptionId: null, seats: null, trialEnd: null, currentPeriodEnd: null,
+  cancelAtPeriodEnd: false, cardVerifiedAt: null, verificationError: null, termsVersion: null, termsAcceptedAt: null,
 };
 
 // The tenant's billing state; a tenant with no row has status "none".
 export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
   const [r] = await tx.query<Row>(
-    `SELECT stripe_customer_id, plan, status, subscription_id, seats, trial_end, current_period_end,
+    `SELECT stripe_customer_id, status, subscription_id, starter_seats, pro_seats, trial_end, current_period_end,
             cancel_at_period_end, card_verified_at, verification_error, terms_version, terms_accepted_at
      FROM supahound.billing_accounts WHERE tenant_id = $1`,
     [tx.tenantId],
@@ -69,10 +70,9 @@ export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
   if (!r) return NONE;
   return {
     customerId: r.stripe_customer_id,
-    plan: isPlan(r.plan) ? r.plan : null,
     status: isBillingStatus(r.status) ? r.status : "none",
     subscriptionId: r.subscription_id,
-    seats: r.seats,
+    seats: r.starter_seats === null || r.pro_seats === null ? null : { starter: r.starter_seats, pro: r.pro_seats },
     trialEnd: r.trial_end,
     currentPeriodEnd: r.current_period_end,
     cancelAtPeriodEnd: r.cancel_at_period_end,
@@ -91,8 +91,8 @@ async function upsert(tx: TenantTx, set: string, params: unknown[]): Promise<voi
 }
 
 // The owner accepted the billing terms on our page, just before Checkout.
-export async function acceptBillingTerms(tx: TenantTx, plan: Plan, version: string, at: Date): Promise<void> {
-  await upsert(tx, "plan = $2, terms_version = $3, terms_accepted_at = $4, verification_error = NULL", [plan, version, at]);
+export async function acceptBillingTerms(tx: TenantTx, version: string, at: Date): Promise<void> {
+  await upsert(tx, "terms_version = $2, terms_accepted_at = $3, verification_error = NULL", [version, at]);
 }
 
 export async function setStripeCustomer(tx: TenantTx, customerId: string): Promise<void> {
@@ -106,9 +106,8 @@ export async function recordCardRejected(tx: TenantTx, reason: CardRejection | "
 export interface SubscriptionSnapshot {
   id: string;
   customerId: string;
-  plan: Plan;
   status: BillingStatus;
-  seats: number;
+  seats: Seats;
   trialEnd: Date | null;
   currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
@@ -119,16 +118,15 @@ export interface SubscriptionSnapshot {
 export async function saveSubscription(tx: TenantTx, s: SubscriptionSnapshot, cardVerifiedAt: Date | null): Promise<void> {
   await upsert(
     tx,
-    `stripe_customer_id = $2, plan = $3, status = $4, subscription_id = $5, seats = $6, trial_end = $7,
-     current_period_end = $8, cancel_at_period_end = $9,
-     card_verified_at = COALESCE(card_verified_at, $10),
+    `stripe_customer_id = $2, status = $3, subscription_id = $4, starter_seats = $5, pro_seats = $6, trial_end = $7,
+     current_period_end = $8, cancel_at_period_end = $9, card_verified_at = COALESCE(card_verified_at, $10),
      verification_error = NULL`,
-    [s.customerId, s.plan, s.status, s.id, s.seats, s.trialEnd, s.currentPeriodEnd, s.cancelAtPeriodEnd, cardVerifiedAt],
+    [s.customerId, s.status, s.id, s.seats.starter, s.seats.pro, s.trialEnd, s.currentPeriodEnd, s.cancelAtPeriodEnd, cardVerifiedAt],
   );
 }
 
-export async function saveSeats(tx: TenantTx, seats: number): Promise<void> {
-  await upsert(tx, "seats = $2", [seats]);
+export async function saveSeats(tx: TenantTx, seats: Seats): Promise<void> {
+  await upsert(tx, "starter_seats = $2, pro_seats = $3", [seats.starter, seats.pro]);
 }
 
 export async function isStripeEventProcessed(tx: TenantTx, eventId: string): Promise<boolean> {
@@ -146,9 +144,54 @@ export async function claimStripeEvent(tx: TenantTx, eventId: string, type: stri
   return rows.length === 1;
 }
 
-export async function countWatchedProjects(tx: TenantTx): Promise<number> {
-  const [r] = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM supahound.projects WHERE tenant_id = $1", [tx.tenantId]);
-  return r?.n ?? 0;
+// --- Usage and tiers -------------------------------------------------------------------------------
+
+export interface ProjectTier {
+  id: ProjectId;
+  tier: Tier;
+  requests30d: number | null;
+}
+
+export async function projectTiers(tx: TenantTx): Promise<ProjectTier[]> {
+  const rows = await tx.query<{ id: ProjectId; billing_tier: string; requests_30d: string | null }>(
+    "SELECT id, billing_tier, requests_30d FROM supahound.projects WHERE tenant_id = $1 ORDER BY created_at",
+    [tx.tenantId],
+  );
+  return rows.map((r) => ({
+    id: r.id, tier: isTier(r.billing_tier) ? r.billing_tier : "starter", requests30d: r.requests_30d === null ? null : Number(r.requests_30d),
+  }));
+}
+
+// One UTC day of edge-log requests for one project. Counting the same day again replaces it.
+export async function saveDailyUsage(tx: TenantTx, project: ProjectId, day: string, requests: number): Promise<void> {
+  await tx.query(
+    `INSERT INTO supahound.project_usage (tenant_id, project_id, day, requests) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (tenant_id, project_id, day) DO UPDATE SET requests = EXCLUDED.requests, counted_at = now()`,
+    [tx.tenantId, project, day, requests],
+  );
+}
+
+// Sums each project's last 30 counted days (up to and including `today`) and sets its tier.
+export async function refreshProjectTiers(tx: TenantTx, today: string): Promise<ProjectTier[]> {
+  const rows = await tx.query<{ id: ProjectId; total: string }>(
+    `SELECT p.id, COALESCE(sum(u.requests), 0)::bigint AS total
+     FROM supahound.projects p
+     LEFT JOIN supahound.project_usage u
+       ON u.tenant_id = p.tenant_id AND u.project_id = p.id
+      AND u.day > $2::date - $3::int AND u.day <= $2::date
+     WHERE p.tenant_id = $1
+     GROUP BY p.id`,
+    [tx.tenantId, today, USAGE_WINDOW_DAYS],
+  );
+  for (const r of rows) {
+    const total = Number(r.total);
+    await tx.query(
+      `UPDATE supahound.projects SET requests_30d = $3, billing_tier = $4, usage_counted_at = now()
+       WHERE tenant_id = $1 AND id = $2`,
+      [tx.tenantId, r.id, total, tierFor(total)],
+    );
+  }
+  return projectTiers(tx);
 }
 
 // The gate (decision 028, point 7). The only tenant entry point for signed-in pages and actions

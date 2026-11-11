@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { accessFor, checkCard, POLLABLE_STATUSES, seatsFor, type BillingStatus } from "../../src/billing/policy.js";
+import {
+  accessFor, checkCard, needsEnterprise, POLLABLE_STATUSES, seatsFor, tierFor, type BillingStatus,
+} from "../../src/billing/policy.js";
 
 const ALL: BillingStatus[] = ["none", "incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"];
 
@@ -15,11 +17,17 @@ describe("billing policy (decision 028)", () => {
     expect([...POLLABLE_STATUSES].sort()).toEqual(["active", "past_due", "trialing"]);
   });
 
-  it("bills Builder at least 1 seat and Agency at least 10", () => {
-    expect([0, 1, 4].map((n) => seatsFor("builder", n))).toEqual([1, 1, 4]);
-    expect([0, 9, 10, 25].map((n) => seatsFor("agency", n))).toEqual([10, 10, 10, 25]);
-    expect(() => seatsFor("builder", -1)).toThrow();
-    expect(() => seatsFor("builder", 1.5)).toThrow();
+  it("puts a project on Pro above 1 million requests in 30 days, and flags Enterprise above 10 million", () => {
+    expect([null, 0, 999_999, 1_000_000, 1_000_001, 9_999_999, 50_000_000].map(tierFor)).toEqual([
+      "starter", "starter", "starter", "starter", "pro", "pro", "pro",
+    ]);
+    expect([null, 10_000_000, 10_000_001].map(needsEnterprise)).toEqual([false, false, true]);
+  });
+
+  it("bills one seat per project at its tier, and at least one Starter seat", () => {
+    expect(seatsFor([])).toEqual({ starter: 1, pro: 0 });
+    expect(seatsFor(["starter", "starter", "pro"])).toEqual({ starter: 2, pro: 1 });
+    expect(seatsFor(["pro"])).toEqual({ starter: 0, pro: 1 });
   });
 
   const ok = { approvedByIssuer: true, captured: false, cvcCheck: "pass", funding: "credit" };

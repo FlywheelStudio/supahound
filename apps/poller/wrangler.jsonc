@@ -43,6 +43,11 @@
     // "stripe": skip tenants without a validated card (decision 028). "off": self-hosting without
     // billing. Required; there is no default.
     "SUPAHOUND_BILLING": "off",
+    // With billing on: the daily usage count sets each project's tier and updates the Stripe
+    // subscription. Same prices as the web app; secret STRIPE_SECRET_KEY.
+    "STRIPE_PRICE_STARTER": "",
+    "STRIPE_PRICE_PRO": "",
+    "STRIPE_API_URL": "https://api.stripe.com",
     // Same Supabase OAuth app as the web app; used to refresh connection tokens.
     "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID",
     "APP_URL": "http://localhost:5173"

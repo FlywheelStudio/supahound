@@ -1,9 +1,11 @@
--- Billing with a validated card (issue #25, decision 028).
+-- Billing with a validated card, priced per watched project by its traffic (issue #25, decision 028).
 --
 -- billing_accounts: one row per tenant. Holds Stripe IDs, the subscription status the gate reads,
---   the card check result and the accepted terms. No card data: Stripe holds the card.
+--   the seats billed per tier, the card check result and the accepted terms. No card data.
 -- stripe_events: the Stripe event IDs already processed for a tenant, so a replayed webhook
 --   changes nothing.
+-- project_usage: edge-log requests per project per UTC day, counted once a day by the poller.
+--   The sum of the last 30 days sets each project's tier (projects.billing_tier).
 --
 -- The scheduler reads billing_accounts (tenant_id, status) only, to skip tenants that have not
 -- paid. The app may insert and update billing rows but never delete them: they are the record of
@@ -14,11 +16,11 @@ BEGIN;
 CREATE TABLE supahound.billing_accounts (
   tenant_id uuid PRIMARY KEY REFERENCES supahound.tenants (id) ON DELETE CASCADE,
   stripe_customer_id text UNIQUE CHECK (stripe_customer_id ~ '^cus_[A-Za-z0-9]{1,64}$'),
-  plan text CHECK (plan IN ('builder', 'agency')),
   status text NOT NULL DEFAULT 'none'
     CHECK (status IN ('none', 'incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused')),
   subscription_id text UNIQUE CHECK (subscription_id ~ '^sub_[A-Za-z0-9]{1,64}$'),
-  seats integer CHECK (seats > 0),
+  starter_seats integer CHECK (starter_seats >= 0),
+  pro_seats integer CHECK (pro_seats >= 0),
   trial_end timestamptz,
   current_period_end timestamptz,
   cancel_at_period_end boolean NOT NULL DEFAULT false,
@@ -55,5 +57,28 @@ CREATE POLICY tenant_isolation ON supahound.stripe_events TO supahound_app
   USING (tenant_id = (SELECT supahound.current_tenant()))
   WITH CHECK (tenant_id = (SELECT supahound.current_tenant()));
 GRANT SELECT, INSERT ON supahound.stripe_events TO supahound_app;
+
+CREATE TABLE supahound.project_usage (
+  tenant_id uuid NOT NULL,
+  project_id uuid NOT NULL,
+  day date NOT NULL,
+  requests bigint NOT NULL CHECK (requests >= 0),
+  counted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, project_id, day),
+  FOREIGN KEY (tenant_id, project_id) REFERENCES supahound.projects (tenant_id, id) ON DELETE CASCADE
+);
+
+ALTER TABLE supahound.project_usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE supahound.project_usage FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON supahound.project_usage TO supahound_app
+  USING (tenant_id = (SELECT supahound.current_tenant()))
+  WITH CHECK (tenant_id = (SELECT supahound.current_tenant()));
+GRANT SELECT, INSERT, UPDATE ON supahound.project_usage TO supahound_app;
+
+-- The tier each project bills at, from its last 30 days of requests. New projects start on starter.
+ALTER TABLE supahound.projects
+  ADD COLUMN billing_tier text NOT NULL DEFAULT 'starter' CHECK (billing_tier IN ('starter', 'pro')),
+  ADD COLUMN requests_30d bigint CHECK (requests_30d >= 0),
+  ADD COLUMN usage_counted_at timestamptz;
 
 COMMIT;

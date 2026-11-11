@@ -34,12 +34,14 @@ export function flowDeps(pool: pg.Pool): FlowDeps {
   return { pool, stripe: stripeGateway(), appUrl: env.APP_URL, now: () => new Date() };
 }
 
-// After the picker adds or removes a project: bill the new count. A failure is logged, not shown;
+// After the picker adds or removes a project: bill the new count now, pro rata. A failure is logged, not shown;
 // the overview syncs again when it sees the stored seats drift from the project count.
-export async function syncSeatsAfterChange(pool: pg.Pool, tenant: TenantId): Promise<void> {
+// prorate: true after the picker (a project added now is billed now); false when the overview
+// repairs drift, so a repair never charges anything before the next renewal.
+export async function syncSeatsAfterChange(pool: pg.Pool, tenant: TenantId, prorate = true): Promise<void> {
   if (mode() === "off") return;
   try {
-    await syncSeats(flowDeps(pool), tenant);
+    await syncSeats(flowDeps(pool), tenant, prorate);
   } catch {
     console.log(JSON.stringify({ event: "seat_sync_failed", tenant_id: tenant }));
   }

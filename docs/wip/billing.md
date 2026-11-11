@@ -38,3 +38,24 @@ Migration, `packages/core/src/{billing,db}`, `apps/web/app/w/[tenantId]/**`,
 - 2026-11-10: Erik's answers: card before any use; 7-day trial; Builder $29 / Agency $19 (min 10);
   Builder minimum 1 project; CVC "not failed"; refuse prepaid; new Stripe account for Supahound;
   Hack-me also needs a card.
+- 2026-11-10, later: Erik replaced the plans: no Agency; per project $19.99 (Starter) up to 1M
+  edge-log requests in 30 days, $99 (Pro, SMS coming soon) above, Enterprise above 10M (stays on Pro,
+  we contact them). Thresholds from real traffic in Flywheel's own Supabase projects (counts only,
+  via `supabase logs --remote`): most under 400k/month, the busiest production app about 3.4M.
+  Tier moves take effect at the next renewal (no proration); adding a project is prorated.
+- The rollup cannot measure usage (it filters traffic and stops at 5,000 templates), so the poller
+  counts each project's requests once a day (00:20 UTC, previous UTC day; the logs API caps a
+  query at 24 hours and free Supabase projects keep 1 day of logs).
+- Wrangler passes only declared secrets to a Worker, and a deploy fails when a required secret is
+  missing. So the public template leaves the Stripe secrets undeclared (self-hosters need none),
+  E2E declares them in a copy of the built config, and Flywheel's private config requires them.
+- Stripe SDK 23.0.1 (API 2026-09-30.endive) has no `payment_method_types` on Checkout; it is
+  `allowed_payment_method_types`. A non-card payment method fails the check (fail closed).
+- The middleware's same-origin check blocked the Stripe webhook (403): it is now in `SIGNED_ROUTES`.
+
+## Next
+
+1. Merge PR #88 (hook fix), then this branch, into `develop`, then release to `main`.
+2. Erik runs `scripts/stripe-setup.sh` in the private deploy repo with a test key, then tests.
+3. Live cutover: the same script with a live key, after Erik approves (CLAUDE.md).
+4. SMS alerts: an issue and a provider decision before Pro's "coming soon" can flip.

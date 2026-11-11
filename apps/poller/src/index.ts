@@ -1,10 +1,13 @@
+import { applyUsageTiers } from "@supahound/core/billing/flow";
+import { stripeGateway } from "@supahound/core/billing/stripeGateway";
+import { countDailyUsage } from "@supahound/core/billing/usage";
 import { billingMode } from "@supahound/core/db/billing";
-import { dueProjects } from "@supahound/core/db/repo";
+import { billedTenants, dueProjects } from "@supahound/core/db/repo";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
 import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
-import { projectScope, type ProjectScope } from "@supahound/core/tenancy/scope";
+import { projectScope, tenantId as parseTenantId, type ProjectScope, type TenantId } from "@supahound/core/tenancy/scope";
 import { TokenVault } from "@supahound/core/vault/vault";
 import pg from "pg";
 
@@ -14,9 +17,26 @@ import pg from "pg";
 //
 // Pools are created per invocation: Workers may not share I/O objects across requests.
 
-export interface PollMessage {
-  tenantId: string;
-  projectId: string;
+// A poll of one project, or (once a day, billing on) the usage count of one tenant (decision 028).
+export type PollMessage = { tenantId: string; projectId: string } | { kind: "usage"; tenantId: string };
+
+// The daily usage count runs at 00:20 UTC, after Supabase has the previous day's logs.
+export const USAGE_CRON = { hour: 0, minute: 20 };
+
+export function isUsageMinute(scheduledTime: number): boolean {
+  const t = new Date(scheduledTime);
+  return t.getUTCHours() === USAGE_CRON.hour && t.getUTCMinutes() === USAGE_CRON.minute;
+}
+
+export function parseUsageMessage(body: unknown): TenantId | null {
+  if (!body || typeof body !== "object") return null;
+  const { kind, tenantId } = body as Record<string, unknown>;
+  if (kind !== "usage" || typeof tenantId !== "string") return null;
+  try {
+    return parseTenantId(tenantId);
+  } catch {
+    return null;
+  }
 }
 
 const QUEUE_SEND_LIMIT = 100;
@@ -41,6 +61,13 @@ export interface PollQueue {
   sendBatch(messages: Iterable<MessageSendRequest<PollMessage>>): Promise<unknown>;
 }
 
+export async function enqueueUsage(tenants: TenantId[], queue: PollQueue): Promise<number> {
+  for (let i = 0; i < tenants.length; i += QUEUE_SEND_LIMIT) {
+    await queue.sendBatch(tenants.slice(i, i + QUEUE_SEND_LIMIT).map((t) => ({ body: { kind: "usage" as const, tenantId: t } })));
+  }
+  return tenants.length;
+}
+
 export async function enqueueDue(scopes: ProjectScope[], queue: PollQueue): Promise<number> {
   for (let i = 0; i < scopes.length; i += QUEUE_SEND_LIMIT) {
     const chunk = scopes.slice(i, i + QUEUE_SEND_LIMIT);
@@ -58,8 +85,21 @@ export interface QueueMessageLike {
 export async function handleMessages(
   messages: readonly QueueMessageLike[],
   poll: (scope: ProjectScope) => Promise<PollOutcome>,
+  usage?: (tenant: TenantId) => Promise<void>,
 ): Promise<void> {
   for (const msg of messages) {
+    const tenant = parseUsageMessage(msg.body);
+    if (tenant) {
+      try {
+        if (usage) await usage(tenant);
+        log("usage_done", { tenant_id: tenant });
+        msg.ack();
+      } catch {
+        log("usage_crashed", { tenant_id: tenant });
+        msg.retry();
+      }
+      continue;
+    }
     const scope = parseMessage(msg.body);
     if (!scope) {
       log("poll_message_invalid");
@@ -81,8 +121,12 @@ export default {
   async scheduled(_controller, env): Promise<void> {
     const scheduler = new pg.Pool({ connectionString: env.HYPERDRIVE_SCHEDULER.connectionString, max: 1 });
     try {
-      const count = await enqueueDue(await dueProjects(scheduler, 60, 1000, billingMode(env.SUPAHOUND_BILLING)), env.POLL_QUEUE);
+      const billing = billingMode(env.SUPAHOUND_BILLING);
+      const count = await enqueueDue(await dueProjects(scheduler, 60, 1000, billing), env.POLL_QUEUE);
       log("polls_enqueued", { count });
+      if (billing === "stripe" && isUsageMinute(_controller.scheduledTime)) {
+        log("usage_enqueued", { count: await enqueueUsage(await billedTenants(scheduler), env.POLL_QUEUE) });
+      }
     } finally {
       await scheduler.end();
     }
@@ -104,8 +148,20 @@ export default {
       explain: explainerFor((env as Env & { AI_GATEWAY_API_KEY?: string }).AI_GATEWAY_API_KEY),
       env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
     };
+    // Billing on: count yesterday's requests, set each project's tier, bill it from the next renewal.
+    const usage = async (tenant: TenantId) => {
+      if (billingMode(env.SUPAHOUND_BILLING) !== "stripe") return;
+      const counted = await countDailyUsage(tenant, { app, vault: deps.vault, oauth: deps.oauth, queryLogs, env: deps.env });
+      log("usage_counted", { tenant_id: tenant, counted: counted.counted, failed: counted.failed });
+      const stripe = stripeGateway({
+        secretKey: (env as Env & { STRIPE_SECRET_KEY?: string }).STRIPE_SECRET_KEY ?? "",
+        apiUrl: env.STRIPE_API_URL,
+        prices: { starter: env.STRIPE_PRICE_STARTER, pro: env.STRIPE_PRICE_PRO },
+      });
+      await applyUsageTiers({ pool: app, stripe, appUrl: env.APP_URL, now: () => new Date() }, tenant, counted.day);
+    };
     try {
-      await handleMessages(batch.messages, (scope) => pollProject(scope, deps));
+      await handleMessages(batch.messages, (scope) => pollProject(scope, deps), usage);
     } finally {
       await app.end();
     }

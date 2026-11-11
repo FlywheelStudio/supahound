@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { POLLABLE_STATUSES } from "../billing/policy.js";
 import type { Finding, Severity } from "../detectors/finding.js";
 import type { OwnershipMap } from "../ownership/ownership.js";
-import { connectionId, projectId, projectScope, tenantId, type ConnectionId, type ProjectId, type ProjectScope } from "../tenancy/scope.js";
+import { connectionId, projectId, projectScope, tenantId, type ConnectionId, type ProjectId, type ProjectScope, type TenantId } from "../tenancy/scope.js";
 import type { TokenVault } from "../vault/vault.js";
 import type { BillingMode } from "./billing.js";
 import type { TenantTx } from "./tenant.js";
@@ -330,6 +330,16 @@ export async function dueProjects(
     billing === "off" ? [olderThanSeconds, limit] : [olderThanSeconds, limit, POLLABLE_STATUSES],
   );
   return res.rows.map((r) => projectScope(tenantId(r.tenant_id), r.id));
+}
+
+// The tenants whose subscription allows polling, for the daily usage count (decision 028).
+// Scheduler role: reads billing_accounts (tenant_id, status) only.
+export async function billedTenants(schedulerPool: Pool): Promise<TenantId[]> {
+  const res = await schedulerPool.query<{ tenant_id: string }>(
+    "SELECT tenant_id FROM supahound.billing_accounts WHERE status = ANY($1::text[]) ORDER BY tenant_id",
+    [POLLABLE_STATUSES],
+  );
+  return res.rows.map((r) => tenantId(r.tenant_id));
 }
 
 // Dashboard reads. Called inside withTenantForUser, so the tenant is a verified membership.

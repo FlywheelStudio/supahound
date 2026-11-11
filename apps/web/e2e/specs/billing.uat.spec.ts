@@ -18,16 +18,15 @@ async function newWorkspace(page: Page, tag: string): Promise<string> {
   return BILLING_URL.exec(new URL(page.url()).pathname)![1]!;
 }
 
-async function toCheckout(page: Page, plan: "Builder" | "Agency" = "Builder"): Promise<void> {
-  await page.getByRole("radio", { name: new RegExp(plan) }).check();
+async function toCheckout(page: Page): Promise<void> {
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Add card and start trial" }).click();
   await expect(page.getByRole("heading", { name: "Fake Stripe Checkout" })).toBeVisible();
 }
 
 async function billingRow(tenant: string) {
-  const [row] = await adminQuery<{ status: string; seats: number | null; plan: string | null; verification_error: string | null; card_verified_at: Date | null; terms_accepted_at: Date | null }>(
-    "SELECT status, seats, plan, verification_error, card_verified_at, terms_accepted_at FROM supahound.billing_accounts WHERE tenant_id = $1",
+  const [row] = await adminQuery<{ status: string; starter_seats: number | null; pro_seats: number | null; verification_error: string | null; card_verified_at: Date | null; terms_accepted_at: Date | null }>(
+    "SELECT status, starter_seats, pro_seats, verification_error, card_verified_at, terms_accepted_at FROM supahound.billing_accounts WHERE tenant_id = $1",
     [tenant],
   );
   return row;
@@ -36,7 +35,7 @@ async function billingRow(tenant: string) {
 async function stripeState() {
   return (await (await fetch(`${STRIPE()}/__test/state`)).json()) as {
     sessions: { metadata: { tenant_id?: string }; payment_intent: { status: string } | null }[];
-    subscriptions: { id: string; metadata: { tenant_id?: string }; trial_period_days: number; items: { data: { quantity: number }[] } }[];
+    subscriptions: { id: string; metadata: { tenant_id?: string }; trial_period_days: number; last_proration_behavior?: string; items: { data: { quantity: number; price: { id: string } }[] } }[];
   };
 }
 
@@ -61,11 +60,14 @@ test.describe("UAT: a validated card before any use", () => {
     await page.getByRole("button", { name: "Add card and start trial" }).click();
     await expect(page).toHaveURL(new RegExp(`/w/${tenant}/billing\\?error=terms$`));
     await expect(page.getByRole("alert")).toContainText("accept the terms");
+    await expect(page.locator("#billing-terms")).toContainText("we contact you about Enterprise");
+    await expect(page.locator("#billing-terms")).toContainText("$1 hold");
 
     await toCheckout(page);
     await expect(page.locator("#amount")).toHaveText("$1.00");
     await expect(page.locator("#terms")).toContainText("$1 hold");
-    await expect(page.locator("#terms")).toContainText("$29 per watched project per month");
+    await expect(page.locator("#terms")).toContainText("$19.99 per month");
+    await expect(page.locator("#terms")).toContainText("$99 per month if it sent more than 1 million requests");
     expect((await billingRow(tenant))!.terms_accepted_at).not.toBeNull();
   });
 
@@ -79,22 +81,22 @@ test.describe("UAT: a validated card before any use", () => {
     await expect(page.getByRole("button", { name: "Connect Supabase" })).toBeVisible();
 
     const row = await billingRow(tenant);
-    expect([row!.status, row!.seats, row!.plan, row!.verification_error, row!.card_verified_at !== null]).toEqual(["trialing", 1, "builder", null, true]);
+    expect([row!.status, row!.starter_seats, row!.pro_seats, row!.verification_error, row!.card_verified_at !== null]).toEqual(["trialing", 1, 0, null, true]);
     const state = await stripeState();
     const session = state.sessions.find((s) => s.metadata.tenant_id === tenant)!;
     expect(session.payment_intent!.status).toBe("canceled"); // the $1 hold is released, never captured
     const subs = state.subscriptions.filter((s) => s.metadata.tenant_id === tenant);
     expect(subs).toHaveLength(1);
-    expect([subs[0]!.trial_period_days, subs[0]!.items.data[0]!.quantity]).toEqual([7, 1]);
+    expect(subs[0]!.trial_period_days).toBe(7);
+    expect(subs[0]!.items.data.map((i) => [i.price.id, i.quantity])).toEqual([["price_starter_e2e", 1], ["price_pro_e2e", 0]]);
   });
 
-  test("UAT-B4 Agency bills its 10-project minimum, and a card whose bank skips the CVC check passes", async ({ page }) => {
+  test("UAT-B4 a card whose bank skips the CVC check passes", async ({ page }) => {
     const tenant = await newWorkspace(page, "b4");
-    await toCheckout(page, "Agency");
+    await toCheckout(page);
     await page.getByRole("link", { name: "Pay with a card whose bank skips CVC" }).click();
     await expect(page).toHaveURL(new RegExp(`/w/${tenant}\\?welcome=1$`));
-    const row = await billingRow(tenant);
-    expect([row!.status, row!.plan, row!.seats]).toEqual(["trialing", "agency", 10]);
+    expect((await billingRow(tenant))!.status).toBe("trialing");
   });
 
   for (const [id, card, link, text] of [
@@ -167,5 +169,39 @@ test.describe("UAT: a validated card before any use", () => {
     await expect(member.getByText("Ask a workspace owner or admin to add one")).toBeVisible();
     await expect(member.getByRole("button", { name: "Add card and start trial" })).toHaveCount(0);
     await member.close();
+  });
+
+  test("UAT-B12 each project shows its own tier; a busy project bills at Pro from the next renewal", async ({ page }) => {
+    const tenant = await newWorkspace(page, "b12");
+    await toCheckout(page);
+    await page.getByRole("link", { name: "Pay with a good card", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/w/${tenant}\\?welcome=1$`));
+
+    // What the daily usage count leaves behind (packages/core/test/db/billing.test.ts covers the count):
+    // one quiet project, one above 1 million requests, one above 10 million.
+    const { pollPickedProject } = await import("../support/seed");
+    for (const name of ["Quiet app", "Busy app", "Huge app"]) await pollPickedProject(tenant, name, []);
+    await adminQuery(
+      `UPDATE supahound.projects SET requests_30d = CASE name WHEN 'Quiet app' THEN 250000 WHEN 'Busy app' THEN 3400000 ELSE 12000000 END,
+         billing_tier = CASE name WHEN 'Quiet app' THEN 'starter' ELSE 'pro' END, usage_counted_at = now()
+       WHERE tenant_id = $1`,
+      [tenant],
+    );
+    await page.goto(`/w/${tenant}`);
+    await expect(page.getByText(/Starter \$19\.99\/mo · 250,000 requests in 30 days/)).toBeVisible();
+    await expect(page.getByText(/Pro \$99\/mo · 3,400,000 requests in 30 days/)).toBeVisible();
+    await expect(page.getByText("we will contact you about Enterprise")).toBeVisible();
+
+    // The overview saw the stored seats drift and billed the tiers without proration: nothing is
+    // charged before the next renewal.
+    const sub = (await stripeState()).subscriptions.find((s) => s.metadata.tenant_id === tenant)!;
+    expect(sub.items.data.map((i) => [i.price.id, i.quantity])).toEqual([["price_starter_e2e", 1], ["price_pro_e2e", 2]]);
+    expect(sub.last_proration_behavior).toBe("none");
+    const row = await billingRow(tenant);
+    expect([row!.starter_seats, row!.pro_seats]).toEqual([1, 2]);
+
+    await page.goto(`/w/${tenant}/billing`);
+    await expect(page.getByRole("list", { name: "Projects and their tier" })).toContainText("Huge app");
+    await expect(page.getByRole("list", { name: "Projects and their tier" })).toContainText("Enterprise: we will contact you");
   });
 });

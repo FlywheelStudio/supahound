@@ -1,10 +1,12 @@
-import type { BillingEvent, VerificationSession } from "@supahound/core/billing/flow";
-import { isBillingStatus, isPlan, PRICE_PER_SEAT_USD, TRIAL_DAYS, type Plan } from "@supahound/core/billing/policy";
-import type { SubscriptionSnapshot } from "@supahound/core/db/billing";
+import type { SubscriptionSnapshot } from "../db/billing.js";
+import type { BillingEvent, VerificationSession } from "./flow.js";
+import {
+  ENTERPRISE_FROM_REQUESTS, isBillingStatus, PRICE_LABEL, PRO_FROM_REQUESTS, TRIAL_DAYS, USAGE_WINDOW_DAYS, type Seats,
+} from "./policy.js";
 
-// Stripe objects → the shapes packages/core/src/billing/flow.ts works with. Pure, so the tests run
-// on plain fixtures. Fields are read defensively: an API version change must fail closed (no
-// access), never open.
+// Stripe objects → the shapes the billing flow works with. Pure, so the tests run on plain
+// fixtures. Fields are read defensively: an API version change must fail closed (no access),
+// never open.
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" ? (v as Obj) : null);
@@ -14,6 +16,11 @@ const date = (v: unknown): Date | null => (typeof v === "number" ? new Date(v * 
 const meta = (v: unknown, key: string): string | null => str(obj(obj(v)?.metadata)?.[key]);
 
 export const PURPOSE = "card_verification";
+
+export interface PriceIds {
+  starter: string;
+  pro: string;
+}
 
 // A Checkout Session retrieved with expand: ["payment_intent.latest_charge"].
 export function sessionFromStripe(s: Obj): VerificationSession {
@@ -27,7 +34,6 @@ export function sessionFromStripe(s: Obj): VerificationSession {
     id: str(s.id) ?? "",
     status: status === "complete" || status === "expired" ? status : "open",
     tenant: meta(s, "purpose") === PURPOSE ? meta(s, "tenant_id") : null,
-    plan: meta(s, "plan"),
     customerId: idOf(s.customer),
     hold: pi
       ? {
@@ -43,25 +49,39 @@ export function sessionFromStripe(s: Obj): VerificationSession {
   };
 }
 
-export function subscriptionFromStripe(s: Obj, priceToPlan: (priceId: string) => Plan | null): SubscriptionSnapshot & {
+// Seats per tier from the subscription's items, matched by price ID.
+export function seatsFromItems(items: unknown, prices: PriceIds): Seats & { itemIds: Partial<Record<keyof PriceIds, string>> } {
+  const data = (obj(items)?.data as unknown[] | undefined) ?? [];
+  const out = { starter: 0, pro: 0, itemIds: {} as Partial<Record<keyof PriceIds, string>> };
+  for (const raw of data) {
+    const item = obj(raw);
+    const price = idOf(item?.price);
+    const tier = price === prices.starter ? "starter" : price === prices.pro ? "pro" : null;
+    if (!tier || !item) continue;
+    out[tier] += typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 0;
+    const itemId = str(item.id);
+    if (itemId) out.itemIds[tier] = itemId;
+  }
+  return out;
+}
+
+export function subscriptionFromStripe(s: Obj, prices: PriceIds): SubscriptionSnapshot & {
   tenant: string | null;
   cardVerifiedAt: Date | null;
 } {
-  const item = obj((obj(s.items)?.data as unknown[] | undefined)?.[0]);
-  const priceId = idOf(item?.price);
-  const plan = (isPlan(meta(s, "plan")) ? meta(s, "plan") : null) ?? (priceId ? priceToPlan(priceId) : null);
+  const seats = seatsFromItems(s.items, prices);
+  const firstItem = obj((obj(s.items)?.data as unknown[] | undefined)?.[0]);
   const status = str(s.status);
   const verified = meta(s, "card_verified_at");
   const verifiedAt = verified ? new Date(verified) : null;
   return {
     id: str(s.id) ?? "",
     customerId: idOf(s.customer) ?? "",
-    plan: (plan ?? "builder") as Plan,
     // Unknown status: treat as canceled, which closes the gate.
     status: isBillingStatus(status) && status !== "none" ? status : "canceled",
-    seats: typeof item?.quantity === "number" && item.quantity > 0 ? item.quantity : 1,
+    seats: { starter: seats.starter, pro: seats.pro },
     trialEnd: date(s.trial_end),
-    currentPeriodEnd: date(item?.current_period_end) ?? date(s.current_period_end),
+    currentPeriodEnd: date(firstItem?.current_period_end) ?? date(s.current_period_end),
     cancelAtPeriodEnd: s.cancel_at_period_end === true,
     tenant: meta(s, "tenant_id"),
     cardVerifiedAt: verifiedAt && !Number.isNaN(verifiedAt.getTime()) ? verifiedAt : null,
@@ -87,11 +107,14 @@ export function billingEventFromStripe(e: Obj): BillingEvent {
   return base;
 }
 
+const millions = (n: number) => `${n / 1_000_000} million`;
+
 // The billing terms shown on our page and next to Stripe's pay button (decision 028, point 6).
-export function termsText(plan: Plan): string {
-  const price = PRICE_PER_SEAT_USD[plan];
-  const minimum = plan === "agency" ? "10 projects minimum" : "1 project minimum";
+export function termsText(): string {
   return `Free for ${TRIAL_DAYS} days. We place a $1 hold on your card to confirm it with your bank, and release it at once. ` +
-    `After the trial, Supahound charges $${price} per watched project per month (${minimum}) until you cancel. ` +
+    `After the trial, each watched project costs ${PRICE_LABEL.starter} per month, or ${PRICE_LABEL.pro} per month if it sent more than ` +
+    `${millions(PRO_FROM_REQUESTS)} requests in the last ${USAGE_WINDOW_DAYS} days (you pay for at least one project). ` +
+    `A project's price follows its traffic and changes at the next monthly charge. Above ${millions(ENTERPRISE_FROM_REQUESTS)} requests ` +
+    `a project stays at ${PRICE_LABEL.pro} and we contact you about Enterprise. ` +
     `Cancel any time from Billing; cancel before the trial ends and you pay nothing.`;
 }

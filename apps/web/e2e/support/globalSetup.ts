@@ -68,8 +68,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     `STRIPE_API_URL=${stripe.url}`,
     "STRIPE_SECRET_KEY=sk_test_e2e",
     `STRIPE_WEBHOOK_SECRET=${stripe.webhookSecret}`,
-    "STRIPE_PRICE_BUILDER=price_builder_e2e",
-    "STRIPE_PRICE_AGENCY=price_agency_e2e",
+    "STRIPE_PRICE_STARTER=price_starter_e2e",
+    "STRIPE_PRICE_PRO=price_pro_e2e",
   ].join("\n"));
 
   const webDir = fileURLToPath(new URL("../../", import.meta.url));

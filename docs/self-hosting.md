@@ -55,6 +55,8 @@ project for it.
 | `SUPAHOUND_MASTER_KEYS` | `pnpm -s master-key` (step 2) | both Workers, the same value | secret | yes |
 | `APP_URL` | Your app's origin, for example `https://supahound.example.com` | both Workers | var | yes |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | poller | secret | no |
+| `SUPAHOUND_BILLING` | `off` for self-hosting; `stripe` needs the Stripe items below (decision 028) | both Workers | var | yes |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO` | Your Stripe account, only with `SUPAHOUND_BILLING=stripe` | web (all), poller (key and prices) | secret, var | no |
 | `SUPPORT_EMAIL`, `TERMS_URL`, `PRIVACY_URL` | Your own | web | var | no |
 
 Without `AI_GATEWAY_API_KEY`, incident summaries use template text and no model is called. With

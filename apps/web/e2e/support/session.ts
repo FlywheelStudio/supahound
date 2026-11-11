@@ -57,8 +57,8 @@ export async function createPaidWorkspace(page: Page): Promise<string> {
   const { adminQuery } = await import("./seed");
   const suffix = randomBytes(8).toString("hex");
   await adminQuery(
-    `INSERT INTO supahound.billing_accounts (tenant_id, stripe_customer_id, plan, status, subscription_id, seats, trial_end, card_verified_at, terms_version, terms_accepted_at)
-     VALUES ($1, $2, 'builder', 'trialing', $3, 1, now() + interval '7 days', now(), 'e2e', now())`,
+    `INSERT INTO supahound.billing_accounts (tenant_id, stripe_customer_id, status, subscription_id, starter_seats, pro_seats, trial_end, card_verified_at, terms_version, terms_accepted_at)
+     VALUES ($1, $2, 'trialing', $3, 1, 0, now() + interval '7 days', now(), 'e2e', now())`,
     [tenant, `cus_seed${suffix}`, `sub_seed${suffix}`],
   );
   await page.goto(`/w/${tenant}`);
