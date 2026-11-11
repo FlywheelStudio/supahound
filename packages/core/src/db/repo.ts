@@ -308,8 +308,10 @@ export async function appendAudit(
 // project IDs and poll times and nothing else. Returns scopes only; each job then opens its own
 // tenant transaction.
 //
-// billing "stripe" skips tenants whose subscription may not be polled (decision 028); "off" is for
-// self-hosting without billing. The scheduler reads billing_accounts (tenant_id, status) only.
+// billing "stripe" skips tenants whose subscription may not be polled (decision 028), unless the
+// workspace is exempt (decision 029); "off" is for self-hosting without billing. The scheduler
+// reads billing_accounts (tenant_id, status, exempt_at) only. A membership trigger clears
+// exempt_at when the owners change, so the scheduler needs no access to memberships.
 export async function dueProjects(
   schedulerPool: Pool,
   olderThanSeconds: number,
@@ -323,7 +325,7 @@ export async function dueProjects(
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`
       : `SELECT p.tenant_id, p.id FROM supahound.projects p
-         JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND b.status = ANY($3::text[])
+         JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND (b.status = ANY($3::text[]) OR b.exempt_at IS NOT NULL)
          WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`,

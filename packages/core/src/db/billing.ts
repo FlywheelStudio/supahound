@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import {
-  accessFor, isBillingStatus, isTier, tierFor, USAGE_WINDOW_DAYS,
+  accessForAccount, isBillingStatus, isTier, tierFor, USAGE_WINDOW_DAYS,
   type Access, type BillingStatus, type CardRejection, type Seats, type Tier,
 } from "../billing/policy.js";
 import type { ProjectId, TenantId, UserId } from "../tenancy/scope.js";
@@ -37,6 +37,10 @@ export interface BillingAccount {
   verificationError: string | null;
   termsVersion: string | null;
   termsAcceptedAt: Date | null;
+  // Decision 029: true only while the workspace's sole owner is the user who was granted the
+  // exemption. The database computes it on every read.
+  exempt: boolean;
+  exemptAt: Date | null;
 }
 
 interface Row {
@@ -52,18 +56,27 @@ interface Row {
   verification_error: string | null;
   terms_version: string | null;
   terms_accepted_at: Date | null;
+  exempt: boolean;
+  exempt_at: Date | null;
 }
 
 const NONE: BillingAccount = {
   customerId: null, status: "none", subscriptionId: null, seats: null, trialEnd: null, currentPeriodEnd: null,
   cancelAtPeriodEnd: false, cardVerifiedAt: null, verificationError: null, termsVersion: null, termsAcceptedAt: null,
+  exempt: false, exemptAt: null,
 };
+
+// The owners of the tenant, as a list, are exactly [exempt_owner]. Shared by getBilling and grantExemption.
+const SOLE_OWNER_IS = (user: string) =>
+  `COALESCE((SELECT array_agg(m.user_id) FROM supahound.memberships m
+             WHERE m.tenant_id = $1 AND m.role = 'owner') = ARRAY[${user}]::uuid[], false)`;
 
 // The tenant's billing state; a tenant with no row has status "none".
 export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
   const [r] = await tx.query<Row>(
     `SELECT stripe_customer_id, status, subscription_id, starter_seats, pro_seats, trial_end, current_period_end,
-            cancel_at_period_end, card_verified_at, verification_error, terms_version, terms_accepted_at
+            cancel_at_period_end, card_verified_at, verification_error, terms_version, terms_accepted_at,
+            exempt_owner IS NOT NULL AND ${SOLE_OWNER_IS("exempt_owner")} AS exempt, exempt_at
      FROM supahound.billing_accounts WHERE tenant_id = $1`,
     [tx.tenantId],
   );
@@ -80,6 +93,8 @@ export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
     verificationError: r.verification_error,
     termsVersion: r.terms_version,
     termsAcceptedAt: r.terms_accepted_at,
+    exempt: r.exempt,
+    exemptAt: r.exempt ? r.exempt_at : null,
   };
 }
 
@@ -93,6 +108,16 @@ async function upsert(tx: TenantTx, set: string, params: unknown[]): Promise<voi
 // The owner accepted the billing terms on our page, just before Checkout.
 export async function acceptBillingTerms(tx: TenantTx, version: string, at: Date): Promise<void> {
   await upsert(tx, "terms_version = $2, terms_accepted_at = $3, verification_error = NULL", [version, at]);
+}
+
+// Decision 029. Exempts the workspace while `owner` stays its only owner. The caller must have
+// checked the owner's verified email against the exempt domains. False, and nothing written,
+// when the user is not the sole owner.
+export async function grantExemption(tx: TenantTx, owner: UserId, at: Date): Promise<boolean> {
+  const [r] = await tx.query<{ sole: boolean }>(`SELECT ${SOLE_OWNER_IS("$2::uuid")} AS sole`, [tx.tenantId, owner]);
+  if (!r?.sole) return false;
+  await upsert(tx, "exempt_owner = $2, exempt_at = COALESCE(exempt_at, $3)", [owner, at]);
+  return true;
 }
 
 export async function setStripeCustomer(tx: TenantTx, customerId: string): Promise<void> {
@@ -206,7 +231,7 @@ export async function withPaidTenantForUser<T>(
 ): Promise<T> {
   return withTenantForUser(pool, user, tenant, async (tx, role) => {
     if (mode === "off") return fn(tx, role, "full");
-    const access = accessFor((await getBilling(tx)).status);
+    const access = accessForAccount(await getBilling(tx));
     if (access === "blocked") throw new PaymentRequiredError(tenant);
     return fn(tx, role, access);
   });

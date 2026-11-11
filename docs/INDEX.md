@@ -46,3 +46,4 @@
 | [decisions/026-scan-secrets-leak-paths.md](decisions/026-scan-secrets-leak-paths.md) | Scan funnel secrets scanner: client code plus a fixed leak-path list; scope on every hop; no secret in evidence (amends 016) |
 | [decisions/027-hosted-deploy-config-private.md](decisions/027-hosted-deploy-config-private.md) | Flywheel's hosted deploy config in a private repo; public `wrangler.jsonc` files stay templates; deploys from a fresh clone |
 | [decisions/028-card-validated-trial.md](decisions/028-card-validated-trial.md) | A validated card ($1 hold, released) before any use; 7-day trial; per project $19.99 (Starter) or $99 (Pro, above 1M requests/30 days); Enterprise above 10M (supersedes 013's plans) |
+| [decisions/029-staff-billing-exemption.md](decisions/029-staff-billing-exemption.md) | Staff workspaces need no card while a staff member (exempt email domain) is their only owner; a customer workspace with staff in it still pays |

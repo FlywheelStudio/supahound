@@ -6,7 +6,7 @@ import {
 import { withTenant } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
 import { tenantId as parseTenantId, type TenantId, type UserId } from "../tenancy/scope.js";
-import { accessFor, checkCard, seatsFor, TERMS_VERSION, type CardEvidence, type CardRejection, type Seats } from "./policy.js";
+import { accessFor, accessForAccount, checkCard, seatsFor, TERMS_VERSION, type CardEvidence, type CardRejection, type Seats } from "./policy.js";
 
 // The billing flow (decision 028). Stripe sits behind StripeGateway, so the flow runs against a
 // fake in tests. No Stripe call ever runs inside a tenant transaction.
@@ -67,7 +67,7 @@ export async function startCheckout(
   const state: { next: string } | { customerId: string | null } = await withTenantForUser(deps.pool, input.user, tenant, async (tx, role) => {
     if (role === "member") return { next: billingPath(tenant, "role") };
     const billing = await getBilling(tx);
-    if (accessFor(billing.status) !== "blocked") return { next: `/w/${tenant}` };
+    if (accessForAccount(billing) !== "blocked") return { next: `/w/${tenant}` };
     if (!input.acceptedTerms) return { next: billingPath(tenant, "terms") };
     await acceptBillingTerms(tx, TERMS_VERSION, deps.now());
     return { customerId: billing.customerId };

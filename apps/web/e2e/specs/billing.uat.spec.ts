@@ -204,4 +204,52 @@ test.describe("UAT: a validated card before any use", () => {
     await expect(page.getByRole("list", { name: "Projects and their tier" })).toContainText("Huge app");
     await expect(page.getByRole("list", { name: "Projects and their tier" })).toContainText("Enterprise: we will contact you");
   });
+
+  // Decision 029: a workspace whose only owner signs in on an exempt domain needs no card.
+  const staffEmail = (tag: string) => uniqueEmail(tag).replace(/@example\.com$/, "@staff.test");
+  const userId = async (email: string) =>
+    ((await (await fetch(`${process.env.E2E_AUTH_URL}/__test/user?email=${encodeURIComponent(email)}`)).json()) as { id: string }).id;
+
+  test("UAT-B13 a staff owner opens a workspace with no card; it needs one once a second owner joins", async ({ page, browser }) => {
+    const email = staffEmail("b13");
+    await signIn(page, email);
+    await page.getByLabel("Workspace name").fill("Billing b13 staff");
+    await page.getByRole("button", { name: "Create workspace" }).click();
+    await expect(page).toHaveURL(/\/w\/[0-9a-f-]{36}$/);
+    const tenant = /\/w\/([0-9a-f-]{36})$/.exec(new URL(page.url()).pathname)![1]!;
+    await page.goto(`/w/${tenant}/projects`);
+    await expect(page).toHaveURL(new RegExp(`/w/${tenant}/projects$`));
+    await page.goto(`/w/${tenant}/billing`);
+    await expect(page.getByRole("region", { name: "Complimentary workspace" })).toContainText("Complimentary");
+    await expect(page.getByRole("button", { name: "Add card and start trial" })).toHaveCount(0);
+    // No Stripe customer, no Checkout, no subscription.
+    expect(await billingRow(tenant)).toMatchObject({ status: "none", card_verified_at: null });
+    expect((await stripeState()).sessions.filter((s) => s.metadata.tenant_id === tenant)).toHaveLength(0);
+    const [exempt] = await adminQuery<{ exempt_owner: string }>("SELECT exempt_owner FROM supahound.billing_accounts WHERE tenant_id = $1", [tenant]);
+    expect(exempt?.exempt_owner).toBe(await userId(email));
+
+    // A second owner (here a customer): the exemption ends, and the workspace needs a card.
+    const customer = uniqueEmail("b13-customer");
+    const other = await (await browser.newContext()).newPage();
+    await signIn(other, customer);
+    await other.close();
+    await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, await userId(customer)]);
+    await page.goto(`/w/${tenant}`);
+    await expect(page).toHaveURL(new RegExp(`/w/${tenant}/billing$`));
+    await expect(page.getByRole("button", { name: "Add card and start trial" })).toBeVisible();
+  });
+
+  test("UAT-B14 a staff member in a customer's workspace does not make it free", async ({ page, browser }) => {
+    const tenant = await newWorkspace(page, "b14");
+    const email = staffEmail("b14-staff");
+    const staff = await (await browser.newContext()).newPage();
+    await signIn(staff, email);
+    await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')", [tenant, await userId(email)]);
+    await staff.goto(`/w/${tenant}`);
+    await expect(staff).toHaveURL(new RegExp(`/w/${tenant}/billing$`));
+    await expect(staff.getByRole("button", { name: "Add card and start trial" })).toBeVisible();
+    expect(await adminQuery("SELECT 1 FROM supahound.billing_accounts WHERE tenant_id = $1 AND exempt_owner IS NOT NULL", [tenant])).toHaveLength(0);
+    await staff.close();
+  });
 });
+

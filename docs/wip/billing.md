@@ -52,6 +52,12 @@ Migration, `packages/core/src/{billing,db}`, `apps/web/app/w/[tenantId]/**`,
 - Stripe SDK 23.0.1 (API 2026-09-30.endive) has no `payment_method_types` on Checkout; it is
   `allowed_payment_method_types`. A non-card payment method fails the check (fail closed).
 - The middleware's same-origin check blocked the Stripe webhook (403): it is now in `SIGNED_ROUTES`.
+- 2026-11-11: Erik: staff workspaces must not pay, but a customer workspace must still pay when
+  staff join it. Decision 029, issue #94: exempt while the sole owner's verified email is on
+  `SUPAHOUND_BILLING_EXEMPT_DOMAINS`; migration `20261111010000_billing_exempt.sql` adds
+  `exempt_owner`/`exempt_at` and a membership trigger that clears them when the owners change.
+  The one staff subscription that existed before this gets a 100%-off coupon in Stripe (Erik, by
+  hand), so its trial end charges nothing.
 
 ## Next
 
@@ -59,3 +65,6 @@ Migration, `packages/core/src/{billing,db}`, `apps/web/app/w/[tenantId]/**`,
 2. Erik runs `scripts/stripe-setup.sh` in the private deploy repo with a test key, then tests.
 3. Live cutover: the same script with a live key, after Erik approves (CLAUDE.md).
 4. SMS alerts: an issue and a provider decision before Pro's "coming soon" can flip.
+5. Staff exemption (#94): apply the migration to production, set the domain list in the private
+   deploy config, deploy (each needs Erik's approval). Then the staff owner opens the billing page
+   once and cancels the old Stripe subscription.
