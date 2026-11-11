@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
+import * as billing from "../../src/db/billing.js";
 import * as repo from "../../src/db/repo.js";
 import { TenantTx, withTenant } from "../../src/db/tenant.js";
 import { tenantId, type ConnectionId, type ProjectId, type TenantId } from "../../src/tenancy/scope.js";
@@ -13,6 +14,7 @@ const TABLES = [
   "tenants", "connections", "projects", "service_role_networks", "poll_runs", "incidents", "findings", "audit_log",
   "memberships", "oauth_states",
   "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
+  "billing_accounts", "stripe_events",
 ] as const;
 
 interface Seeded {
@@ -75,6 +77,12 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
         [tenant, scanRowId],
       );
       await tx.query("INSERT INTO supahound.scan_jobs (tenant_id, scan_id, state) VALUES ($1, $2, 'queued')", [tenant, scanRowId]);
+      // Billing rows (decision 028): a trialing subscription and one processed Stripe event.
+      await billing.saveSubscription(tx, {
+        id: `sub_${slug}1`, customerId: `cus_${slug}1`, plan: "builder", status: "trialing", seats: 1,
+        trialEnd: new Date(Date.now() + 7 * 86_400_000), currentPeriodEnd: null, cancelAtPeriodEnd: false,
+      }, new Date());
+      expect(await billing.claimStripeEvent(tx, `evt_${slug}1`, "checkout.session.completed")).toBe(true);
       return { tenant, connection, project, run, incident };
     });
   }
@@ -193,12 +201,18 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   });
 
   it("lets the scheduler see project IDs for every tenant and nothing else", async () => {
-    const due = await repo.dueProjects(db.scheduler, 60, 100);
+    const due = await repo.dueProjects(db.scheduler, 60, 100, "off");
     expect(due.map((s) => s.tenantId).sort()).toEqual([seeded.a.tenant, seeded.b.tenant].sort());
     await expect(db.scheduler.query("SELECT supabase_ref FROM supahound.projects")).rejects.toThrow(/permission denied/);
     await expect(db.scheduler.query("SELECT * FROM supahound.projects")).rejects.toThrow(/permission denied/);
-    for (const table of TABLES.filter((t) => t !== "projects")) {
+    for (const table of TABLES.filter((t) => t !== "projects" && t !== "billing_accounts")) {
       await expect(db.scheduler.query(`SELECT 1 FROM supahound.${table}`), table).rejects.toThrow(/permission denied/);
+    }
+    // Billing: the status per tenant, to skip tenants that have not paid, and no other column.
+    const statuses = await db.scheduler.query("SELECT tenant_id, status FROM supahound.billing_accounts");
+    expect(statuses.rows).toHaveLength(2);
+    for (const col of ["stripe_customer_id", "subscription_id", "plan", "*"]) {
+      await expect(db.scheduler.query(`SELECT ${col} FROM supahound.billing_accounts`), col).rejects.toThrow(/permission denied/);
     }
   });
 

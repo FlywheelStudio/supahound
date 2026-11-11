@@ -40,6 +40,9 @@
   ],
   "vars": {
     "SUPAHOUND_SOURCE_COLUMN": "source",
+    // "stripe": skip tenants without a validated card (decision 028). "off": self-hosting without
+    // billing. Required; there is no default.
+    "SUPAHOUND_BILLING": "off",
     // Same Supabase OAuth app as the web app; used to refresh connection tokens.
     "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID",
     "APP_URL": "http://localhost:5173"

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 
 // Signs a user in through the real UI: the login form → Supabase (fake) → our signed Send Email
@@ -44,4 +45,23 @@ export function tenantFromUrl(page: Page): string {
 // a click in that window was lost once (UAT-W14). After network idle, every chunk has loaded.
 export async function settled(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle");
+}
+
+// Decision 028: a new workspace lands on its billing page. Specs that are not about billing click
+// "Create workspace" through this helper: it checks the gate sent them to billing, then marks the
+// workspace as trialing in the database (the billing specs go through the fake Checkout instead).
+export async function createPaidWorkspace(page: Page): Promise<string> {
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page).toHaveURL(/\/w\/[0-9a-f-]{36}\/billing$/);
+  const tenant = /\/w\/([0-9a-f-]{36})\//.exec(new URL(page.url()).pathname)![1]!;
+  const { adminQuery } = await import("./seed");
+  const suffix = randomBytes(8).toString("hex");
+  await adminQuery(
+    `INSERT INTO supahound.billing_accounts (tenant_id, stripe_customer_id, plan, status, subscription_id, seats, trial_end, card_verified_at, terms_version, terms_accepted_at)
+     VALUES ($1, $2, 'builder', 'trialing', $3, 1, now() + interval '7 days', now(), 'e2e', now())`,
+    [tenant, `cus_seed${suffix}`, `sub_seed${suffix}`],
+  );
+  await page.goto(`/w/${tenant}`);
+  await expect(page).toHaveURL(WORKSPACE_URL);
+  return tenant;
 }

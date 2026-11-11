@@ -1,15 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeAuth } from "./fakeAuth";
 import { startFakeManagement } from "./fakeManagement";
+import { startFakeStripe } from "./fakeStripe";
 import { startPostgres } from "./postgres";
 
-// Starts the whole E2E stack: Postgres 17 (TCP) → fake Supabase Auth and Management API → the BUILT web Worker
+// Starts the whole E2E stack: Postgres 17 (TCP) → fake Supabase Auth, Management API and Stripe → the BUILT web Worker
 // under `wrangler dev`. Run `vite build` first (`pnpm e2e` does). Tests read connection details
 // from process.env, which Playwright passes on to its workers.
 
@@ -46,6 +47,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const pg = await startPostgres(await freePort());
   const auth = await startFakeAuth(await freePort(), APP_URL);
   const mgmt = await startFakeManagement(await freePort());
+  const stripe = await startFakeStripe(await freePort(), APP_URL);
   const masterKeys = `1:${randomBytes(32).toString("base64")}`;
 
   // Test-only values, written to a temp file outside the repo and deleted on teardown.
@@ -61,13 +63,28 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     "SUPABASE_OAUTH_CLIENT_SECRET=e2e-oauth-secret",
     `SUPAHOUND_MASTER_KEYS=${masterKeys}`,
     "EMAIL_FROM_ADDRESS=login@supahound.test",
+    // Billing on, against the fake Stripe (decision 028).
+    "SUPAHOUND_BILLING=stripe",
+    `STRIPE_API_URL=${stripe.url}`,
+    "STRIPE_SECRET_KEY=sk_test_e2e",
+    `STRIPE_WEBHOOK_SECRET=${stripe.webhookSecret}`,
+    "STRIPE_PRICE_BUILDER=price_builder_e2e",
+    "STRIPE_PRICE_AGENCY=price_agency_e2e",
   ].join("\n"));
 
   const webDir = fileURLToPath(new URL("../../", import.meta.url));
+  // Wrangler passes only declared secrets to the Worker. The public template leaves the Stripe
+  // secrets undeclared (billing is off for self-hosters), so E2E declares them in a copy of the
+  // built config, next to the original so its relative paths still resolve.
+  const builtConfig = join(webDir, "dist/server/wrangler.json");
+  const e2eConfig = join(webDir, "dist/server/wrangler.e2e.json");
+  const config = JSON.parse(readFileSync(builtConfig, "utf8")) as { secrets?: { required?: string[] } };
+  config.secrets = { required: [...(config.secrets?.required ?? []), "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"] };
+  writeFileSync(e2eConfig, JSON.stringify(config));
   let output = "";
   const wrangler = spawn(
     "pnpm",
-    ["exec", "wrangler", "dev", "--config", "dist/server/wrangler.json", "--ip", "127.0.0.1", "--port", String(APP_PORT),
+    ["exec", "wrangler", "dev", "--config", "dist/server/wrangler.e2e.json", "--ip", "127.0.0.1", "--port", String(APP_PORT),
       "--inspector-port", String(await freePort()), "--env-file", envFile, "--show-interactive-dev-session=false"],
     {
       cwd: webDir,
@@ -88,6 +105,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     wrangler.kill();
     await auth.stop();
     await mgmt.stop();
+    await stripe.stop();
     pg.stop();
     throw err;
   }
@@ -95,6 +113,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env.E2E_APP_URL = APP_URL;
   process.env.E2E_AUTH_URL = auth.url;
   process.env.E2E_MGMT_URL = mgmt.url;
+  process.env.E2E_STRIPE_URL = stripe.url;
   process.env.E2E_ADMIN_DB_URL = pg.adminUrl;
   process.env.E2E_APP_DB_URL = pg.appUrl;
   process.env.E2E_MASTER_KEYS = masterKeys;
@@ -106,6 +125,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     if (wrangler.exitCode === null) wrangler.kill("SIGKILL");
     await auth.stop();
     await mgmt.stop();
+    await stripe.stop();
     pg.stop();
     rmSync(dir, { recursive: true, force: true });
     if (process.env.E2E_DEBUG) process.stdout.write(output);

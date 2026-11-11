@@ -1,3 +1,4 @@
+import { billingMode } from "@supahound/core/db/billing";
 import { dueProjects } from "@supahound/core/db/repo";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
@@ -80,7 +81,7 @@ export default {
   async scheduled(_controller, env): Promise<void> {
     const scheduler = new pg.Pool({ connectionString: env.HYPERDRIVE_SCHEDULER.connectionString, max: 1 });
     try {
-      const count = await enqueueDue(await dueProjects(scheduler, 60, 1000), env.POLL_QUEUE);
+      const count = await enqueueDue(await dueProjects(scheduler, 60, 1000, billingMode(env.SUPAHOUND_BILLING)), env.POLL_QUEUE);
       log("polls_enqueued", { count });
     } finally {
       await scheduler.end();
