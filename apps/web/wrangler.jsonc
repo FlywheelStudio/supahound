@@ -1,6 +1,7 @@
 // Supahound web app (decisions 009, 010). Next.js App Router on Workers via vinext.
 // Secrets (wrangler secret put): SEND_EMAIL_HOOK_SECRET ("v1,whsec_..." from Supabase Auth hooks),
-// SUPABASE_OAUTH_CLIENT_SECRET, SUPAHOUND_MASTER_KEYS (same keys as the poller).
+// SUPABASE_OAUTH_CLIENT_SECRET, SUPAHOUND_MASTER_KEYS (same keys as the poller). With billing on:
+// STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "supahound-web",
@@ -33,7 +34,18 @@
     "TERMS_URL": "",
     "PRIVACY_URL": "",
     // Supabase Management API (project picker). Only E2E points this at a fake.
-    "SUPABASE_API_URL": "https://api.supabase.com"
+    "SUPABASE_API_URL": "https://api.supabase.com",
+    // Billing (decision 028). "stripe": every workspace needs a validated card. "off": self-hosting
+    // without billing. Required; there is no default. With "stripe", also set the two price IDs and
+    // the secrets STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET (webhook: <APP_URL>/api/stripe/webhook).
+    "SUPAHOUND_BILLING": "off",
+    // Monthly per-project prices: Starter ($19.99) and Pro ($99) (decision 028).
+    "STRIPE_PRICE_STARTER": "",
+    "STRIPE_PRICE_PRO": "",
+    // A Billing Portal configuration ID; empty uses the account's default.
+    "STRIPE_PORTAL_CONFIGURATION": "",
+    // Only E2E points this at a fake.
+    "STRIPE_API_URL": "https://api.stripe.com"
   },
   "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET", "SUPAHOUND_MASTER_KEYS"] },
   "observability": {

@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
+import { POLLABLE_STATUSES } from "../billing/policy.js";
 import type { Finding, Severity } from "../detectors/finding.js";
 import type { OwnershipMap } from "../ownership/ownership.js";
-import { connectionId, projectId, projectScope, tenantId, type ConnectionId, type ProjectId, type ProjectScope } from "../tenancy/scope.js";
+import { connectionId, projectId, projectScope, tenantId, type ConnectionId, type ProjectId, type ProjectScope, type TenantId } from "../tenancy/scope.js";
 import type { TokenVault } from "../vault/vault.js";
+import type { BillingMode } from "./billing.js";
 import type { TenantTx } from "./tenant.js";
 
 // Repositories. Each takes a TenantTx and repeats `tenant_id = tx.tenantId` in every statement,
@@ -305,15 +307,39 @@ export async function appendAudit(
 // Scheduler path. Runs on a pool that logs in as a member of supahound_scheduler, which can read
 // project IDs and poll times and nothing else. Returns scopes only; each job then opens its own
 // tenant transaction.
-export async function dueProjects(schedulerPool: Pool, olderThanSeconds: number, limit: number): Promise<ProjectScope[]> {
+//
+// billing "stripe" skips tenants whose subscription may not be polled (decision 028); "off" is for
+// self-hosting without billing. The scheduler reads billing_accounts (tenant_id, status) only.
+export async function dueProjects(
+  schedulerPool: Pool,
+  olderThanSeconds: number,
+  limit: number,
+  billing: BillingMode,
+): Promise<ProjectScope[]> {
   const res = await schedulerPool.query<{ tenant_id: string; id: string }>(
-    `SELECT tenant_id, id FROM supahound.projects
-     WHERE NOT paused AND (last_polled_at IS NULL OR last_polled_at < now() - make_interval(secs => $1))
-     ORDER BY last_polled_at NULLS FIRST
-     LIMIT $2`,
-    [olderThanSeconds, limit],
+    billing === "off"
+      ? `SELECT p.tenant_id, p.id FROM supahound.projects p
+         WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+         ORDER BY p.last_polled_at NULLS FIRST
+         LIMIT $2`
+      : `SELECT p.tenant_id, p.id FROM supahound.projects p
+         JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND b.status = ANY($3::text[])
+         WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+         ORDER BY p.last_polled_at NULLS FIRST
+         LIMIT $2`,
+    billing === "off" ? [olderThanSeconds, limit] : [olderThanSeconds, limit, POLLABLE_STATUSES],
   );
   return res.rows.map((r) => projectScope(tenantId(r.tenant_id), r.id));
+}
+
+// The tenants whose subscription allows polling, for the daily usage count (decision 028).
+// Scheduler role: reads billing_accounts (tenant_id, status) only.
+export async function billedTenants(schedulerPool: Pool): Promise<TenantId[]> {
+  const res = await schedulerPool.query<{ tenant_id: string }>(
+    "SELECT tenant_id FROM supahound.billing_accounts WHERE status = ANY($1::text[]) ORDER BY tenant_id",
+    [POLLABLE_STATUSES],
+  );
+  return res.rows.map((r) => tenantId(r.tenant_id));
 }
 
 // Dashboard reads. Called inside withTenantForUser, so the tenant is a verified membership.

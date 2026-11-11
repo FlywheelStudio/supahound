@@ -136,7 +136,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   it("reports unable to assess on a Supabase failure, never an all-clear, without touching other tenants", async () => {
     behaviour[await tokenOf(agency)] = () => attackRows;
     behaviour[await tokenOf(client)] = () => { throw new LogsApiError("rate limited", 429); };
-    const results = await runDuePolls({ ...deps(), scheduler: db.scheduler, concurrency: 2 });
+    const results = await runDuePolls({ ...deps(), scheduler: db.scheduler, billing: "off", concurrency: 2 });
     const byTenant = Object.fromEntries(results.map((r) => [r.scope.tenantId, r.outcome]));
     expect(byTenant[agency.tenantId]).toMatchObject({ status: "ok" });
     expect(byTenant[client.tenantId]).toEqual({ status: "unable_to_assess", errorCode: "rate_limited" });
@@ -163,7 +163,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   it("contains a crash to the project that crashed", async () => {
     behaviour[await tokenOf(agency)] = () => null as unknown as Record<string, unknown>[];
     behaviour[await tokenOf(client)] = () => benignRows;
-    const results = await runDuePolls({ ...deps(), scheduler: db.scheduler });
+    const results = await runDuePolls({ ...deps(), scheduler: db.scheduler, billing: "off" });
     const byTenant = Object.fromEntries(results.map((r) => [r.scope.tenantId, r.outcome.status]));
     expect(byTenant[agency.tenantId]).toBe("crashed");
     expect(byTenant[client.tenantId]).toBe("ok");
@@ -247,10 +247,10 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   it("skips projects polled within the interval", async () => {
     behaviour[await tokenOf(agency)] = () => [];
     behaviour[await tokenOf(client)] = () => [];
-    const first = await runDuePolls({ ...deps({ now: () => new Date() }), scheduler: db.scheduler });
+    const first = await runDuePolls({ ...deps({ now: () => new Date() }), scheduler: db.scheduler, billing: "off" });
     const mine = (r: typeof first) => r.filter((x) => [agency.tenantId, client.tenantId].includes(x.scope.tenantId));
     expect(mine(first)).toHaveLength(2);
-    const second = await runDuePolls({ ...deps({ now: () => new Date() }), scheduler: db.scheduler });
+    const second = await runDuePolls({ ...deps({ now: () => new Date() }), scheduler: db.scheduler, billing: "off" });
     expect(mine(second)).toHaveLength(0);
   });
 

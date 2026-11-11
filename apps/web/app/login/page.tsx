@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { redirect } from "next/navigation";
+import { mode } from "../../lib/billing";
 import { brandFrom } from "../../lib/brand";
 import { currentUser } from "../../lib/supabase";
 import { authCopy } from "../../lib/signup";
@@ -15,7 +16,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
   if (await currentUser()) redirect("/app");
   const params = await searchParams;
   const error = params.error ? ERRORS[params.error] : undefined;
-  const copy = authCopy(params);
+  const copy = authCopy(params, mode() === "stripe");
   const brand = brandFrom(env);
 
   return (

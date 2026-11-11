@@ -1,11 +1,12 @@
 "use server";
 
 import { createOAuthState } from "@supahound/core/db/repo";
-import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { NotAMemberError } from "@supahound/core/db/user";
 import { authorizeUrl, newState, pkcePair, sha256Hex, STATE_TTL_SECONDS } from "@supahound/core/supabase/oauth";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { notFound, redirect } from "next/navigation";
 import { withPool } from "../../../lib/db";
+import { paidTenant, toBillingIfUnpaid } from "../../../lib/billing";
 import { oauthClient } from "../../../lib/oauth";
 import { requireUser } from "../../../lib/supabase";
 
@@ -22,7 +23,7 @@ export async function startConnect(formData: FormData): Promise<void> {
   const state = newState(tenant);
   const { verifier, challenge } = pkcePair();
   const allowed = await withPool((pool) =>
-    withTenantForUser(pool, user.id, tenant, async (tx, role) => {
+    paidTenant(pool, user.id, tenant, async (tx, role) => {
       if (role === "member") return false;
       await createOAuthState(tx, {
         userId: user.id, stateHash: sha256Hex(state), codeVerifier: verifier,
@@ -31,6 +32,7 @@ export async function startConnect(formData: FormData): Promise<void> {
       return true;
     }),
   ).catch((err: unknown) => {
+    toBillingIfUnpaid(err);
     if (err instanceof NotAMemberError) notFound();
     throw err;
   });

@@ -127,6 +127,25 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
 | UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 
+### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
+
+Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the real Stripe SDK.
+
+| ID | Scenario |
+| --- | --- |
+| UAT-B1 | A new workspace opens nothing but billing: overview, projects and the OAuth callback all go to billing |
+| UAT-B2 | The terms must be ticked (checked on the server); our page and Checkout both state the hold, trial and prices |
+| UAT-B3 | A good card starts a 7-day trial at one Starter seat, the $1 hold is released, the workspace opens |
+| UAT-B4 | A card whose bank skips the CVC check passes |
+| UAT-B5 | A prepaid card is refused; no trial; no hold left; the workspace stays closed |
+| UAT-B6 | A failed CVC is refused, the same way |
+| UAT-B7 | Giving up after a decline adds no card |
+| UAT-B8 | The webhook alone starts the trial; a replayed event changes nothing |
+| UAT-B9 | A webhook without Stripe's signature gets 400 |
+| UAT-B10 | A canceled subscription closes the workspace again |
+| UAT-B11 | A member cannot add the card and is told to ask an owner |
+| UAT-B12 | Each project shows its tier and 30-day requests; a busy project bills at Pro without proration; above 10M shows Enterprise |
+
 ### Manual (needs a live service)
 
 | ID | Scenario | Needs | Issue |
@@ -162,5 +181,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | A leak path must answer at its own path (#74) | `probeLeakPaths` drops the same-path check | 1 unit test fails |
 | An npmrc needs a known key (#74) | `leakShape` drops the known-key check | 1 unit test fails |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
+| The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
+| The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
+| A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

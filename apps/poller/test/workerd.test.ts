@@ -9,7 +9,7 @@ import { TokenVault, VaultError } from "@supahound/core/vault/vault";
 import { MockLanguageModelV4 } from "ai/test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { enqueueDue, handleMessages, parseMessage, type QueueMessageLike } from "../src/index.js";
+import { enqueueDue, enqueueUsage, handleMessages, isUsageMinute, parseMessage, parseUsageMessage, type QueueMessageLike } from "../src/index.js";
 
 const SCOPE = projectScope("aaaaaaaa-0000-4000-8000-000000000001", "11111111-0000-4000-8000-0000000000aa");
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -79,6 +79,43 @@ describe("queue handlers", () => {
     });
     expect([good.state, bad.state, crash.state]).toEqual(["ack", "ack", "retry"]);
     expect(seen).toEqual([SCOPE.tenantId, "bbbbbbbb-0000-4000-8000-000000000002"]);
+  });
+
+  it("runs the daily usage count at 00:20 UTC only (decision 028)", () => {
+    expect(isUsageMinute(Date.UTC(2026, 10, 11, 0, 20))).toBe(true);
+    for (const t of [Date.UTC(2026, 10, 11, 0, 19), Date.UTC(2026, 10, 11, 0, 21), Date.UTC(2026, 10, 11, 12, 20)]) {
+      expect(isUsageMinute(t)).toBe(false);
+    }
+  });
+
+  it("routes usage messages to the usage count, and never mistakes one for a poll", async () => {
+    const tenant = SCOPE.tenantId;
+    expect(parseUsageMessage({ kind: "usage", tenantId: tenant })).toBe(tenant);
+    for (const bad of [{ kind: "usage" }, { kind: "usage", tenantId: "x" }, { tenantId: tenant }, { kind: "other", tenantId: tenant }]) {
+      expect(parseUsageMessage(bad)).toBeNull();
+    }
+    expect(parseMessage({ kind: "usage", tenantId: tenant })).toBeNull();
+    const msg = (body: unknown): QueueMessageLike & { state: string } => {
+      const m = { body, state: "pending", ack() { m.state = "ack"; }, retry() { m.state = "retry"; } };
+      return m;
+    };
+    const usage = msg({ kind: "usage", tenantId: tenant });
+    const failing = msg({ kind: "usage", tenantId: "bbbbbbbb-0000-4000-8000-000000000002" });
+    const counted: string[] = [];
+    let polls = 0;
+    await handleMessages([usage, failing], async () => { polls++; return { status: "ok", findings: 0, notified: 0 }; }, async (t) => {
+      if (t.startsWith("bbbb")) throw new Error("Stripe is down");
+      counted.push(t);
+    });
+    expect([usage.state, failing.state, counted, polls]).toEqual(["ack", "retry", [tenant], 0]);
+  });
+
+  it("enqueues usage messages in batches of at most 100", async () => {
+    const batches: unknown[][] = [];
+    const tenants = Array.from({ length: 150 }, () => tenantId(SCOPE.tenantId));
+    expect(await enqueueUsage(tenants, { sendBatch: async (b) => { batches.push([...b].map((m) => m.body)); } })).toBe(150);
+    expect(batches.map((b) => b.length)).toEqual([100, 50]);
+    expect(batches[0]![0]).toEqual({ kind: "usage", tenantId: SCOPE.tenantId });
   });
 
   it("enqueues in batches of at most 100", async () => {
