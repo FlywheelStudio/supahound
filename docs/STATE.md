@@ -13,7 +13,7 @@ This file tracks only what is in progress and what is done.
 | Baseline-free detectors (2 and 4) | #3, #5 | Built with 127 tests; live run next | Token with `analytics:read` and a project ref | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Tenant isolation (storage, vault, poller) | #8 | Built; live database, login users and Hyperdrive (session pooler, caching off) up on 2026-11-10; the poller cron runs against it | Asymmetric JWT signing keys (optional: `getClaims()` works without them) | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
-| Billing: validated card, 7-day trial, per-project tiers (Starter $19.99, Pro $99 with SMS, Enterprise) | #25 | Merged into `develop` 2026-11-11 (PR #89); billing migration applied to production; release to `main` (#91), then Stripe setup | Stripe key: Erik runs `scripts/stripe-setup.sh` (test, then live with his approval) | [wip/billing.md](wip/billing.md) |
+| Billing: validated card, 7-day trial, per-project tiers (Starter $19.99, Pro $99 with SMS, Enterprise) | #25 | **Live** on app.supahound.com since 2026-11-11 with live Stripe (deployed from `develop` @ 9bfed15); site repriced (supahound-site #2) | Feature doc after the first real customer flow; SMS provider (#32) | [wip/billing.md](wip/billing.md) |
 | Web app: auth, onboarding, dashboard | #9 | Sign-in, workspace, overview, OAuth connect built; E2E in CI; project picker shipped; ownership refresh (#10) next | Supahound's Supabase project, OAuth app, email domain | [wip/web-app.md](wip/web-app.md) |
 
 ## Completed
