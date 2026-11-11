@@ -403,6 +403,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
 
 export interface IncidentSummary {
   id: string;
+  projectId: ProjectId;
   projectName: string;
   severity: Severity;
   detectors: string[];
@@ -411,22 +412,23 @@ export interface IncidentSummary {
   summary: { summary?: string } | null;
 }
 
-export async function listOpenIncidents(tx: TenantTx, limit = 50): Promise<IncidentSummary[]> {
+// Open incidents, worst first. With `project`, only that project's (the project dashboard).
+export async function listOpenIncidents(tx: TenantTx, limit = 50, project?: ProjectId): Promise<IncidentSummary[]> {
   const rows = await tx.query<{
-    id: string; project_name: string; severity: Severity; detectors: string[]; hits: number;
+    id: string; project_id: string; project_name: string; severity: Severity; detectors: string[]; hits: number;
     last_seen_at: Date; summary: { summary?: string } | null;
   }>(
-    `SELECT i.id, p.name AS project_name, i.severity, i.detectors, i.hits, i.last_seen_at, i.summary
+    `SELECT i.id, i.project_id, p.name AS project_name, i.severity, i.detectors, i.hits, i.last_seen_at, i.summary
      FROM supahound.incidents i
      JOIN supahound.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
-     WHERE i.tenant_id = $1 AND i.status = 'open'
+     WHERE i.tenant_id = $1 AND i.status = 'open' AND ($3::uuid IS NULL OR i.project_id = $3::uuid)
      ORDER BY CASE i.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
               i.last_seen_at DESC
      LIMIT $2`,
-    [tx.tenantId, limit],
+    [tx.tenantId, limit, project ?? null],
   );
   return rows.map((r) => ({
-    id: r.id, projectName: r.project_name, severity: r.severity, detectors: r.detectors, hits: r.hits,
+    id: r.id, projectId: projectId(r.project_id), projectName: r.project_name, severity: r.severity, detectors: r.detectors, hits: r.hits,
     lastSeenAt: r.last_seen_at, summary: r.summary,
   }));
 }

@@ -22,7 +22,7 @@ above, high and above, critical only, or off. Members see the setting.
 1. **Addresses.** `memberships.email`, copied from the verified JWT: at workspace creation
    (`createWorkspace`) and on every visit to the overview (`recordMemberEmail`, which writes only
    when the address changed). The migration backfills from `auth.users` where it exists.
-2. **Threshold.** `projects.email_alerts`. The Projects page form calls `setEmailAlertsAction` →
+2. **Threshold.** `projects.email_alerts`. The form on project Settings → Notifications (decision 031) calls `setEmailAlertsAction` →
    `handleAlertSetting` (`apps/web/lib/alerts.ts`), which validates the level and checks the role
    in the same transaction as the write.
 3. **Poll** (`packages/core/src/poller/pollProject.ts`). Step 4 explains an incident when the

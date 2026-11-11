@@ -44,7 +44,7 @@ test.describe("UAT: choose the projects Supahound watches", () => {
     await expect(page.getByRole("list", { name: "Watched projects" })).toContainText("Shop");
     expect(await watchedRefs(tenant)).toEqual([SHOP]);
 
-    await page.getByRole("link", { name: "Back to overview" }).click();
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Overview" }).click();
     await expect(page.getByRole("listitem").filter({ hasText: "Shop" })).toContainText("waiting for first poll");
     await expect(page.getByRole("heading", { name: "Finish setup" })).toBeVisible(); // plan and alerts remain
     await expect(page.getByRole("link", { name: "Choose projects" })).toHaveCount(0);

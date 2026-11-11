@@ -8,12 +8,13 @@ import { env } from "cloudflare:workers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { withPool } from "../../../../lib/db";
-import { paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
+import { mode, paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { requireUser } from "../../../../lib/supabase";
-import { ALERT_LEVEL_LABEL } from "../../../../lib/alerts";
-import { ALERT_LEVELS } from "@supahound/core/alerts/email";
-import { removeProjectAction, setEmailAlertsAction, watchProjectsAction } from "./actions";
+import { removeProjectAction, watchProjectsAction } from "./actions";
+import { Notice, Shell } from "../../../../components/Shell";
+import { projectPath } from "../../../../lib/nav";
+import { projectTiers } from "@supahound/core/db/billing";
 
 const ERRORS: Record<string, string> = {
   none: "Select at least one running project.",
@@ -23,8 +24,6 @@ const ERRORS: Record<string, string> = {
   supabase: "Supabase did not answer. Try again in a minute.",
   mismatch: "The name did not match. Nothing was removed.",
   missing: "That project is not watched in this workspace.",
-  alerts_role: "Only workspace owners and admins can change email alerts.",
-  alerts_level: "Pick an email alert level from the list.",
   alerts_missing: "That project is not watched in this workspace.",
 };
 
@@ -71,7 +70,7 @@ export default async function Projects({
           tokens.push({ connectionId: c.id, label: c.label, token });
         }
       }
-      return { role, watched, connections: connections.length, tokens };
+      return { role, watched, tiers: await projectTiers(tx), connections: connections.length, tokens };
     }),
   ).catch((err: unknown) => {
     toBillingIfUnpaid(err);
@@ -99,24 +98,15 @@ export default async function Projects({
     ? { tone: "ok", text: query.added === "0" ? "Those projects are already watched." : `Watching ${query.added} new project${query.added === "1" ? "" : "s"}. The first poll runs within a few minutes.` }
     : query.removed
       ? { tone: "ok", text: "Project removed. Its incidents and findings are deleted; its audit log entries are kept." }
-      : query.alerts && query.alerts in ALERT_LEVEL_LABEL
-        ? { tone: "ok", text: `Email alerts saved: ${ALERT_LEVEL_LABEL[query.alerts as keyof typeof ALERT_LEVEL_LABEL]}.` }
       : query.error && ERRORS[query.error]
         ? { tone: "error", text: ERRORS[query.error]! }
         : undefined;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Projects</h1>
-        <Link href={`/w/${tenant}`} className="text-sm text-slate-600 hover:text-slate-950">Back to overview</Link>
-      </header>
+    <Shell tenant={tenant} role={data.role} projects={data.watched} tiers={data.tiers} billingOn={mode() !== "off"} active={{ kind: "workspace", page: "projects" }}>
+      <h1 className="mb-8 text-2xl font-semibold">Projects</h1>
 
-      {notice && (
-        <p role="status" className={`mb-6 rounded-md border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
-          {notice.text}
-        </p>
-      )}
+      {notice && <Notice tone={notice.tone as "ok" | "error"}>{notice.text}</Notice>}
 
       {removing && (
         <section aria-labelledby="remove-heading" className="mb-10 rounded-md border border-red-300 bg-red-50 p-6">
@@ -148,25 +138,13 @@ export default async function Projects({
             {data.watched.map((p) => (
               <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <span>
-                  <span className="font-medium">{p.name}</span>
+                  <Link href={projectPath(tenant, p.id)} className="font-medium hover:underline">{p.name}</Link>
                   <span className="ml-2 font-mono text-xs text-slate-500">{p.supabaseRef}</span>
                 </span>
                 <span className="flex flex-wrap items-center gap-4">
-                  {canEdit ? (
-                    <form action={setEmailAlertsAction} className="flex items-center gap-2 text-sm">
-                      <input type="hidden" name="tenantId" value={tenant} />
-                      <input type="hidden" name="projectId" value={p.id} />
-                      <label htmlFor={`alerts-${p.id}`} className="text-slate-600">Email alerts</label>
-                      <select id={`alerts-${p.id}`} name="level" defaultValue={p.emailAlerts} aria-label={`Email alerts for ${p.name}`} className="rounded-md border border-slate-300 bg-white px-2 py-1">
-                        {ALERT_LEVELS.map((l) => (
-                          <option key={l} value={l}>{ALERT_LEVEL_LABEL[l]}</option>
-                        ))}
-                      </select>
-                      <button className="rounded-md border border-slate-300 px-3 py-1 font-medium hover:bg-slate-50">Save</button>
-                    </form>
-                  ) : (
-                    <span className="text-sm text-slate-600">Email alerts: {ALERT_LEVEL_LABEL[p.emailAlerts]}</span>
-                  )}
+                  <Link href={projectPath(tenant, p.id, "general")} className="text-sm text-slate-700 hover:text-slate-950">
+                    Settings<span className="sr-only"> for {p.name}</span>
+                  </Link>
                   {canEdit && (
                     <Link href={`/w/${tenant}/projects?remove=${p.id}`} className="text-sm text-red-700 hover:text-red-900" aria-label={`Remove ${p.name}`}>
                       Remove
@@ -215,6 +193,6 @@ export default async function Projects({
           </section>
         ))
       )}
-    </main>
+    </Shell>
   );
 }

@@ -27,10 +27,17 @@ test.describe("UAT: incident alert email", () => {
     await expect(page.getByRole("status")).toHaveText(/Watching 1 new project/);
     await settled(page);
 
+    // The threshold lives in the project's settings (issue #98): project → Notifications.
+    await page.getByRole("list", { name: "Watched projects" }).getByRole("link", { name: "Shop", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Shop" })).toBeVisible();
+    await settled(page);
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Notifications" }).click();
+    await expect(page).toHaveURL(/\/p\/[0-9a-f-]{36}\/settings\/notifications$/);
+
     const select = page.getByLabel("Email alerts for Shop");
     await expect(select).toHaveValue("low");
     await select.selectOption("high");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText("Email alerts saved: High and above.");
     await expect(page.getByLabel("Email alerts for Shop")).toHaveValue("high");
     const level = await adminQuery<{ email_alerts: string }>("SELECT email_alerts FROM supahound.projects WHERE tenant_id = $1", [tenant]);
@@ -50,15 +57,17 @@ test.describe("UAT: incident alert email", () => {
     await page.getByLabel(/Shop/).check();
     await page.getByRole("button", { name: "Watch selected projects" }).click();
     await expect(page.getByRole("status")).toHaveText(/Watching 1 new project/);
+    const shopId = (await adminQuery<{ id: string }>("SELECT id FROM supahound.projects WHERE tenant_id = $1", [tenant]))[0]!.id;
+    const settings = `/w/${tenant}/p/${shopId}/settings/notifications`;
     // Capture the form from a server render: a client-rendered React form has no no-JS fallback.
-    await page.goto(`/w/${tenant}/projects`);
+    await page.goto(settings);
     const ownerForm = await page.locator("form", { has: page.getByLabel("Email alerts for Shop") }).evaluate((f) => f.outerHTML);
 
     const member = await browser.newPage();
     const memberEmail = uniqueEmail("w18-member");
     await signIn(member, memberEmail);
     await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, await userIdFor(memberEmail)]);
-    await member.goto(`/w/${tenant}/projects`);
+    await member.goto(settings);
     await expect(member.getByText("Email alerts: Every incident")).toBeVisible();
     await expect(member.getByLabel("Email alerts for Shop")).toHaveCount(0);
 
@@ -68,7 +77,7 @@ test.describe("UAT: incident alert email", () => {
     const addresses = await adminQuery<{ email: string }>("SELECT email FROM supahound.memberships WHERE tenant_id = $1 ORDER BY role", [tenant]);
     expect(addresses.map((r) => r.email).sort()).toEqual([email, memberEmail].sort());
 
-    await member.goto(`/w/${tenant}/projects`);
+    await member.goto(settings);
     await expect(member.getByText("Email alerts: Every incident")).toBeVisible();
     await settled(member);
     await member.evaluate((html) => {
