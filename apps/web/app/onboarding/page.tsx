@@ -1,6 +1,7 @@
 import { listWorkspaces } from "@supahound/core/db/user";
 import { redirect } from "next/navigation";
 import { Checklist } from "../../components/Checklist";
+import { mode } from "../../lib/billing";
 import { withPool } from "../../lib/db";
 import { onboardingSteps } from "../../lib/onboarding";
 import { requireUser } from "../../lib/supabase";
@@ -14,7 +15,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
 
   return (
     <main className="mx-auto grid max-w-4xl gap-10 px-6 py-16 md:grid-cols-[1fr_1.2fr]">
-      <Checklist steps={onboardingSteps({ hasWorkspace: false, connections: 0, projects: 0 })} />
+      <Checklist steps={onboardingSteps({ hasWorkspace: false, hasCard: mode() === "off" ? null : false, connections: 0, projects: 0 })} />
       <section>
         <h1 className="text-2xl font-semibold">Create your workspace</h1>
         <p className="mt-2 text-slate-600">

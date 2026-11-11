@@ -2,7 +2,8 @@
 
 // State-changing requests must come from the app's own origin. Server-to-server callers that
 // sign their requests (the Supabase Send Email Hook) are listed and checked by signature instead.
-export const SIGNED_ROUTES = ["/api/auth/send-email-hook"] as const;
+// Server-to-server POSTs that check their own signature: Supabase Auth's hook and Stripe's webhook.
+export const SIGNED_ROUTES = ["/api/auth/send-email-hook", "/api/stripe/webhook"] as const;
 
 export function isSafeMethod(method: string): boolean {
   return method === "GET" || method === "HEAD" || method === "OPTIONS";

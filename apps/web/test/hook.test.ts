@@ -38,7 +38,9 @@ describe("Send Email Hook", () => {
     const { body, headers } = signed(payload());
     const res = await handleSendEmailHook(body, headers, deps(sent as unknown[]));
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("");
+    // Supabase needs a JSON body on success, or it rolls back the sign-up (#87).
+    expect(res.headers.get("content-type")).toMatch(/^application\/json/);
+    expect(await res.json()).toEqual({});
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe("dev@example.com");
     expect(sent[0]!.text).toContain(`${APP}/auth/confirm?token_hash=abc123hash&type=magiclink`);

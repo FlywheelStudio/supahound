@@ -25,11 +25,11 @@ export function submittedRefs(values: unknown[]): Set<string> {
 }
 
 export interface WatchDeps {
-  // Inside withTenantForUser: the role, and the connection's token (null if the connection is not
+  // Inside paidTenant (lib/billing.ts): the role, and the connection's token (null if the connection is not
   // in this tenant). Never fetches a token for a member. Throws OAuthError if a refresh fails.
   prepare: (connection: ConnectionId) => Promise<{ role: Role; token: string | null }>;
   list: (token: string) => Promise<SupabaseProject[]>;
-  // Inside a second withTenantForUser: re-checks the role, then inserts. Null if no longer allowed.
+  // Inside a second paidTenant: re-checks the role, then inserts. Null if no longer allowed.
   insert: (connection: ConnectionId, projects: { ref: string; name: string }[]) => Promise<string[] | null>;
 }
 

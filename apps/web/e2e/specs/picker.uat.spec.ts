@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { adminQuery, managementCalls, pollAttack, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
-import { settled, signIn, tenantFromUrl, uniqueEmail, WORKSPACE_URL } from "../support/session";
+import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // UAT for the project picker (issue #9): connect → pick → watched, members, removal, Supabase errors.
 // The Worker calls a fake Management API (support/fakeManagement.ts); Postgres and RLS are real.
@@ -16,8 +16,7 @@ async function ownerWithConnection(page: Page, tag: string, projects = [
   const email = uniqueEmail(tag);
   await signIn(page, email);
   await page.getByLabel("Workspace name").fill(`${tag} Co`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page).toHaveURL(WORKSPACE_URL);
+  await createPaidWorkspace(page);
   const tenant = tenantFromUrl(page);
   const token = `e2e-${tag}-${tenant}`;
   await setSupabaseProjects(token, projects);

@@ -36,6 +36,14 @@ ORDER BY hits DESC
 LIMIT ${Math.trunc(limit)}`;
 }
 
+// Billing (decision 028): every edge-log request in the window, counted inside ClickHouse. Returns
+// one number, never a log row.
+export function edgeRequestCountSql(env?: EnvVars): string {
+  return `SELECT count() AS requests
+FROM logs
+WHERE ${sourceColumn(env)} = 'edge_logs'`;
+}
+
 // PRD task 1: lists which auth-related keys exist in edge logs, never their values,
 // so the check pulls no user IDs, emails or tokens into a terminal.
 export function discoverKeysSql(env?: EnvVars): string {

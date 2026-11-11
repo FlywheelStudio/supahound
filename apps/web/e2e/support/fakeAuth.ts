@@ -13,6 +13,8 @@ import { Webhook } from "standardwebhooks";
 //
 // Test-only control endpoints live under /__test/.
 
+class HookFailed extends Error {}
+
 export interface SentLink {
   email: string;
   tokenHash: string;
@@ -107,6 +109,13 @@ export async function startFakeAuth(port: number, appUrl: string): Promise<FakeA
       body: payload,
     });
     sent.push({ email, tokenHash, type: "magiclink", hookStatus: res.status });
+    // Like Supabase Auth: a hook that fails, or answers without a JSON content type, rolls back
+    // the token, so the link in any email already sent is dead (issue #87).
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!res.ok || !contentType.startsWith("application/json")) {
+      pending.delete(tokenHash);
+      throw new HookFailed(res.ok ? "hook_payload_invalid_content_type" : "hook_failed");
+    }
   }
 
   let url = "";
@@ -117,7 +126,12 @@ export async function startFakeAuth(port: number, appUrl: string): Promise<FakeA
         if (req.method === "GET" && path === "/auth/v1/.well-known/jwks.json") return json(res, 200, { keys: [jwk] });
         if (req.method === "POST" && path === "/auth/v1/otp") {
           const b = await body(req);
-          await sendMagicLink(String(b.email).toLowerCase());
+          try {
+            await sendMagicLink(String(b.email).toLowerCase());
+          } catch (e) {
+            if (e instanceof HookFailed) return json(res, 500, { code: 500, error_code: e.message, msg: "Error running hook URI" });
+            throw e;
+          }
           return json(res, 200, {});
         }
         if (req.method === "POST" && path === "/auth/v1/verify") {
