@@ -16,7 +16,7 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
   overview shows detector 2 coverage ([feature doc](../features/ownership-refresh.md)).
 - Built: project navigation (#98, [feature doc](../features/project-navigation.md), decision 031).
   Next per project, in order: incidents history (#44), people and roles (#24, decision 033),
-  one subscription per project (#99, decision 032), hack.me findings (#100, decision 034).
+  one subscription per project (#99, decision 032), Security scan findings (#100, decision 034).
 - **Next step:** Stripe (#25), then alert email (#16).
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
   need Supahound's Supabase project and a Hyperdrive config.

@@ -19,7 +19,8 @@ Decision 028 bills a workspace on one subscription with Starter and Pro seats. E
 Accepted; not built. Until #99 ships, Plan & billing is read-only and links to workspace billing.
 Building it needs Erik's approval for live Stripe changes and for moving the live workspace.
 
-## Open questions (answer in #99 before the build)
+## Answered by Erik on 2026-11-11
 
-- The trial: one 7-day trial per workspace, or per project.
-- Adding a project mid-month: bill from that day, or from the next renewal.
+- **One 7-day trial per workspace.** Projects added during the trial share it. A project added
+  after the trial bills from the day it is added. Removing and re-adding a project never restarts
+  a trial.

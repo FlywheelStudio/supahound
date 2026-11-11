@@ -20,7 +20,7 @@ describe("project navigation (issue #98)", () => {
   it("lists the project pages in order, with settings in their own group", () => {
     const [main, settings] = projectNav(T, P, "dashboard");
     expect(main!.label).toBeNull();
-    expect(main!.items.map((i) => i.label)).toEqual(["Dashboard", "Incidents", "hack.me findings"]);
+    expect(main!.items.map((i) => i.label)).toEqual(["Dashboard", "Incidents", "Security scan"]);
     expect(settings!.label).toBe("Settings");
     expect(settings!.items.map((i) => i.label)).toEqual(["General", "Notifications", "Plan & billing", "People"]);
   });
@@ -34,7 +34,7 @@ describe("project navigation (issue #98)", () => {
 
   it("badges only the placeholder pages as Soon", () => {
     const soon = projectNav(T, P, "dashboard").flatMap((g) => g.items).filter((i) => i.soon).map((i) => i.label);
-    expect(soon).toEqual(["hack.me findings", "People"]);
+    expect(soon).toEqual(["Security scan", "People"]);
     expect([...SOON].sort()).toEqual(["findings", "people"]);
   });
 

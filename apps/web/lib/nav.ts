@@ -47,7 +47,7 @@ const item = (label: string, href: string, current: boolean, soon = false): NavI
 export function projectNav(tenant: TenantId, project: ProjectId, active: ProjectPage): NavGroup[] {
   const p = (page: ProjectPage, label: string) => item(label, projectPath(tenant, project, page), page === active, SOON.has(page));
   return [
-    { label: null, items: [p("dashboard", "Dashboard"), p("incidents", "Incidents"), p("findings", "hack.me findings")] },
+    { label: null, items: [p("dashboard", "Dashboard"), p("incidents", "Incidents"), p("findings", "Security scan")] },
     { label: "Settings", items: [p("general", "General"), p("notifications", "Notifications"), p("plan", "Plan & billing"), p("people", "People")] },
   ];
 }

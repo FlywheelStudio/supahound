@@ -11,7 +11,7 @@ and the app opens that project's dashboard. Each project has these pages:
 | --- | --- | --- |
 | Dashboard | (none) | Status, open incidents, 30-day requests, plan, detector 2 coverage, top 5 open incidents |
 | Incidents | `/incidents` | Open incidents, worst first; history and detail come with #44 |
-| hack.me findings | `/findings` | Coming soon (#100, decision 034) |
+| Security scan | `/findings` | Coming soon (#100, decision 034) |
 | Settings → General | `/settings` | Name, ref, polling, last poll; Remove (owners and admins) |
 | Settings → Notifications | `/settings/notifications` | Email alert threshold (decision 030); SMS disabled, Coming soon (#32) |
 | Settings → Plan & billing | `/settings/plan` | Tier, price, 30-day requests, how the tier is set; read-only until #99 |

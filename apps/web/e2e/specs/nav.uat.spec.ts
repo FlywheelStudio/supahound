@@ -93,8 +93,8 @@ test.describe("UAT: project navigation", () => {
     await expect(page.getByRole("main")).toContainText("People and roles for each projectComing soon");
 
     await page.goto(`${base}/findings`);
-    await expect(page.getByRole("main")).toContainText("hack.me scan findingsComing soon");
-    for (const label of ["hack.me findings", "People"]) {
+    await expect(page.getByRole("main")).toContainText("Security scan findingsComing soon");
+    for (const label of ["Security scan", "People"]) {
       await expect(nav(page).getByRole("link", { name: label })).toContainText("Soon");
     }
   });

@@ -52,4 +52,4 @@
 | [decisions/031-project-navigation.md](decisions/031-project-navigation.md) | Project dropdown in a sidebar shell; the URL holds the project; other workspaces' project IDs 404; alert threshold moves to project settings (amends 030) |
 | [decisions/032-subscription-per-project.md](decisions/032-subscription-per-project.md) | One Stripe subscription per project; the workspace keeps the customer and card (supersedes 028's seats; not built, #99) |
 | [decisions/033-people-per-project.md](decisions/033-people-per-project.md) | Per-project roles Owner/Admin/Editor/Viewer with email invites, enforced by RLS (not built, #24) |
-| [decisions/034-scan-domains-per-project.md](decisions/034-scan-domains-per-project.md) | A verified scan domain belongs to one project; the project's hack.me findings tab lists them (not built, #100) |
+| [decisions/034-scan-domains-per-project.md](decisions/034-scan-domains-per-project.md) | A verified scan domain belongs to one project; the project's Security scan tab lists them (not built, #100) |
