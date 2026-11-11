@@ -82,9 +82,13 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
    actor IDs with aliases. `explainer/llm.ts` calls Haiku 5.5, then Grok 4.20 non-reasoning, then
-   template text. The validator rejects any number or entity not in the evidence.
+   template text. The validator rejects any number or entity not in the evidence. An incident is
+   explained when the engine pages it, or when it will email and is new or changed severity.
 8. **Record.** The run ends as `ok` or `unable_to_assess` with an error code. A Supabase failure
    never reads as an all-clear.
+9. **Email.** After the save, `sendPendingAlerts` emails each open incident at or above the
+   project's threshold that has not been emailed at its severity, one email per member, and marks it
+   (decision 030; `alerts/email.ts` renders it). A failed send stays pending for the next poll.
 
 ## Tenant isolation
 

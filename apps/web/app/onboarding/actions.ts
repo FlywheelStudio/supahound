@@ -12,7 +12,7 @@ export async function createWorkspaceAction(formData: FormData): Promise<void> {
   const tenant = await withPool(async (pool) => {
     // One workspace from onboarding; more can be added from settings later.
     const existing = await listWorkspaces(pool, user.id);
-    return existing[0]?.tenantId ?? createWorkspace(pool, user.id, name);
+    return existing[0]?.tenantId ?? createWorkspace(pool, user.id, name, user.email);
   });
   redirect(`/w/${tenant}`);
 }

@@ -1,7 +1,7 @@
 # Self-hosting Supahound
 
-Status: **alpha.** Nobody has run this guide from zero on clean accounts yet (#67). The steps
-match the code and the tests. The items under "Not verified yet" can still change.
+Status: **alpha.** Flywheel's hosted deploy (2026-11-10) followed these steps. Nobody has run this
+guide from zero on clean accounts yet (#67). The items under "Not verified yet" can still change.
 
 Supahound is fair source under [FSL-1.1-ALv2](../LICENSE.md). You may run it for your own apps and
 for your company. You may not offer it to others as a commercial hosted service (decision 025).
@@ -51,7 +51,7 @@ project for it.
 | A Cloudflare account with Workers, Queues and Hyperdrive | dash.cloudflare.com | both Workers | account | yes |
 | Two Hyperdrive configs, caching off | `wrangler hyperdrive create` (step 4) | `HYPERDRIVE_APP` (both), `HYPERDRIVE_SCHEDULER` (poller) | binding | yes |
 | A queue and a dead-letter queue | `wrangler queues create` (step 5) | poller | binding | yes |
-| A sending domain on Cloudflare Email Service, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `wrangler email sending enable` (step 6) | web | binding, var | yes |
+| A sending domain on Cloudflare Email Service, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `wrangler email sending enable` (step 6) | web (sign-in), poller (incident alerts) | binding, var | yes |
 | `SUPAHOUND_MASTER_KEYS` | `pnpm -s master-key` (step 2) | both Workers, the same value | secret | yes |
 | `APP_URL` | Your app's origin, for example `https://supahound.example.com` | both Workers | var | yes |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | poller | secret | no |
@@ -114,12 +114,22 @@ the passwords.
 
 ### 4. Hyperdrive
 
+Use the Supabase **session pooler**. Copy its host from the dashboard (Connect → Session
+pooler), for example `aws-0-eu-west-1.pooler.supabase.com`, port 5432. The prefix (`aws-0`,
+`aws-1`) differs between projects, and the wrong one answers "tenant/user not found". On the
+pooler the user name carries the project ref: `supahound_app_login.<ref>`. The direct host `db.<ref>.supabase.co` has an IPv6
+address only. Never use the transaction pooler (port 6543): the app sets the tenant per
+transaction, and Hyperdrive already pools.
+
 ```bash
 wrangler hyperdrive create supahound-app --caching-disabled \
-  --connection-string 'postgresql://supahound_app_login:<app password>@<host>:5432/postgres'
+  --connection-string 'postgresql://supahound_app_login.<ref>:<app password>@<pooler host>:5432/postgres'
 wrangler hyperdrive create supahound-scheduler --caching-disabled \
-  --connection-string 'postgresql://supahound_scheduler_login:<scheduler password>@<host>:5432/postgres'
+  --connection-string 'postgresql://supahound_scheduler_login.<ref>:<scheduler password>@<pooler host>:5432/postgres'
 ```
+
+Test each login with `psql` before you create the config. `hyperdrive create` also connects
+once and fails on a wrong host or password.
 
 Put the IDs in `apps/web/wrangler.jsonc` (`HYPERDRIVE_APP`) and `apps/poller/wrangler.jsonc`
 (`HYPERDRIVE_APP` and `HYPERDRIVE_SCHEDULER`). Caching must stay off (decision 008): a cached
@@ -139,7 +149,8 @@ wrangler email sending enable <your domain>
 ```
 
 Set `EMAIL_FROM_ADDRESS` (an address on that domain) and `EMAIL_FROM_NAME` in
-`apps/web/wrangler.jsonc`.
+`apps/web/wrangler.jsonc` (sign-in links) and in `apps/poller/wrangler.jsonc` (incident alerts,
+decision 030). They may differ, for example `login@` and `alerts@`.
 
 ### 7. The Supabase OAuth app
 
@@ -205,6 +216,4 @@ The rehearsal (#67) checks these:
 
 - Whether a Supabase OAuth app in one org can authorize other orgs without a review step.
 - Whether `supabase_read_only_user` can read `pg_policies` through the read-only SQL endpoint (#4).
-- Which Supabase connection string Hyperdrive should use for the login users: the direct
-  connection or the session pooler (where the user name is `supahound_app_login.<ref>`).
 - The JWT subject and role field names in live edge logs (#3).
