@@ -1,6 +1,6 @@
 "use server";
 
-import { listConnections, listProjects, removeProject, watchProjects } from "@supahound/core/db/repo";
+import { listConnections, listProjects, removeProject, setEmailAlerts, watchProjects } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { accessTokenInTx } from "@supahound/core/supabase/credentials";
 import { listSupabaseProjects } from "@supahound/core/supabase/management";
@@ -10,6 +10,7 @@ import { notFound, redirect } from "next/navigation";
 import { withPool } from "../../../../lib/db";
 import { paidTenant, syncSeatsAfterChange, toBillingIfUnpaid } from "../../../../lib/billing";
 import { oauthClient, vault } from "../../../../lib/oauth";
+import { handleAlertSetting } from "../../../../lib/alerts";
 import { handleWatch, picksPath, removalOutcome } from "../../../../lib/picker";
 import { requireUser } from "../../../../lib/supabase";
 
@@ -70,4 +71,22 @@ export async function removeProjectAction(formData: FormData): Promise<void> {
     }),
   ).catch(memberOr404);
   redirect(outcome === "mismatch" ? `${picksPath(tenant, outcome)}&remove=${project}` : picksPath(tenant, outcome));
+}
+
+// Owners and admins set which severities email the workspace's members for one project.
+// Logic and tests: lib/alerts.ts.
+export async function setEmailAlertsAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const tenant: TenantId = parseOr404(parseTenantId, formData.get("tenantId"));
+  const project: ProjectId = parseOr404(projectId, formData.get("projectId"));
+  const path = await withPool((pool) =>
+    handleAlertSetting(tenant, formData.get("level"), {
+      apply: (level) =>
+        paidTenant(pool, user.id, tenant, async (tx, role) => ({
+          role,
+          updated: role === "member" ? false : await setEmailAlerts(tx, project, level),
+        })),
+    }),
+  ).catch(memberOr404);
+  redirect(path);
 }

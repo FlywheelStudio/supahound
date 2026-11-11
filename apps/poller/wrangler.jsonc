@@ -28,6 +28,8 @@
   // Point them at Supabase's direct or session connection, never the transaction pooler.
   // Local dev: set CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP (and _SCHEDULER).
   // The IDs below are placeholders until the Hyperdrive configs exist.
+  // Incident alert email (decisions 014 and 030). The sender domain must be onboarded to Email Sending.
+  "send_email": [{ "name": "EMAIL" }],
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE_APP",
@@ -50,7 +52,10 @@
     "STRIPE_API_URL": "https://api.stripe.com",
     // Same Supabase OAuth app as the web app; used to refresh connection tokens.
     "SUPABASE_OAUTH_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID",
-    "APP_URL": "http://localhost:5173"
+    "APP_URL": "http://localhost:5173",
+    // Sender of incident alert emails. Use an address on a domain onboarded to Email Sending.
+    "EMAIL_FROM_ADDRESS": "alerts@supahound.example",
+    "EMAIL_FROM_NAME": "Supahound alerts"
   },
   "secrets": { "required": ["SUPAHOUND_MASTER_KEYS", "SUPABASE_OAUTH_CLIENT_SECRET"] },
   "observability": {

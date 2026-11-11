@@ -147,6 +147,12 @@ export default {
       // Optional secret (decision 025): without it, alerts use template text and no model is called.
       explain: explainerFor((env as Env & { AI_GATEWAY_API_KEY?: string }).AI_GATEWAY_API_KEY),
       env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
+      // Incident alert email (decision 030): one email per incident per member.
+      alerts: {
+        send: (m) => env.EMAIL.send(m),
+        from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
+        appUrl: env.APP_URL,
+      },
     };
     // Billing on: count yesterday's requests, set each project's tier, bill it from the next renewal.
     const usage = async (tenant: TenantId) => {
