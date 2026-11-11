@@ -88,7 +88,11 @@ jobs:
           echo "SUPAHOUND_PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - name: Install Chromium
-        run: pnpm --filter @supahound/web exec playwright install --with-deps chromium-headless-shell
+        # --with-deps runs apt-get. When the runner's Ubuntu mirror fails (#92), install only the
+        # browser: the runner image already has its libraries, and a missing one fails the tests.
+        run: |
+          pnpm --filter @supahound/web exec playwright install --with-deps chromium-headless-shell \
+            || pnpm --filter @supahound/web exec playwright install chromium-headless-shell
       - run: pnpm e2e
       - name: Upload the Playwright report on failure
         if: failure()
