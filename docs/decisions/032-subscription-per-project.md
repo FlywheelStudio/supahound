@@ -16,8 +16,9 @@ Decision 028 bills a workspace on one subscription with Starter and Pro seats. E
 
 ## Status
 
-Accepted; not built. Until #99 ships, Plan & billing is read-only and links to workspace billing.
-Building it needs Erik's approval for live Stripe changes and for moving the live workspace.
+Accepted; built in #99 (2026-11-12). How it is built, and how seat subscriptions move: decision
+[041](041-project-subscriptions-build.md). The production rollout (migration, live Stripe changes,
+deploy, conversion) waits for Erik's approval.
 
 ## Answered by Erik on 2026-11-11
 

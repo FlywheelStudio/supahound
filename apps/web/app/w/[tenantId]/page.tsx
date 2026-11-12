@@ -1,5 +1,6 @@
 import { needsEnterprise, PRICE_LABEL, seatsFor } from "@supahound/core/billing/policy";
-import { billedTiers, getBilling, projectTiers } from "@supahound/core/db/billing";
+import { trialEndsAt } from "@supahound/core/billing/projects";
+import { billedTiers, getBilling, projectBillingDrift, projectTiers } from "@supahound/core/db/billing";
 import { getClosure } from "@supahound/core/db/closure";
 import { postureSummaries } from "@supahound/core/db/posture";
 import { countConnections, listOpenIncidents, listProjects, recordMemberEmail } from "@supahound/core/db/repo";
@@ -13,7 +14,7 @@ import { incidentPath, projectPath } from "../../../lib/nav";
 import { crossTenantNote } from "../../../lib/coverage";
 import { postureLine } from "../../../lib/posture";
 import { withPool } from "../../../lib/db";
-import { mode, paidTenant, syncSeatsAfterChange, toBillingIfUnpaid } from "../../../lib/billing";
+import { mode, paidTenant, syncBillingAfterChange, toBillingIfUnpaid } from "../../../lib/billing";
 import { currentStep, onboardingSteps } from "../../../lib/onboarding";
 import { requireUser } from "../../../lib/supabase";
 import { startConnect } from "./actions";
@@ -58,14 +59,15 @@ export default async function Workspace({
       incidents: await listOpenIncidents(tx, 20),
       connections: await countConnections(tx),
       closure: await getClosure(tx),
+      // Decision 041: Stripe differs from the watched projects (per-project model only).
+      projectDrift: role === "member" ? false : await projectBillingDrift(tx, new Date()),
     })).then(async (d) => {
-      // The picker syncs seats; this catches a sync that failed after the picker committed. Only
+      // The picker syncs billing; this catches a sync that failed after the picker committed. Only
       // workspace owners and admins see every project (decision 036), so only they can spot drift.
       if (d.role === "member") return d;
       const want = seatsFor(billedTiers(d.tiers));
-      if (d.billing.seats && (d.billing.seats.starter !== want.starter || d.billing.seats.pro !== want.pro)) {
-        await syncSeatsAfterChange(pool, tenant, false);
-      }
+      const seatDrift = d.billing.model === "workspace" && d.billing.seats && (d.billing.seats.starter !== want.starter || d.billing.seats.pro !== want.pro);
+      if (seatDrift || d.projectDrift) await syncBillingAfterChange(pool, tenant, false);
       return d;
     }),
   ).catch((err: unknown) => {
@@ -75,9 +77,10 @@ export default async function Workspace({
   });
 
   const query = await searchParams;
-  const welcome = data.billing.status === "trialing"
+  const trialEnd = trialEndsAt(data.billing, new Date());
+  const welcome = trialEnd
     ? NOTICES.welcome
-    : { tone: "ok" as const, text: "Card confirmed and the hold released. Your subscription is active. Next, connect Supabase." };
+    : { tone: "ok" as const, text: "Card confirmed and the hold released. No free trial is left, so each project you add is billed from the day you add it. Next, connect Supabase." };
   const notice = query.welcome ? welcome : query.connected ? NOTICES.connected : query.reconnected ? NOTICES.reconnected : query.error ? NOTICES[query.error] : undefined;
   const steps = onboardingSteps({ hasWorkspace: true, hasCard: mode() === "off" ? null : true, connections: data.connections, projects: data.projects.length });
   const setupLeft = currentStep(steps);
@@ -98,9 +101,9 @@ export default async function Workspace({
           <Link href={`/w/${tenant}/settings`} className="underline">Workspace settings</Link>
         </p>
       )}
-      {data.billing.status === "trialing" && data.billing.trialEnd && (
+      {trialEnd && (
         <p className="mb-6 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-          Your free trial ends on {data.billing.trialEnd.toISOString().slice(0, 10)}.{" "}
+          Your free trial ends on {trialEnd.toISOString().slice(0, 10)}.{" "}
           <Link href={`/w/${tenant}/billing`} className="underline">Billing</Link>
         </p>
       )}

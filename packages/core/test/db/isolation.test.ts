@@ -10,7 +10,7 @@ const TABLES = [
   "tenants", "connections", "projects", "service_role_networks", "poll_runs", "incidents", "findings", "audit_log",
   "memberships", "oauth_states",
   "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
-  "billing_accounts", "stripe_events", "project_usage",
+  "billing_accounts", "stripe_events", "project_usage", "project_subscriptions",
   "project_members", "project_invites",
   "posture_scans", "posture_findings",
   "scan_domain_links",

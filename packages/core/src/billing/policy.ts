@@ -14,7 +14,7 @@ export const TRIAL_DAYS = 7;
 export const VERIFICATION_HOLD_CENTS = 100;
 export const VERIFICATION_CURRENCY = "usd";
 // Bump when the billing terms on the billing page change; stored with each acceptance.
-export const TERMS_VERSION = "2026-11-10.2";
+export const TERMS_VERSION = "2026-11-12.1";
 
 export const PRICE_CENTS: Record<Tier, number> = { starter: 1999, pro: 9900 };
 export const PRICE_LABEL: Record<Tier, string> = { starter: "$19.99", pro: "$99" };
@@ -73,10 +73,38 @@ export function accessFor(status: BillingStatus): Access {
   }
 }
 
+// How a workspace is billed (decision 041). "workspace": one subscription with Starter and Pro
+// seats (decision 028), kept until the conversion CLI moves the workspace. "project": one
+// subscription per watched project (decision 032).
+export type BillingModel = "workspace" | "project";
+
+export function isBillingModel(v: unknown): v is BillingModel {
+  return v === "workspace" || v === "project";
+}
+
+// Per-project model (decision 041). billing_accounts.status holds the workspace's standing: the
+// worst status among the watched projects' subscriptions, or "none" when no watched project has
+// one. "none" with a validated card is full access: a workspace with no billed project owes
+// nothing and must still be able to add one. "incomplete" (a project's first charge has not gone
+// through yet; Stripe gives it 23 hours) is the same grace as "past_due".
+export function accessForStanding(standing: BillingStatus, cardVerified: boolean): Access {
+  if (standing === "none") return cardVerified ? "full" : "blocked";
+  if (standing === "incomplete") return "grace";
+  return accessFor(standing);
+}
+
+export interface AccountAccessInput {
+  status: BillingStatus;
+  exempt: boolean;
+  model: BillingModel;
+  cardVerifiedAt: Date | null;
+}
+
 // Staff workspaces (decision 029): a workspace whose only owner has a verified email on an exempt
 // domain gets full access with no card and no Stripe subscription.
-export function accessForAccount(account: { status: BillingStatus; exempt: boolean }): Access {
-  return account.exempt ? "full" : accessFor(account.status);
+export function accessForAccount(account: AccountAccessInput): Access {
+  if (account.exempt) return "full";
+  return account.model === "project" ? accessForStanding(account.status, account.cardVerifiedAt !== null) : accessFor(account.status);
 }
 
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -108,10 +136,25 @@ export function isExemptEmail(email: string | null, domains: readonly string[]):
 // trial that never paid does not count, nor does a self-hosted copy without billing. While a
 // workspace pays, Supahound deletes none of its data: no retention, no purge, no delete after a
 // disconnect. This is the only definition; every deletion path calls it.
+//
+// Per-project model (decision 041): the workspace pays while any of its project subscriptions is
+// "active" or "past_due", including the subscription of a removed project until its paid period
+// ends. billing_accounts.status is then a standing, not a Stripe status, so it does not count.
+// projectStatuses is required, so every caller states what it read.
 export const PAYING_STATUSES: readonly BillingStatus[] = ["active", "past_due"];
 
-export function payingAccount(account: { status: BillingStatus; exempt: boolean }): boolean {
-  return account.exempt || PAYING_STATUSES.includes(account.status);
+export interface PayingInput {
+  status: BillingStatus;
+  exempt: boolean;
+  model: BillingModel;
+  // The status of every project subscription of the workspace (empty in the seat model).
+  projectStatuses: readonly BillingStatus[];
+}
+
+export function payingAccount(account: PayingInput): boolean {
+  if (account.exempt) return true;
+  if (account.model === "project") return account.projectStatuses.some((s) => PAYING_STATUSES.includes(s));
+  return PAYING_STATUSES.includes(account.status);
 }
 
 // The statuses whose projects the poller still polls. Kept next to accessFor so the two agree.
