@@ -130,3 +130,8 @@ is safe: old code would prorate seat changes onto converted seat subscriptions.
   subscription with no card, and (without `--include-empty`) a workspace with no project. Tested in
   `projects.test.ts` ("skips ...").
 - **`incomplete` is grace at the gate but not polled** (the scheduler polls `trialing`, `active`, `past_due`).
+- **The Billing Portal cancels with `cancel_at`, not `cancel_at_period_end`.** Seen live on
+  2026-11-12 (API `2026-09-30`): the portal set `cancel_at` to the period end and left the flag
+  false. `subscriptionFromStripe` reads either as set to end, and an undo clears `cancel_at` with
+  a second update (`cancel_at: ""`). Tested in `apps/web/test/stripe.test.ts` ("reads a Billing
+  Portal cancel", "undoes a portal cancel").

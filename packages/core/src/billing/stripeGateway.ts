@@ -106,12 +106,21 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
     },
 
     async setCancelAtPeriodEnd(id, cancel, options) {
-      const s = await stripe.subscriptions.update(
+      let s = asObj(await stripe.subscriptions.update(
         id,
         { cancel_at_period_end: cancel, ...(options?.converted ? { metadata: { converted: "yes" } } : {}) },
         options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined,
-      );
-      return subscriptionFromStripe(asObj(s), prices);
+      ));
+      // Undo a cancel the Billing Portal set: it uses `cancel_at`, which the flag does not clear.
+      // An empty value unsets it. A second call, so the two parameters are never sent together.
+      if (!cancel && typeof s.cancel_at === "number") {
+        s = asObj(await stripe.subscriptions.update(
+          id,
+          { cancel_at: "" },
+          options?.idempotencyKey ? { idempotencyKey: `${options.idempotencyKey}-clear` } : undefined,
+        ));
+      }
+      return subscriptionFromStripe(s, prices);
     },
 
     // --- One subscription per project (decision 041) ---

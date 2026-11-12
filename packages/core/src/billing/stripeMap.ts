@@ -100,7 +100,9 @@ export function subscriptionFromStripe(s: Obj, prices: PriceIds): StripeSubscrip
     seats: { starter: seats.starter, pro: seats.pro },
     trialEnd: date(s.trial_end),
     currentPeriodEnd: date(firstItem?.current_period_end) ?? date(s.current_period_end),
-    cancelAtPeriodEnd: s.cancel_at_period_end === true,
+    // Set to end: the flag, or a `cancel_at` time. The Billing Portal cancels with `cancel_at` (the
+    // period end) and leaves `cancel_at_period_end` false, so the flag alone misses a portal cancel.
+    cancelAtPeriodEnd: s.cancel_at_period_end === true || (typeof s.cancel_at === "number" && s.cancel_at > 0),
     tenant: meta(s, "tenant_id"),
     cardVerifiedAt: verifiedAt && !Number.isNaN(verifiedAt.getTime()) ? verifiedAt : null,
     projectId: meta(s, "project_id"),

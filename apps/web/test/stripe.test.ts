@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { describe, expect, it } from "vitest";
 import { checkCard } from "@supahound/core/billing/policy";
+import { stripeGateway } from "@supahound/core/billing/stripeGateway";
 import { billingEventFromStripe, invoiceFromStripe, projectSubFromStripe, sessionFromStripe, subscriptionFromStripe, termsText } from "@supahound/core/billing/stripeMap";
 import { verifyStripeEvent } from "../lib/stripeWebhook";
 
@@ -105,6 +106,14 @@ describe("subscriptionFromStripe", () => {
     });
   });
 
+  it("reads a Billing Portal cancel (cancel_at set, flag false) as set to end", () => {
+    // Live shape seen 2026-11-12: the portal sets cancel_at to the period end, not the flag.
+    const portal = { ...project, cancel_at_period_end: false, cancel_at: 1_800_000_000 };
+    expect(subscriptionFromStripe(portal, PRICES).cancelAtPeriodEnd).toBe(true);
+    expect(projectSubFromStripe(subscriptionFromStripe(portal, PRICES))?.cancelAtPeriodEnd).toBe(true);
+    expect(subscriptionFromStripe({ ...portal, cancel_at: null }, PRICES).cancelAtPeriodEnd).toBe(false);
+  });
+
   it("fails closed on a project subscription at an unknown price or with a bad ref: no row", () => {
     const unknown = { ...project, items: { data: [{ id: "si_x", quantity: 1, price: { id: "price_someone_elses" } }] } };
     expect(projectSubFromStripe(subscriptionFromStripe(unknown, PRICES))).toBeNull();
@@ -127,6 +136,42 @@ describe("subscriptionFromStripe", () => {
     const itemDiscount = { ...sub, items: { data: [{ ...sub.items.data[0]!, discounts: ["di_2"] }] } };
     expect(subscriptionFromStripe(itemDiscount, PRICES).hasDiscount).toBe(true);
     expect(subscriptionFromStripe({ ...sub, customer: { id: "cus_1", discount: { id: "di_3" } } }, PRICES).hasDiscount).toBe(false);
+  });
+});
+
+describe("stripeGateway.setCancelAtPeriodEnd", () => {
+  // A fake client that records each update and applies it the way Stripe does: an empty
+  // cancel_at unsets it; the flag alone leaves a portal's cancel_at in place.
+  function fake(start: Record<string, unknown>) {
+    const sub: Record<string, unknown> = { id: "sub_p1", customer: "cus_1", status: "active", metadata: {}, items: { data: [] }, ...start };
+    const calls: Record<string, unknown>[] = [];
+    const client = {
+      subscriptions: {
+        update: async (_id: string, body: Record<string, unknown>) => {
+          calls.push(body);
+          if ("cancel_at_period_end" in body) sub.cancel_at_period_end = body.cancel_at_period_end;
+          if (body.cancel_at === "") sub.cancel_at = null;
+          return { ...sub };
+        },
+      },
+    } as unknown as Stripe;
+    return { gateway: stripeGateway({ secretKey: "sk_test_x", apiUrl: "https://api.stripe.test", prices: { starter: "price_starter", pro: "price_pro" } }, client), calls };
+  }
+
+  it("undoes a portal cancel: clears cancel_at in a second call, never with the flag", async () => {
+    const { gateway, calls } = fake({ cancel_at_period_end: false, cancel_at: 1_800_000_000 });
+    const s = await gateway.setCancelAtPeriodEnd("sub_p1", false);
+    expect(calls).toEqual([{ cancel_at_period_end: false }, { cancel_at: "" }]);
+    expect(s.cancelAtPeriodEnd).toBe(false);
+  });
+
+  it("undoes a flag cancel in one call, and sets a cancel with the flag only", async () => {
+    const undo = fake({ cancel_at_period_end: true });
+    expect((await undo.gateway.setCancelAtPeriodEnd("sub_p1", false)).cancelAtPeriodEnd).toBe(false);
+    expect(undo.calls).toEqual([{ cancel_at_period_end: false }]);
+    const set = fake({ cancel_at_period_end: false });
+    expect((await set.gateway.setCancelAtPeriodEnd("sub_p1", true)).cancelAtPeriodEnd).toBe(true);
+    expect(set.calls).toEqual([{ cancel_at_period_end: true }]);
   });
 });
 
