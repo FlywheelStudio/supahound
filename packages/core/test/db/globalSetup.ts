@@ -65,6 +65,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
     }
     await admin.query("CREATE ROLE app_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_app");
     await admin.query("CREATE ROLE scheduler_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_scheduler");
+    await admin.query("CREATE ROLE notifier_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_notifier");
   } finally {
     await admin.end();
   }
