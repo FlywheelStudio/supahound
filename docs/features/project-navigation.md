@@ -10,7 +10,7 @@ and the app opens that project's dashboard. Each project has these pages:
 | Page | Path under `/w/<tenant>/p/<project>` | State |
 | --- | --- | --- |
 | Dashboard | (none) | Status, open incidents, 30-day requests, plan, detector 2 coverage, top 5 open incidents |
-| Incidents | `/incidents` | Open incidents, worst first; history and detail come with #44 |
+| Incidents | `/incidents` | 30-day history, newest first, and `/incidents/<id>` detail ([incident-history.md](incident-history.md), #44) |
 | Security scan | `/findings` | Coming soon (#100, decision 034) |
 | Settings → General | `/settings` | Name, ref, polling, last poll; Remove (owners and admins) |
 | Settings → Notifications | `/settings/notifications` | Email alert threshold (decision 030); SMS disabled, Coming soon (#32) |

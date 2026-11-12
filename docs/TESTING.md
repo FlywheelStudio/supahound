@@ -1,18 +1,20 @@
 # Testing
 
-Updated 2026-11-09. CI runs every tier below on each pull request
+Updated 2026-11-12. CI runs every tier below on each pull request
 ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)). A PR merges only when CI is green.
 
 ## Tiers
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 229 core (unit + Postgres), 31 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | within the 229 |
-| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 6 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 6 |
-| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 10 |
-| UAT, web journey | Sign-in → workspace → connect → incident, in a real browser | `apps/web/e2e/specs/journey.uat.spec.ts` | `pnpm e2e` | 10 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 556 core (unit + Postgres + detection UAT), 104 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 128, within the 556 |
+| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 556 |
+| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 39 |
+
+Totals on `feature/incident-history` (2026-11-12): core 556, web 104, poller 12, E2E 50.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -132,6 +134,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W20 | Project settings: General with Remove, Notifications with SMS Coming soon, Plan, People; Soon badges |
 | UAT-W21 | A project ID from another workspace, a made-up ID and a malformed ID are each a 404 |
 | UAT-W22 | A member opens every project page but gets no Add project, no Remove and no alert form |
+| UAT-W23 | The incident list shows 30 days of open and resolved incidents, newest first, in keyset pages; a 31-day-old resolved one is gone (`incidents.uat.spec.ts`) |
+| UAT-W24 | The incident detail shows the actor alias, signals, counts, time range, summary and suggested fix; no raw IDs; a summary from counts when none is stored |
+| UAT-W25 | Another workspace's, another project's, an old resolved, a made-up or a malformed incident, and a malformed cursor, are each a 404; so is my incident for another workspace's user |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -201,6 +206,17 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Only owners and admins set the threshold (#16) | `setEmailAlertsAction` treats every role as owner | UAT-W18 fails |
 | Project pages show only this tenant's projects (#98) | `loadProjectPage` falls back to the first project for an unknown ID | UAT-W21 fails (200, not 404) |
 | The dashboard lists one project's incidents (#98) | `listOpenIncidents` ignores its project filter | `projects.test.ts` fails |
+| History keeps to its project (#44) | `listIncidentHistory` and `getIncident` drop the project filter | 4 Postgres tests fail |
+| The detail keeps to its project (#44) | `getIncident` alone drops the project filter | UAT-W25 fails (200, not 404) |
+| Open incidents stay in the window (#44) | The window drops `status = 'open'` | 1 Postgres test fails |
+| The window is 30 days (#44) | The window set to 3650 days | 1 Postgres test fails |
+| The cursor keeps microseconds (#44) | The cursor is cut to milliseconds | 1 Postgres test fails (a row is skipped) |
+| Ties on last seen break by id (#44) | The keyset compares `last_seen_at` only | 1 Postgres test fails |
+| No next page after a full last page (#44) | `next` set when the page is exactly full | 2 Postgres tests fail |
+| The list follows the cursor (#44) | The page ignores `?before=` | UAT-W23 fails |
+| Bad IDs and cursors never reach Postgres (#44) | `parseIncidentId` returns its input; `parseCursor` skips the digit check | 1 unit test fails each |
+| Stored explanation text is cleaned (#44) | `explanationOf` skips `cleanText` | 2 unit tests fail |
+| The detail hides the raw actor (#44) | The page prints `actor` next to the alias | UAT-W24 fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

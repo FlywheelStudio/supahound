@@ -15,7 +15,8 @@ choose projects → plan → alerts. Decisions 009, 010, 012, 013, 014.
 - Built: ownership refresh (#10): the poller loads `pg_policies` on a project's first poll; the
   overview shows detector 2 coverage ([feature doc](../features/ownership-refresh.md)).
 - Built: project navigation (#98, [feature doc](../features/project-navigation.md), decision 031).
-  Next per project, in order: incidents history (#44), people and roles (#24, decision 033),
+- Built: incident history (#44, [feature doc](../features/incident-history.md), decision 035).
+  Next per project, in order: people and roles (#24, decision 033),
   one subscription per project (#99, decision 032), Security scan findings (#100, decision 034).
 - **Next step:** Stripe (#25), then alert email (#16).
 - Not verified end to end: the real magic-link round trip and the database-backed pages. Both
