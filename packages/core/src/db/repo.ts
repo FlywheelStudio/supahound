@@ -435,6 +435,95 @@ export async function listOpenIncidents(tx: TenantTx, limit = 50, project?: Proj
   }));
 }
 
+// Incident history (issue #44, decision 035). The window: last seen in the last 30 days, or still
+// open. The engine resolves an incident only when its actor acts again after the 15-minute window,
+// so an actor who goes quiet leaves the incident open; it must stay reachable from the dashboard.
+
+export const INCIDENT_HISTORY_DAYS = 30;
+
+// Keyset position: the last row of a page. `lastSeenUs` is epoch microseconds as a decimal string,
+// read from SQL. A JS Date holds milliseconds only, so a cursor built from one would skip rows
+// that differ in the microseconds.
+export interface IncidentCursor {
+  lastSeenUs: string;
+  id: string;
+}
+
+export interface IncidentHistoryItem {
+  id: string;
+  status: "open" | "resolved";
+  actor: string;
+  severity: Severity;
+  detectors: string[];
+  signals: string[];
+  findingCount: number;
+  hits: number;
+  openedAt: Date;
+  lastSeenAt: Date;
+  summary: unknown;
+}
+
+export interface IncidentDetail extends IncidentHistoryItem {
+  summarySource: "model" | "template" | null;
+}
+
+const IN_WINDOW = `(i.status = 'open' OR i.last_seen_at >= $3::timestamptz - make_interval(days => ${INCIDENT_HISTORY_DAYS}))`;
+const US_TO_TS = (param: string) => `(timestamptz 'epoch' + ${param}::bigint * interval '1 microsecond')`;
+
+interface IncidentRow {
+  id: string; status: "open" | "resolved"; actor: string; severity: Severity; detectors: string[]; signals: string[];
+  finding_count: number; hits: number; opened_at: Date; last_seen_at: Date; summary: unknown;
+  summary_source: "model" | "template" | null; last_seen_us: string;
+}
+
+const INCIDENT_COLUMNS = `i.id, i.status, i.actor, i.severity, i.detectors, i.signals, i.finding_count, i.hits,
+  i.opened_at, i.last_seen_at, i.summary, i.summary_source,
+  ((extract(epoch FROM i.last_seen_at) * 1000000)::numeric(20,0))::text AS last_seen_us`;
+
+const toHistoryItem = (r: IncidentRow): IncidentHistoryItem => ({
+  id: r.id, status: r.status, actor: r.actor, severity: r.severity, detectors: r.detectors, signals: r.signals,
+  findingCount: r.finding_count, hits: r.hits, openedAt: r.opened_at, lastSeenAt: r.last_seen_at, summary: r.summary,
+});
+
+// One project's incidents in the window, newest first (last seen, then id). Pass the previous
+// page's `next` as `after`. `next` is null on the last page.
+export async function listIncidentHistory(
+  tx: TenantTx,
+  project: ProjectId,
+  opts: { now: Date; limit: number; after?: IncidentCursor | null },
+): Promise<{ incidents: IncidentHistoryItem[]; next: IncidentCursor | null }> {
+  const limit = Math.max(1, Math.min(100, Math.trunc(opts.limit)));
+  const after = opts.after ?? null;
+  const rows = await tx.query<IncidentRow>(
+    `SELECT ${INCIDENT_COLUMNS}
+     FROM supahound.incidents i
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW}
+       AND ($4::text IS NULL OR (i.last_seen_at, i.id) < (${US_TO_TS("$4")}, $5::uuid))
+     ORDER BY i.last_seen_at DESC, i.id DESC
+     LIMIT $6`,
+    [tx.tenantId, project, opts.now, after?.lastSeenUs ?? null, after?.id ?? null, limit + 1],
+  );
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    incidents: page.map(toHistoryItem),
+    next: rows.length > limit && last ? { lastSeenUs: last.last_seen_us, id: last.id } : null,
+  };
+}
+
+// One incident of this project, in the window; null otherwise. Another project's or another
+// tenant's incident ID is null too, so the page answers 404 in every case.
+export async function getIncident(tx: TenantTx, project: ProjectId, incidentId: string, now: Date): Promise<IncidentDetail | null> {
+  const rows = await tx.query<IncidentRow>(
+    `SELECT ${INCIDENT_COLUMNS}
+     FROM supahound.incidents i
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW} AND i.id = $4::uuid`,
+    [tx.tenantId, project, now, incidentId],
+  );
+  const r = rows[0];
+  return r ? { ...toHistoryItem(r), summarySource: r.summary_source } : null;
+}
+
 export interface ConnectionSummary {
   id: ConnectionId;
   label: string;
