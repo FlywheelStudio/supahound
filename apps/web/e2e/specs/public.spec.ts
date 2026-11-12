@@ -10,6 +10,10 @@ test.describe("signed out", () => {
     expect((await page.goto("/login"))?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: "Sign in to Supahound" })).toBeVisible();
     await expect(page.getByLabel("Work email")).toBeVisible();
+    // The logo (issue #121), loaded, not a broken image.
+    const logo = page.locator('img[src="/favicon.svg"]').first();
+    await expect(logo).toBeVisible();
+    expect(await logo.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
   });
 
   // The marketing site and legal pages live in a private repo (decision 025). A self-hosted copy
