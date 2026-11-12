@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  authorizeUrl, exchangeCode, needsRefresh, newState, OAuthError, parseCredentials, pkcePair, refreshCredentials, tenantFromState,
+  authorizeUrl, exchangeCode, isRevokedGrant, needsRefresh, newState, OAuthError, parseCredentials, pkcePair, refreshCredentials, tenantFromState,
 } from "../src/supabase/oauth.js";
 import { tenantId } from "../src/tenancy/scope.js";
 
@@ -77,5 +77,34 @@ describe("token requests", () => {
   it("reads stored credentials and treats a plain string as a static token", () => {
     expect(parseCredentials("sbp_static")).toEqual({ accessToken: "sbp_static", refreshToken: null, expiresAt: null });
     expect(parseCredentials(JSON.stringify({ accessToken: "a", refreshToken: "r", expiresAt: "x" }))).toEqual({ accessToken: "a", refreshToken: "r", expiresAt: "x" });
+  });
+});
+
+describe("isRevokedGrant (decision 037)", () => {
+  const current = { accessToken: "old", refreshToken: "rt1", expiresAt: NOW.toISOString() };
+  const refreshError = async (status: number, body: unknown, raw?: string) => {
+    const f = (async () => new Response(raw ?? JSON.stringify(body), { status })) as typeof fetch;
+    return refreshCredentials(client(f), current, NOW).then(() => null, (e: unknown) => e);
+  };
+
+  it("reads the OAuth error code from the token endpoint", async () => {
+    expect(await refreshError(400, { error: "invalid_grant", error_description: "revoked" })).toMatchObject({ status: 400, code: "invalid_grant" });
+    expect(await refreshError(400, {}, "not json")).toMatchObject({ status: 400, code: null });
+    // A code with odd characters is dropped, not trusted.
+    expect(await refreshError(400, { error: "invalid grant<script>" })).toMatchObject({ code: null });
+  });
+
+  it("counts only invalid_grant with HTTP 400 or 401 as a revoked grant", async () => {
+    expect(isRevokedGrant(await refreshError(400, { error: "invalid_grant" }))).toBe(true);
+    expect(isRevokedGrant(await refreshError(401, { error: "invalid_grant" }))).toBe(true);
+    for (const [status, body] of [
+      [500, { error: "invalid_grant" }], [503, { error: "temporarily_unavailable" }], [401, { error: "invalid_client" }],
+      [401, {}], [400, { error: "invalid_request" }], [429, { error: "invalid_grant" }],
+    ] as const) {
+      expect(isRevokedGrant(await refreshError(status, body)), `${status} ${JSON.stringify(body)}`).toBe(false);
+    }
+    expect(isRevokedGrant(new TypeError("fetch failed"))).toBe(false);
+    expect(isRevokedGrant(new OAuthError("No access token in response", 200))).toBe(false);
+    expect(isRevokedGrant(null)).toBe(false);
   });
 });

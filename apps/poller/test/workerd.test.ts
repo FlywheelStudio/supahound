@@ -9,7 +9,9 @@ import { TokenVault, VaultError } from "@supahound/core/vault/vault";
 import { MockLanguageModelV4 } from "ai/test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { enqueueDue, enqueueUsage, handleMessages, isUsageMinute, parseMessage, parseUsageMessage, type QueueMessageLike } from "../src/index.js";
+import {
+  enqueueDue, enqueueUsage, handleMessages, isDataMinute, isUsageMinute, parseDataMessage, parseMessage, parseUsageMessage, type QueueMessageLike,
+} from "../src/index.js";
 
 const SCOPE = projectScope("aaaaaaaa-0000-4000-8000-000000000001", "11111111-0000-4000-8000-0000000000aa");
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -116,6 +118,49 @@ describe("queue handlers", () => {
     expect(await enqueueUsage(tenants, { sendBatch: async (b) => { batches.push([...b].map((m) => m.body)); } })).toBe(150);
     expect(batches.map((b) => b.length)).toEqual([100, 50]);
     expect(batches[0]![0]).toEqual({ kind: "usage", tenantId: SCOPE.tenantId });
+  });
+
+  it("runs the daily data job at 00:40 UTC only (decision 037)", () => {
+    expect(isDataMinute(Date.UTC(2026, 10, 11, 0, 40))).toBe(true);
+    for (const t of [Date.UTC(2026, 10, 11, 0, 39), Date.UTC(2026, 10, 11, 0, 41), Date.UTC(2026, 10, 11, 12, 40), Date.UTC(2026, 10, 11, 0, 20)]) {
+      expect(isDataMinute(t)).toBe(false);
+    }
+  });
+
+  it("routes data messages to the data job, never to a poll or the usage count", async () => {
+    const tenant = SCOPE.tenantId;
+    expect(parseDataMessage({ kind: "data", tenantId: tenant })).toBe(tenant);
+    for (const bad of [{ kind: "data" }, { kind: "data", tenantId: "x" }, { tenantId: tenant }, { kind: "usage", tenantId: tenant }]) {
+      expect(parseDataMessage(bad)).toBeNull();
+    }
+    // A mixed deploy: the consumer before this change reads a data message with parseUsageMessage
+    // and parseMessage only (both unchanged). Neither matches, so it acks it as invalid: no poll.
+    expect(parseUsageMessage({ kind: "data", tenantId: tenant })).toBeNull();
+    expect(parseMessage({ kind: "data", tenantId: tenant })).toBeNull();
+
+    const msg = (body: unknown): QueueMessageLike & { state: string } => {
+      const m = { body, state: "pending", ack() { m.state = "ack"; }, retry() { m.state = "retry"; } };
+      return m;
+    };
+    const job = msg({ kind: "data", tenantId: tenant });
+    const failing = msg({ kind: "data", tenantId: "bbbbbbbb-0000-4000-8000-000000000002" });
+    const usage = msg({ kind: "usage", tenantId: tenant });
+    const ran: string[] = [];
+    const counted: string[] = [];
+    let polls = 0;
+    await handleMessages(
+      [job, failing, usage],
+      async () => { polls++; return { status: "ok", findings: 0, notified: 0, emailed: 0 }; },
+      async (t) => { counted.push(t); },
+      async (t) => { if (t.startsWith("bbbb")) throw new Error("db down"); ran.push(t); },
+    );
+    expect([job.state, failing.state, usage.state, ran, counted, polls]).toEqual(["ack", "retry", "ack", [tenant], [tenant], 0]);
+  });
+
+  it("enqueues data messages with their kind", async () => {
+    const bodies: unknown[] = [];
+    await enqueueUsage([tenantId(SCOPE.tenantId)], { sendBatch: async (b) => { bodies.push(...[...b].map((m) => m.body)); } }, "data");
+    expect(bodies).toEqual([{ kind: "data", tenantId: SCOPE.tenantId }]);
   });
 
   it("enqueues in batches of at most 100", async () => {

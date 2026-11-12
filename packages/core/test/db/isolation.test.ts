@@ -1,15 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import * as billing from "../../src/db/billing.js";
-import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
 import { TenantTx, withTenant } from "../../src/db/tenant.js";
-import { tenantId, type ConnectionId, type ProjectId, type TenantId } from "../../src/tenancy/scope.js";
 import { VaultError } from "../../src/vault/vault.js";
 import { pgInfo, useDb } from "./harness.js";
-
-// Both tenants watch the SAME Supabase project, the case most likely to leak.
-const SHARED_REF = "abcdefghijklmnopqrst";
+import { SHARED_REF, seedFullTenant, type Seeded } from "./seedTenant.js";
 
 const TABLES = [
   "tenants", "connections", "projects", "service_role_networks", "poll_runs", "incidents", "findings", "audit_log",
@@ -19,109 +14,35 @@ const TABLES = [
   "project_members", "project_invites",
   "posture_scans", "posture_findings",
   "scan_domain_links",
+  "account_closures",
 ] as const;
-
-interface Seeded {
-  tenant: TenantId;
-  connection: ConnectionId;
-  project: ProjectId;
-  run: string;
-  incident: string;
-}
 
 describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   const db = useDb();
   const seeded: Record<"a" | "b", Seeded> = {} as never;
 
-  async function seed(name: string, token: string): Promise<Seeded> {
-    const tenant = tenantId(randomUUID());
-    return withTenant(db.app, tenant, async (tx) => {
-      await repo.createTenant(tx, name);
-      const connection = await repo.createConnection(tx, db.vault, { label: `${name} org`, token });
-      const project = await repo.createProject(tx, { connectionId: connection, supabaseRef: SHARED_REF, name: `${name} app` });
-      const run = await repo.startPollRun(tx, project, { start: new Date(Date.now() - 60_000), end: new Date() });
-      const incident = await repo.upsertIncident(tx, project, {
-        id: null, status: "open", actor: `user:${name}`, severity: "critical", detectors: ["cross_tenant"],
-        signals: ["other_owner"], findingCount: 1, hits: 1, openedAt: new Date(), lastSeenAt: new Date(),
-      });
-      await repo.insertFindings(tx, project, run, [{
-        detector: "cross_tenant", severity: "critical", actor: `user:${name}`, signals: ["other_owner"],
-        firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString(), hits: 1,
-        evidence: { table: "notes" }, incidentId: incident,
-      }]);
-      await repo.saveNetworks(tx, project, [16509]);
-      await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
-      await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
-      // People per project (decision 036): a viewer and an open invite.
-      const viewer = randomUUID();
-      await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, viewer]);
-      await tx.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')", [tenant, project, viewer]);
-      await tx.query(
-        `INSERT INTO supahound.project_invites (tenant_id, project_id, email, role, token_hash, invited_by, expires_at)
-         VALUES ($1, $2, $3, 'editor', $4, $5, now() + interval '7 days')`,
-        [tenant, project, `invitee@${name.toLowerCase()}.test`, randomUUID().replace(/-/g, "").padEnd(64, "0"), viewer],
-      );
-      await repo.createOAuthState(tx, {
-        userId: randomUUID(), stateHash: randomUUID().replace(/-/g, "").padEnd(64, "0"),
-        codeVerifier: "v".repeat(64), expiresAt: new Date(Date.now() + 600_000),
-      });
-      // Scan funnel rows: a verified domain and a completed scan, one of each per tenant.
-      const slug = name.toLowerCase();
-      const [domain] = await tx.query<{ id: string }>(
-        `INSERT INTO supahound.scan_domains (tenant_id, apex, verification_token, token_expires_at, verified_at, verifying_ip)
-         VALUES ($1, $2, $3, now() + interval '1 day', now(), '203.0.113.7') RETURNING id`,
-        [tenant, `acme-${slug}.com`, "a".repeat(32)],
-      );
-      const domainRowId = domain!.id;
-      await tx.query(
-        `INSERT INTO supahound.scan_authorizations (tenant_id, domain_id, tos_version, email, ip)
-         VALUES ($1, $2, 'v1', $3, '203.0.113.7')`,
-        [tenant, domainRowId, `founder@acme-${slug}.com`],
-      );
-      const [scan] = await tx.query<{ id: string }>(
-        `INSERT INTO supahound.scans (tenant_id, domain_id, mode, status, score, started_at, finished_at)
-         VALUES ($1, $2, 'introductory', 'done', 72, now(), now()) RETURNING id`,
-        [tenant, domainRowId],
-      );
-      const scanRowId = scan!.id;
-      await tx.query(
-        `INSERT INTO supahound.scan_findings (tenant_id, scan_id, severity, type, endpoint, evidence, fix, supahound_monitor)
-         VALUES ($1, $2, 'high', 'rls_missing', '/rest/v1/notes', '{"tables":1}', 'Enable RLS', 'anon_table_read')`,
-        [tenant, scanRowId],
-      );
-      await tx.query("INSERT INTO supahound.scan_jobs (tenant_id, scan_id, state) VALUES ($1, $2, 'queued')", [tenant, scanRowId]);
-      // Scan domains per project (decision 040): the verified domain belongs to the project.
-      await tx.query("INSERT INTO supahound.scan_domain_links (tenant_id, domain_id, project_id) VALUES ($1, $2, $3)", [tenant, domainRowId, project]);
-      // Billing rows (decision 028): a trialing subscription and one processed Stripe event.
-      await billing.saveSubscription(tx, {
-        id: `sub_${slug}1`, customerId: `cus_${slug}1`, status: "trialing", seats: { starter: 1, pro: 0 },
-        trialEnd: new Date(Date.now() + 7 * 86_400_000), currentPeriodEnd: null, cancelAtPeriodEnd: false,
-      }, new Date());
-      expect(await billing.claimStripeEvent(tx, `evt_${slug}1`, "checkout.session.completed")).toBe(true);
-      await billing.saveDailyUsage(tx, project, "2026-11-09", 1234);
-      // Posture scan (decision 038): one scan with one finding.
-      const scanId = (await posture.claimPostureScan(tx, project, new Date(), { refreshSeconds: 1, retrySeconds: 1 }))!;
-      await posture.savePostureScan(tx, project, scanId, {
-        catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },
-        advisor: null,
-      }, new Date());
-      return { tenant, connection, project, run, incident };
-    });
-  }
+  const seed = (name: string, token: string) => seedFullTenant(db, name, token);
 
   beforeAll(async () => {
     seeded.a = await seed("Agency", "token-of-agency");
     seeded.b = await seed("Client", "token-of-client");
+    // Data controls (decision 037): a closure row per tenant, so every table holds rows.
+    for (const s of [seeded.a, seeded.b]) {
+      await withTenant(db.app, s.tenant, (tx) => tx.query(
+        `INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, access_ends_at, purge_after)
+         VALUES ($1, now(), $2, now(), now() + interval '30 days')`, [s.tenant, randomUUID()]));
+    }
   });
 
   it("runs the app and scheduler as roles that cannot bypass RLS and own nothing", async () => {
     const roles = await db.admin.query(
-      "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname IN ('app_user', 'scheduler_user', 'supahound_app', 'supahound_scheduler')",
+      `SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname IN
+         ('app_user', 'scheduler_user', 'notifier_user', 'supahound_app', 'supahound_scheduler', 'supahound_notifier')`,
     );
-    expect(roles.rows).toHaveLength(4);
+    expect(roles.rows).toHaveLength(6);
     for (const r of roles.rows) expect([r.rolsuper, r.rolbypassrls]).toEqual([false, false]);
     const owned = await db.admin.query(
-      "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'supahound' AND tableowner IN ('app_user', 'scheduler_user', 'supahound_app', 'supahound_scheduler')",
+      "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'supahound' AND tableowner IN ('app_user', 'scheduler_user', 'notifier_user', 'supahound_app', 'supahound_scheduler', 'supahound_notifier')",
     );
     expect(owned.rows[0].n).toBe(0);
   });
@@ -238,11 +159,21 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
   });
 
   it("lets the scheduler see project IDs for every tenant and nothing else", async () => {
+    // Both seeded tenants are closed (beforeAll), and the scheduler skips closed workspaces
+    // (decision 037). Open them for this check, then close one again.
+    const closures = (await db.admin.query("DELETE FROM supahound.account_closures RETURNING *")).rows;
     const due = await repo.dueProjects(db.scheduler, 60, 100, "off");
     expect(due.map((s) => s.tenantId).sort()).toEqual([seeded.a.tenant, seeded.b.tenant].sort());
+    for (const c of closures) {
+      await db.admin.query(
+        "INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, access_ends_at, purge_after) VALUES ($1, $2, $3, $4, $5)",
+        [c.tenant_id, c.closed_at, c.closed_by, c.access_ends_at, c.purge_after],
+      );
+    }
+    expect(await repo.dueProjects(db.scheduler, 60, 100, "off")).toEqual([]);
     await expect(db.scheduler.query("SELECT supabase_ref FROM supahound.projects")).rejects.toThrow(/permission denied/);
     await expect(db.scheduler.query("SELECT * FROM supahound.projects")).rejects.toThrow(/permission denied/);
-    for (const table of TABLES.filter((t) => t !== "projects" && t !== "billing_accounts")) {
+    for (const table of TABLES.filter((t) => t !== "projects" && t !== "billing_accounts" && t !== "account_closures")) {
       await expect(db.scheduler.query(`SELECT 1 FROM supahound.${table}`), table).rejects.toThrow(/permission denied/);
     }
     // Billing: the status per tenant, to skip tenants that have not paid, and no other column.
@@ -250,6 +181,27 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     expect(statuses.rows).toHaveLength(2);
     for (const col of ["stripe_customer_id", "subscription_id", "starter_seats", "*"]) {
       await expect(db.scheduler.query(`SELECT ${col} FROM supahound.billing_accounts`), col).rejects.toThrow(/permission denied/);
+    }
+    // Closures (decision 037): which tenants are closed and when they purge, and no kept record.
+    const visible = await db.scheduler.query("SELECT tenant_id, access_ends_at, purge_after, purged_at FROM supahound.account_closures");
+    expect(visible.rows).toHaveLength(2);
+    for (const col of ["closed_by", "closed_at", "*"]) {
+      await expect(db.scheduler.query(`SELECT ${col} FROM supahound.account_closures`), col).rejects.toThrow(/permission denied/);
+    }
+  });
+
+  it("lets the notifier read owners' addresses in every tenant and nothing else (decision 037)", async () => {
+    const owners = await db.notifier.query<{ tenant_id: string; role: string }>("SELECT tenant_id, role, email FROM supahound.memberships");
+    expect(owners.rows.map((r) => r.tenant_id).sort()).toEqual([seeded.a.tenant, seeded.b.tenant].sort());
+    expect(owners.rows.every((r) => r.role === "owner")).toBe(true);
+    for (const col of ["user_id", "created_at", "*"]) {
+      await expect(db.notifier.query(`SELECT ${col} FROM supahound.memberships`), col).rejects.toThrow(/permission denied/);
+    }
+    for (const table of TABLES.filter((t) => t !== "memberships")) {
+      await expect(db.notifier.query(`SELECT 1 FROM supahound.${table}`), table).rejects.toThrow(/permission denied/);
+    }
+    for (const sql of ["UPDATE supahound.memberships SET email = 'x@y.z'", "DELETE FROM supahound.memberships"]) {
+      await expect(db.notifier.query(sql), sql).rejects.toThrow(/permission denied/);
     }
   });
 

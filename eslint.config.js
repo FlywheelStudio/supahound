@@ -40,10 +40,16 @@ const WEB_NO_AI_PATHS = [{ name: "ai", message: NO_AI_MESSAGE }];
 const WEB_NO_AI_PATTERNS = [{ group: ["@supahound/core/explainer/llm", "@supahound/core/explainer/llm.*"], message: NO_AI_MESSAGE }];
 
 // The billing gate (decision 028): signed-in tenant pages and actions use withPaidTenantForUser.
-// Only the billing routes, which a workspace needs before it pays, may use withTenantForUser.
-const GATE_MESSAGE = "Use withPaidTenantForUser (packages/core/src/db/billing.ts): every tenant page and action needs a validated card. Only the billing routes may use withTenantForUser.";
+// Only the billing routes, which a workspace needs before it pays, may use withTenantForUser, and
+// the data-controls routes (decision 037): disconnecting Supabase and closing or reopening a
+// workspace must work whether or not it pays.
+const GATE_MESSAGE = "Use withPaidTenantForUser (packages/core/src/db/billing.ts): every tenant page and action needs a validated card. Only the billing and data-controls routes may use withTenantForUser.";
 const GATE_PATHS = [{ name: "@supahound/core/db/user", importNames: ["withTenantForUser"], message: GATE_MESSAGE }];
-export const BILLING_ROUTE_FILES = ["apps/web/app/w/[[]tenantId]/billing/**"];
+export const BILLING_ROUTE_FILES = [
+  "apps/web/app/w/[[]tenantId]/billing/**",
+  "apps/web/app/w/[[]tenantId]/settings/**",
+  "apps/web/app/w/[[]tenantId]/closed/**",
+];
 
 // One block per file set, because a later no-restricted-imports entry replaces an earlier one.
 const webGuard = {

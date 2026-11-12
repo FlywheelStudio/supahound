@@ -107,6 +107,20 @@ export async function seedConnection(tenant: string, token: string): Promise<str
   }
 }
 
+// A connection holding OAuth credentials with a refresh token, as the callback stores them, so
+// Disconnect has a grant to revoke (decision 037).
+export async function seedOAuthConnection(tenant: string, accessToken: string, refreshToken: string): Promise<string> {
+  return seedConnection(tenant, JSON.stringify({ accessToken, refreshToken, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+}
+
+export async function revokeCalls(): Promise<{ client_id: string; refresh_token: string }[]> {
+  return (await (await fetch(`${process.env.E2E_MGMT_URL}/__test/revokes`)).json()) as { client_id: string; refresh_token: string }[];
+}
+
+export async function refuseRevoke(refreshToken: string): Promise<void> {
+  await fetch(`${process.env.E2E_MGMT_URL}/__test/refuse-revoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: refreshToken }) });
+}
+
 // What the fake Management API answers for this token (support/fakeManagement.ts).
 export async function setSupabaseProjects(token: string, projects: { ref: string; name: string; status?: string }[], status = 200): Promise<void> {
   const res = await fetch(`${process.env.E2E_MGMT_URL}/__test/projects`, {

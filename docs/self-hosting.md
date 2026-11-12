@@ -113,6 +113,12 @@ creates `supahound_app_login` and `supahound_scheduler_login`. They inherit the 
 `supahound_scheduler` roles and nothing more: no superuser, no BYPASSRLS. Running it again changes
 the passwords.
 
+Optional, only if you email a subprocessor notice to your workspace owners (decision 037):
+`psql "$SUPAHOUND_DB_URL" -v notifier_password="$(openssl rand -hex 32)" -f supabase/setup/notifier-user.sql`
+creates `supahound_notifier_login`, which reads owners' addresses and nothing else. Set the notice
+variables in `.env.example`, then run `pnpm subprocessor-notice --name … --purpose … --location …
+--effective YYYY-MM-DD --contact …`. Without `--send` it only counts.
+
 ### 4. Hyperdrive
 
 Use the Supabase **session pooler**. Copy its host from the dashboard (Connect → Session
@@ -204,6 +210,14 @@ the projects to watch. The poller reads them on the next minute.
 - Never connect the Workers as `postgres` or any role with BYPASSRLS.
 - Never commit `.dev.vars`, passwords, the master keys or the hook secret. CI runs gitleaks on
   every push (`.gitleaks.toml`).
+
+## Data retention
+
+The poller runs a data job once a day at 00:40 UTC, in every billing mode (decision 037). It keeps
+incidents, findings and poll runs for 30 days after their last activity, and deletes a closed
+workspace's logs and history 30 days after it closed; the workspace record and audit log stay.
+With billing off no workspace counts as paying, so these rules always apply. Nothing to configure:
+the cron that polls every minute runs it.
 
 ## The scan funnel
 
