@@ -5,6 +5,10 @@ import type { TenantTx } from "./tenant.js";
 // RLS and the repeated tenant_id keep it to one tenant. The window is the incident history window
 // (decision 035): 30 days after an incident's last activity.
 //
+// A workspace that pays (billing/policy.ts payingAccount) loses nothing: the caller passes
+// deleteHistory false, and only steps 1 (resolve, which deletes nothing) and 5 (OAuth states,
+// which are not customer data) run.
+//
 // The rules, in this order, in one transaction:
 //   1. An OPEN incident last seen more than 30 days ago is resolved. The engine resolves an
 //      incident only when its actor acts again, so a quiet actor leaves it open forever. Open
@@ -35,7 +39,7 @@ export interface RetentionResult {
 
 const CUTOFF = `$2::timestamptz - make_interval(days => ${RETENTION_DAYS})`;
 
-export async function applyRetention(tx: TenantTx, now: Date): Promise<RetentionResult> {
+export async function applyRetention(tx: TenantTx, now: Date, opts: { deleteHistory: boolean }): Promise<RetentionResult> {
   const p = [tx.tenantId, now];
   const resolved = await tx.query(
     `UPDATE supahound.incidents SET status = 'resolved', updated_at = $2
@@ -43,6 +47,13 @@ export async function applyRetention(tx: TenantTx, now: Date): Promise<Retention
      RETURNING id`,
     p,
   );
+  const oauthStates = await tx.query(
+    "DELETE FROM supahound.oauth_states WHERE tenant_id = $1 AND expires_at < $2 RETURNING id",
+    p,
+  );
+  if (!opts.deleteHistory) {
+    return { resolved: resolved.length, incidents: 0, findings: 0, pollRuns: 0, oauthStates: oauthStates.length };
+  }
   const incidents = await tx.query(
     `DELETE FROM supahound.incidents
      WHERE tenant_id = $1 AND status = 'resolved' AND last_seen_at < ${CUTOFF}
@@ -64,10 +75,6 @@ export async function applyRetention(tx: TenantTx, now: Date): Promise<Retention
          SELECT DISTINCT ON (k.project_id) k.id FROM supahound.poll_runs k
           WHERE k.tenant_id = $1 AND k.status = 'ok' ORDER BY k.project_id, k.window_end DESC)
      RETURNING r.id`,
-    p,
-  );
-  const oauthStates = await tx.query(
-    "DELETE FROM supahound.oauth_states WHERE tenant_id = $1 AND expires_at < $2 RETURNING id",
     p,
   );
   return {

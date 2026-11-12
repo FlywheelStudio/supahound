@@ -2,7 +2,6 @@ import { applyUsageTiers } from "@supahound/core/billing/flow";
 import { stripeGateway } from "@supahound/core/billing/stripeGateway";
 import { countDailyUsage } from "@supahound/core/billing/usage";
 import { billingMode } from "@supahound/core/db/billing";
-import { KEEP_RECORDS_YEARS } from "@supahound/core/db/closure";
 import { billedTenants, dataJobTenants, dueProjects } from "@supahound/core/db/repo";
 import { runDataJob } from "@supahound/core/datacontrols/flow";
 import { explainerFor } from "@supahound/core/explainer/llm";
@@ -157,7 +156,7 @@ export default {
       }
       // Every billing mode: retention and purges are privacy promises, not billing.
       if (isDataMinute(_controller.scheduledTime)) {
-        const tenants = await dataJobTenants(scheduler, new Date(_controller.scheduledTime), KEEP_RECORDS_YEARS);
+        const tenants = await dataJobTenants(scheduler, new Date(_controller.scheduledTime));
         log("data_jobs_enqueued", { count: await enqueueUsage(tenants, env.POLL_QUEUE, "data") });
       }
     } finally {
@@ -203,7 +202,10 @@ export default {
       // Counts only in the log: never row contents.
       const data = async (tenant: TenantId) => {
         const outcome = await runDataJob(app, tenant, new Date());
-        log("data_job", { tenant_id: tenant, kind: outcome.kind, ...(outcome.kind === "retention" ? outcome.retention : {}) });
+        log("data_job", {
+          tenant_id: tenant, paying: outcome.paying, purged: outcome.purged, connections_deleted: outcome.connectionsDeleted,
+          ...(outcome.retention ?? {}),
+        });
       };
       await handleMessages(batch.messages, (scope) => pollProject(scope, deps), usage, data);
     } finally {

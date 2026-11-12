@@ -140,7 +140,7 @@ emails support; that is a manual step for now.
 
 ## Consequences
 
-- Migration `20261112010000_data_controls.sql` is additive: a new table, a new NOLOGIN role, new
+- Migration `20261112030000_data_controls.sql` is additive: a new table, a new NOLOGIN role, new
   policies and grants. It must be applied before this code deploys. The code before it keeps working
   with it applied (develop's unchanged suites pass on it, except the catalog check that lists tables).
 - The poller needs no new trigger, var or secret.

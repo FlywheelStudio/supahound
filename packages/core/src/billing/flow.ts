@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import {
-  acceptBillingTerms, claimStripeEvent, getBilling, isStripeEventProcessed, projectTiers, recordCardRejected,
+  acceptBillingTerms, billedTiers, claimStripeEvent, getBilling, isStripeEventProcessed, projectTiers, recordCardRejected, trialAvailable,
   refreshProjectTiers, saveSeats, saveSubscription, setStripeCustomer, type SubscriptionSnapshot,
 } from "../db/billing.js";
 import { getClosure } from "../db/closure.js";
@@ -17,30 +17,32 @@ export interface VerificationSession {
   status: "open" | "complete" | "expired";
   tenant: string | null; // metadata.tenant_id, set by our server when it created the session
   customerId: string | null;
+  // metadata.trial, set by our server: false when the owner already had a trial elsewhere.
+  trialAllowed: boolean;
   hold: (CardEvidence & { paymentIntentId: string; releasable: boolean; paymentMethodId: string | null }) | null;
 }
 
 export interface StripeGateway {
   createCustomer(input: { tenant: TenantId; email: string | null; idempotencyKey: string }): Promise<{ id: string }>;
   createVerificationCheckout(input: {
-    tenant: TenantId; customerId: string; successUrl: string; cancelUrl: string;
+    tenant: TenantId; customerId: string; successUrl: string; cancelUrl: string; trial: boolean;
   }): Promise<{ id: string; url: string }>;
   getVerificationSession(id: string): Promise<VerificationSession>;
   releaseHold(paymentIntentId: string): Promise<void>;
   // The customer's subscription that is not canceled, if one exists.
   liveSubscription(customerId: string): Promise<(SubscriptionSnapshot & { cardVerifiedAt: Date | null }) | null>;
+  // trial false: no free trial, the first charge is at once (decision 037: one trial ever).
   createTrialSubscription(input: {
     tenant: TenantId; customerId: string; seats: Seats; paymentMethodId: string;
-    cardVerifiedAt: Date; idempotencyKey: string;
+    cardVerifiedAt: Date; idempotencyKey: string; trial: boolean;
   }): Promise<SubscriptionSnapshot>;
   getSubscription(id: string): Promise<SubscriptionSnapshot & { tenant: string | null; cardVerifiedAt: Date | null }>;
   // prorate: true when the customer adds or removes a project (charged now, pro rata); false when
   // a project changes tier from its usage, which takes effect at the next renewal (decision 028).
   setSeats(subscriptionId: string, seats: Seats, prorate: boolean): Promise<void>;
   portalUrl(customerId: string, returnUrl: string): Promise<string>;
-  // Cancels at once, with no proration and no refund (closing a workspace, decision 037).
-  // Canceling a subscription that is already canceled returns it unchanged.
-  cancelSubscription(subscriptionId: string): Promise<SubscriptionSnapshot>;
+  // Closing a workspace cancels at the end of the paid period; reopening undoes it (decision 037).
+  setCancelAtPeriodEnd(subscriptionId: string, cancel: boolean): Promise<SubscriptionSnapshot>;
 }
 
 export interface FlowDeps {
@@ -68,15 +70,15 @@ export async function startCheckout(
   input: { user: UserId; email: string | null; tenant: TenantId; acceptedTerms: boolean },
 ): Promise<string> {
   const { tenant } = input;
-  const state: { next: string } | { customerId: string | null } = await withTenantForUser(deps.pool, input.user, tenant, async (tx, role) => {
-    // A closed workspace never starts a checkout, even from a replayed form (decision 037).
+  const state: { next: string } | { customerId: string | null; trial: boolean } = await withTenantForUser(deps.pool, input.user, tenant, async (tx, role) => {
+    // A closing or closed workspace never starts a checkout, even from a replayed form (decision 037).
     if (await getClosure(tx)) return { next: `/w/${tenant}/closed` };
     if (role === "member") return { next: billingPath(tenant, "role") };
     const billing = await getBilling(tx);
     if (accessForAccount(billing) !== "blocked") return { next: `/w/${tenant}` };
     if (!input.acceptedTerms) return { next: billingPath(tenant, "terms") };
     await acceptBillingTerms(tx, TERMS_VERSION, deps.now());
-    return { customerId: billing.customerId };
+    return { customerId: billing.customerId, trial: await trialAvailable(tx, input.user) };
   });
   if ("next" in state) return state.next;
 
@@ -87,7 +89,7 @@ export async function startCheckout(
     await withTenant(deps.pool, tenant, (tx) => setStripeCustomer(tx, customerId!));
   }
   const session = await deps.stripe.createVerificationCheckout({
-    tenant, customerId,
+    tenant, customerId, trial: state.trial,
     successUrl: `${deps.appUrl}/w/${tenant}/billing/return?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${deps.appUrl}${billingPath(tenant, "canceled")}`,
   });
@@ -138,9 +140,12 @@ export async function completeVerification(
     verifiedAt = existing.cardVerifiedAt ?? now;
   } else {
     const tiers = await withTenant(deps.pool, tenant, (tx) => projectTiers(tx));
+    // One trial per workspace, ever, and none for an owner who had one elsewhere (decision 037):
+    // the session carries the owner check; the workspace check runs here again.
+    const trial = s.trialAllowed && billing.cardVerifiedAt === null && billing.trialEnd === null;
     sub = await deps.stripe.createTrialSubscription({
-      tenant, customerId: s.customerId, seats: seatsFor(tiers.map((t) => t.tier)), paymentMethodId: s.hold.paymentMethodId,
-      cardVerifiedAt: now, idempotencyKey: `trial-${s.id}`,
+      tenant, customerId: s.customerId, seats: seatsFor(billedTiers(tiers)), paymentMethodId: s.hold.paymentMethodId,
+      cardVerifiedAt: now, idempotencyKey: `trial-${s.id}`, trial,
     });
     verifiedAt = now;
   }
@@ -173,7 +178,7 @@ export async function syncSeats(deps: FlowDeps, tenant: TenantId, prorate: boole
   const want = await withTenant(deps.pool, tenant, async (tx) => {
     const billing = await getBilling(tx);
     if (!billing.subscriptionId || accessFor(billing.status) === "blocked") return null;
-    const seats = seatsFor((await projectTiers(tx)).map((t) => t.tier));
+    const seats = seatsFor(billedTiers(await projectTiers(tx)));
     const same = billing.seats && billing.seats.starter === seats.starter && billing.seats.pro === seats.pro;
     return same ? null : { subscriptionId: billing.subscriptionId, seats };
   });

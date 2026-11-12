@@ -27,8 +27,8 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     // Data controls (decision 037): a closure row per tenant, so every table holds rows.
     for (const s of [seeded.a, seeded.b]) {
       await withTenant(db.app, s.tenant, (tx) => tx.query(
-        `INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, purge_after)
-         VALUES ($1, now(), $2, now() + interval '30 days')`, [s.tenant, randomUUID()]));
+        `INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, access_ends_at, purge_after)
+         VALUES ($1, now(), $2, now(), now() + interval '30 days')`, [s.tenant, randomUUID()]));
     }
   });
 
@@ -164,8 +164,8 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     expect(due.map((s) => s.tenantId).sort()).toEqual([seeded.a.tenant, seeded.b.tenant].sort());
     for (const c of closures) {
       await db.admin.query(
-        "INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, purge_after) VALUES ($1, $2, $3, $4)",
-        [c.tenant_id, c.closed_at, c.closed_by, c.purge_after],
+        "INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, access_ends_at, purge_after) VALUES ($1, $2, $3, $4, $5)",
+        [c.tenant_id, c.closed_at, c.closed_by, c.access_ends_at, c.purge_after],
       );
     }
     expect(await repo.dueProjects(db.scheduler, 60, 100, "off")).toEqual([]);
@@ -181,9 +181,9 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       await expect(db.scheduler.query(`SELECT ${col} FROM supahound.billing_accounts`), col).rejects.toThrow(/permission denied/);
     }
     // Closures (decision 037): which tenants are closed and when they purge, and no kept record.
-    const visible = await db.scheduler.query("SELECT tenant_id, purge_after, purged_at FROM supahound.account_closures");
+    const visible = await db.scheduler.query("SELECT tenant_id, access_ends_at, purge_after, purged_at FROM supahound.account_closures");
     expect(visible.rows).toHaveLength(2);
-    for (const col of ["closed_by", "stripe_customer_id", "scan_consents", "*"]) {
+    for (const col of ["closed_by", "closed_at", "*"]) {
       await expect(db.scheduler.query(`SELECT ${col} FROM supahound.account_closures`), col).rejects.toThrow(/permission denied/);
     }
   });

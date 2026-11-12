@@ -22,9 +22,10 @@ export const backPath = (tenant: TenantId, back: Back) => (back === "closed" ? c
 
 export function closeRedirect(tenant: TenantId, result: CloseResult | "failed"): string {
   switch (result) {
+    // The settings page sends a workspace whose period has already ended on to its closed page.
     case "closed":
     case "already_closed":
-      return `${closedPath(tenant)}?closed=1`;
+      return `${settingsPath(tenant)}?closing=1`;
     case "mismatch":
       return `${settingsPath(tenant)}?error=close_mismatch`;
     case "role":
@@ -46,11 +47,11 @@ export function reopenRedirect(tenant: TenantId, result: ReopenOutcome): string 
   }
 }
 
-export function disconnectRedirect(tenant: TenantId, back: Back, connection: string, out: DisconnectOutcome): string {
+export function disconnectRedirect(tenant: TenantId, back: Back, connection: string, out: Pick<DisconnectOutcome, "result" | "revoked" | "projectsPaused">): string {
   const base = backPath(tenant, back);
   switch (out.result) {
     case "disconnected":
-      return `${base}?disconnected=${out.revoked ? "revoked" : "local"}&removed=${out.projectsRemoved}`;
+      return `${base}?disconnected=${out.revoked ? "revoked" : "local"}&removed=${out.projectsPaused}`;
     case "mismatch":
       return `${base}?disconnect=${encodeURIComponent(connection)}&error=disconnect_mismatch`;
     case "role":
@@ -74,7 +75,9 @@ export const MESSAGES: Record<string, string> = {
 export function disconnectedNotice(kind: string | undefined, removed: string | undefined): string | null {
   if (kind !== "revoked" && kind !== "local") return null;
   const n = Number(removed ?? 0);
-  const projects = Number.isInteger(n) && n > 0 ? ` and stopped watching ${n} project${n === 1 ? "" : "s"}` : "";
+  const projects = Number.isInteger(n) && n > 0
+    ? ` and stopped watching ${n} project${n === 1 ? "" : "s"}. Everyone on ${n === 1 ? "it" : "them"} got an email`
+    : "";
   const head = `Supabase disconnected. Supahound deleted its access token${projects}.`;
   return kind === "revoked"
     ? `${head} Supabase confirmed that the grant is revoked.`
@@ -82,6 +85,19 @@ export function disconnectedNotice(kind: string | undefined, removed: string | u
 }
 
 export const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+// The state of a connection, for the settings list (decision 037).
+export function connectionState(
+  c: { disconnectedAt: Date | null; disconnectReason: "user" | "revoked" | null; deleteAfter: Date | null },
+  paying: boolean,
+): string | null {
+  if (!c.disconnectedAt) return null;
+  const how = c.disconnectReason === "revoked" ? "Access revoked in Supabase" : "Disconnected";
+  const keep = paying
+    ? "History kept while the workspace pays."
+    : `History deleted on ${ymd(c.deleteAfter ?? c.disconnectedAt)} unless you reconnect the same Supabase organization.`;
+  return `${how} on ${ymd(c.disconnectedAt)}. ${keep}`;
+}
 
 // Whole days until the purge, rounded up; 0 on the day itself or after.
 export function daysLeft(closure: Pick<Closure, "purgeAfter">, now: Date): number {

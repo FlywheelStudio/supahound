@@ -1,10 +1,10 @@
 import type { Pool } from "pg";
 import {
-  accessForAccount, isBillingStatus, isTier, tierFor, USAGE_WINDOW_DAYS,
+  accessForAccount, isBillingStatus, isTier, payingAccount, tierFor, USAGE_WINDOW_DAYS,
   type Access, type BillingStatus, type CardRejection, type Seats, type Tier,
 } from "../billing/policy.js";
 import type { ProjectId, TenantId, UserId } from "../tenancy/scope.js";
-import { getClosure, WorkspaceClosedError } from "./closure.js";
+import { getClosure, isClosedNow, WorkspaceClosedError } from "./closure.js";
 import type { TenantTx } from "./tenant.js";
 import { withTenantForUser, type Role } from "./user.js";
 
@@ -176,16 +176,47 @@ export interface ProjectTier {
   id: ProjectId;
   tier: Tier;
   requests30d: number | null;
+  // Paused projects (their Supabase connection is disconnected, decision 037) are not watched, so
+  // they are not billed.
+  paused: boolean;
 }
 
 export async function projectTiers(tx: TenantTx): Promise<ProjectTier[]> {
-  const rows = await tx.query<{ id: ProjectId; billing_tier: string; requests_30d: string | null }>(
-    "SELECT id, billing_tier, requests_30d FROM supahound.projects WHERE tenant_id = $1 ORDER BY created_at",
+  const rows = await tx.query<{ id: ProjectId; billing_tier: string; requests_30d: string | null; paused: boolean }>(
+    "SELECT id, billing_tier, requests_30d, paused FROM supahound.projects WHERE tenant_id = $1 ORDER BY created_at",
     [tx.tenantId],
   );
   return rows.map((r) => ({
     id: r.id, tier: isTier(r.billing_tier) ? r.billing_tier : "starter", requests30d: r.requests_30d === null ? null : Number(r.requests_30d),
+    paused: r.paused,
   }));
+}
+
+// The tiers billed: one seat per watched (not paused) project.
+export const billedTiers = (tiers: readonly ProjectTier[]): Tier[] => tiers.filter((t) => !t.paused).map((t) => t.tier);
+
+// Decision 037: whether the workspace pays now (billing/policy.ts payingAccount). Every deletion
+// path asks this inside the transaction that would delete.
+export async function isPaying(tx: TenantTx): Promise<boolean> {
+  return payingAccount(await getBilling(tx));
+}
+
+// Decision 037: one free trial per workspace, ever, and none when the user adding the card owns
+// another workspace that already had a validated card (and so a trial). The second check reads
+// the user's other workspaces through the owner_trial_history policy. A new sign-in email gets
+// around it; a check on the card itself would need data across tenants.
+export async function trialAvailable(tx: TenantTx, user: UserId): Promise<boolean> {
+  const billing = await getBilling(tx);
+  if (billing.cardVerifiedAt !== null || billing.trialEnd !== null) return false;
+  const [r] = await tx.query<{ had: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM supahound.billing_accounts b
+       JOIN supahound.memberships m ON m.tenant_id = b.tenant_id
+       WHERE m.user_id = $2 AND m.role = 'owner' AND b.tenant_id <> $1
+         AND (b.card_verified_at IS NOT NULL OR b.trial_end IS NOT NULL)) AS had`,
+    [tx.tenantId, user],
+  );
+  return !r?.had;
 }
 
 // One UTC day of edge-log requests for one project. Counting the same day again replaces it.
@@ -223,8 +254,9 @@ export async function refreshProjectTiers(tx: TenantTx, today: string): Promise<
 // The gate (decision 028, point 7). The only tenant entry point for signed-in pages and actions
 // other than the billing routes. Membership and billing are both checked inside the transaction
 // that runs fn; a tenant without a validated card gets PaymentRequiredError before fn runs.
-// A closed workspace (decision 037) gets WorkspaceClosedError first, in every billing mode: its
-// canceled subscription must not send it to the billing page.
+// A closed workspace (decision 037) whose paid period has ended gets WorkspaceClosedError first,
+// in every billing mode: its canceled subscription must not send it to the billing page. Until
+// then a closing workspace works as before.
 export async function withPaidTenantForUser<T>(
   pool: Pool,
   mode: BillingMode,
@@ -233,7 +265,7 @@ export async function withPaidTenantForUser<T>(
   fn: (tx: TenantTx, role: Role, access: Access) => Promise<T>,
 ): Promise<T> {
   return withTenantForUser(pool, user, tenant, async (tx, role) => {
-    if (await getClosure(tx)) throw new WorkspaceClosedError(tenant);
+    if (isClosedNow(await getClosure(tx), new Date())) throw new WorkspaceClosedError(tenant);
     if (mode === "off") return fn(tx, role, "full");
     const access = accessForAccount(await getBilling(tx));
     if (access === "blocked") throw new PaymentRequiredError(tenant);

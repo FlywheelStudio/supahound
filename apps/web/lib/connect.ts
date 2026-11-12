@@ -11,7 +11,8 @@ export interface CallbackDeps {
   // state is unknown, used, expired or someone else's. Throws NotAMemberError for non-members.
   consume: (user: UserId, tenant: TenantId, stateHash: string) => Promise<string | null>;
   exchange: (code: string, verifier: string) => Promise<Credentials>;
-  store: (user: UserId, tenant: TenantId, credentials: Credentials) => Promise<void>;
+  // Resolves true when the token went back into a disconnected connection (decision 037).
+  store: (user: UserId, tenant: TenantId, credentials: Credentials) => Promise<boolean | void>;
   isNotAMember: (err: unknown) => boolean;
 }
 
@@ -28,8 +29,8 @@ export async function handleOAuthCallback(params: URLSearchParams, user: UserId 
     const verifier = await deps.consume(user, tenant, sha256Hex(state));
     if (!verifier) return `/w/${tenant}?error=connect`;
     const credentials = await deps.exchange(code, verifier);
-    await deps.store(user, tenant, credentials);
-    return `/w/${tenant}?connected=1`;
+    const reattached = await deps.store(user, tenant, credentials);
+    return reattached === true ? `/w/${tenant}?reconnected=1` : `/w/${tenant}?connected=1`;
   } catch (err) {
     if (deps.isNotAMember(err)) return "/app";
     return `/w/${tenant}?error=connect`;

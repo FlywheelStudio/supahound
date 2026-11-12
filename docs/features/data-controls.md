@@ -88,7 +88,7 @@ pnpm subprocessor-notice --name Twilio --purpose "SMS alerts" --location "United
 
 ## Data model and RLS
 
-Migration `20261112010000_data_controls.sql` (additive):
+Migration `20261112030000_data_controls.sql` (additive):
 
 | Object | Rule |
 | --- | --- |

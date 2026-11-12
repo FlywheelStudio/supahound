@@ -1,6 +1,6 @@
 "use server";
 
-import { closeWorkspace, disconnectConnection } from "@supahound/core/datacontrols/flow";
+import { closeWorkspace, disconnectConnection, sendDisconnectEmails } from "@supahound/core/datacontrols/flow";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { revokeGrant } from "@supahound/core/supabase/oauth";
 import { connectionId, tenantId as parseTenantId, type ConnectionId, type TenantId } from "@supahound/core/tenancy/scope";
@@ -25,7 +25,9 @@ function parseOr404<T>(parse: (v: string) => T, value: FormDataEntryValue | null
   }
 }
 
-// A workspace owner or admin disconnects one Supabase connection after typing its name.
+// A workspace owner or admin disconnects one Supabase connection after typing its name. Every
+// person on the affected projects gets an email; the history stays 30 days (longer while the
+// workspace pays).
 export async function disconnectAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const tenant: TenantId = parseOr404(parseTenantId, formData.get("tenantId"));
@@ -36,8 +38,15 @@ export async function disconnectAction(formData: FormData): Promise<void> {
       { pool, vault: vault(), revoke: (refreshToken) => revokeGrant(oauthClient(), refreshToken, env.SUPABASE_API_URL) },
       { user: user.id, tenant, connection, typedLabel: String(formData.get("confirmLabel") ?? "") },
     );
-    // Fewer projects: bill fewer seats now (pro rata), as when a project is removed.
-    if (r.projectsRemoved > 0) await syncSeatsAfterChange(pool, tenant);
+    if (r.notice) {
+      await sendDisconnectEmails(pool, tenant, r.notice, "user", user.email, {
+        send: (m) => env.EMAIL.send(m),
+        from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
+        appUrl: env.APP_URL,
+      });
+    }
+    // Paused projects are not billed: bill fewer seats now (pro rata), as when a project is removed.
+    if (r.projectsPaused > 0) await syncSeatsAfterChange(pool, tenant);
     return r;
   }).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();
@@ -46,7 +55,8 @@ export async function disconnectAction(formData: FormData): Promise<void> {
   redirect(disconnectRedirect(tenant, back, connection, out));
 }
 
-// The workspace owner closes the workspace after typing its name. Stripe is canceled first.
+// The workspace owner closes the workspace after typing its name. Stripe first: the subscription
+// cancels at the end of its period.
 export async function closeWorkspaceAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const tenant: TenantId = parseOr404(parseTenantId, formData.get("tenantId"));

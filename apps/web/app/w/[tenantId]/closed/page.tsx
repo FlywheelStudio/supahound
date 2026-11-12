@@ -1,4 +1,6 @@
-import { getClosure, KEEP_RECORDS_YEARS } from "@supahound/core/db/closure";
+import { payingAccount } from "@supahound/core/billing/policy";
+import { getBilling } from "@supahound/core/db/billing";
+import { getClosure, isClosedNow } from "@supahound/core/db/closure";
 import { listConnectionsWithProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
@@ -7,14 +9,14 @@ import { notFound, redirect } from "next/navigation";
 import { Connections } from "../../../../components/Connections";
 import { Notice } from "../../../../components/Shell";
 import { mode } from "../../../../lib/billing";
-import { canClose, canDisconnect, daysLeft, disconnectedNotice, MESSAGES, ymd } from "../../../../lib/dataControls";
+import { canClose, canDisconnect, daysLeft, disconnectedNotice, MESSAGES, settingsPath, ymd } from "../../../../lib/dataControls";
 import { withPool } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/supabase";
 import { reopenAction } from "./actions";
 
-// A closed workspace (decision 037). Every other workspace page sends its members here until the
-// purge. The owner can reopen it; owners and admins can still disconnect Supabase, which deletes
-// the sealed token at once instead of at the purge.
+// A closed workspace whose paid period has ended (decision 037). Every other workspace page sends
+// its members here. Before the purge the owner can reopen it, and owners and admins can still
+// disconnect Supabase. After the purge it says what was deleted and what is kept.
 
 export default async function ClosedWorkspace({
   params,
@@ -35,20 +37,26 @@ export default async function ClosedWorkspace({
   const data = await withPool((pool) =>
     withTenantForUser(pool, user.id, tenant, async (tx, role) => {
       const closure = await getClosure(tx);
-      if (!closure) return null;
+      if (!closure) return { state: "open" as const };
+      if (!isClosedNow(closure, new Date())) return { state: "closing" as const };
       const [t] = await tx.query<{ name: string }>("SELECT name FROM supahound.tenants WHERE id = $1", [tenant]);
-      return { role, closure, name: t!.name, connections: canDisconnect(role) ? await listConnectionsWithProjects(tx) : [] };
+      return {
+        state: "closed" as const, role, closure, name: t!.name, paying: payingAccount(await getBilling(tx)),
+        connections: canDisconnect(role) && !closure.purgedAt ? await listConnectionsWithProjects(tx) : [],
+      };
     }),
   ).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();
     throw err;
   });
-  if (!data) redirect(`/w/${tenant}`);
+  if (data.state === "open") redirect(`/w/${tenant}`);
+  if (data.state === "closing") redirect(settingsPath(tenant));
 
   const query = await searchParams;
   const error = query.error ? MESSAGES[query.error] : undefined;
   const done = disconnectedNotice(query.disconnected, query.removed);
-  const left = daysLeft(data.closure, new Date());
+  const { closure } = data;
+  const left = daysLeft(closure, new Date());
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-10">
@@ -58,22 +66,26 @@ export default async function ClosedWorkspace({
       {done && <Notice tone="ok">{done}</Notice>}
 
       <section className="mb-10 rounded-md border border-slate-200 bg-white p-6">
-        <dl className="grid grid-cols-[10rem_1fr] gap-y-2 text-sm">
+        <dl className="grid grid-cols-[12rem_1fr] gap-y-2 text-sm">
           <dt className="text-slate-500">Closed on</dt>
-          <dd>{ymd(data.closure.closedAt)}</dd>
-          <dt className="text-slate-500">Data deleted on</dt>
-          <dd>{ymd(data.closure.purgeAfter)} ({left} day{left === 1 ? "" : "s"} left)</dd>
+          <dd>{ymd(closure.closedAt)}</dd>
+          {closure.purgedAt ? (<>
+            <dt className="text-slate-500">Logs and history deleted on</dt>
+            <dd>{ymd(closure.purgedAt)}</dd>
+          </>) : (<>
+            <dt className="text-slate-500">Logs and history deleted on</dt>
+            <dd>{data.paying ? "Not while the workspace pays" : `${ymd(closure.purgeAfter)} (${left} day${left === 1 ? "" : "s"} left)`}</dd>
+          </>)}
         </dl>
         <p className="mt-4 text-sm text-slate-700">
-          On that date Supahound deletes all of this workspace&apos;s data. It keeps only the billing record and any
-          security-scan consent, for {KEEP_RECORDS_YEARS} years, for tax and legal reasons.
+          The workspace record, its billing and payment history and its audit log are kept.
         </p>
-        {canClose(data.role) ? (
+        {closure.purgedAt ? null : canClose(data.role) ? (
           <form action={reopenAction} className="mt-6">
             <input type="hidden" name="tenantId" value={tenant} />
             <button className="rounded-md bg-slate-950 px-4 py-2 font-medium text-white hover:bg-slate-800">Reopen workspace</button>
             <p className="mt-2 text-sm text-slate-500">
-              Polling starts again.{mode() === "stripe" ? " The subscription was canceled, so the workspace may ask for a card again." : ""}
+              Polling starts again.{mode() === "stripe" ? " The subscription has ended, so the workspace asks for a card again, with no free trial." : ""}
             </p>
           </form>
         ) : (
@@ -81,8 +93,8 @@ export default async function ClosedWorkspace({
         )}
       </section>
 
-      {canDisconnect(data.role) && (
-        <Connections tenant={tenant} connections={data.connections} canDisconnect confirming={query.disconnect} back="closed" />
+      {data.connections.length > 0 && (
+        <Connections tenant={tenant} connections={data.connections} canDisconnect confirming={query.disconnect} back="closed" paying={data.paying} canReconnect={false} />
       )}
 
       <p className="text-sm">

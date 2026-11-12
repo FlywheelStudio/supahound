@@ -1,13 +1,13 @@
 import type { TenantId, UserId } from "../tenancy/scope.js";
 import type { TenantTx } from "./tenant.js";
 
-// Closing a workspace (issue #43, decision 037). The owner closes it; polling stops at once
-// (every project is paused); 30 days later the daily data job purges the tenant. Until then the
-// owner may reopen it. Every function runs inside a tenant transaction.
+// Closing a workspace (issue #43, decision 037). The owner closes it; the Stripe subscription
+// cancels at the end of its period and the workspace works until then (access_ends_at). Once the
+// workspace no longer pays, and at least 30 days after the close, the daily data job deletes its
+// logs and history. The workspace record is never deleted. Until the purge, the owner may reopen.
+// Every function runs inside a tenant transaction.
 
 export const PURGE_AFTER_DAYS = 30;
-// The tax and legal records the purge keeps (decision 037) are deleted this long after it.
-export const KEEP_RECORDS_YEARS = 7;
 
 export class WorkspaceClosedError extends Error {
   constructor(readonly tenant: TenantId) {
@@ -19,6 +19,7 @@ export class WorkspaceClosedError extends Error {
 export interface Closure {
   closedAt: Date;
   closedBy: string;
+  accessEndsAt: Date;
   purgeAfter: Date;
   purgedAt: Date | null;
 }
@@ -26,125 +27,101 @@ export interface Closure {
 interface Row {
   closed_at: Date;
   closed_by: string;
+  access_ends_at: Date;
   purge_after: Date;
   purged_at: Date | null;
 }
 
-const toClosure = (r: Row): Closure => ({ closedAt: r.closed_at, closedBy: r.closed_by, purgeAfter: r.purge_after, purgedAt: r.purged_at });
+const toClosure = (r: Row): Closure => ({
+  closedAt: r.closed_at, closedBy: r.closed_by, accessEndsAt: r.access_ends_at, purgeAfter: r.purge_after, purgedAt: r.purged_at,
+});
 
 // The workspace's closure, or null when it is open.
 export async function getClosure(tx: TenantTx): Promise<Closure | null> {
   const [r] = await tx.query<Row>(
-    "SELECT closed_at, closed_by, purge_after, purged_at FROM supahound.account_closures WHERE tenant_id = $1",
+    "SELECT closed_at, closed_by, access_ends_at, purge_after, purged_at FROM supahound.account_closures WHERE tenant_id = $1",
     [tx.tenantId],
   );
   return r ? toClosure(r) : null;
 }
 
-// Closes the workspace: records the closure, pauses every project (the poller skips paused
-// projects, in this code and in the code before it), and cancels open invites (accepting one
-// would add a member to a closed workspace). A second call changes nothing. RLS refuses the insert
-// unless the signed-in user is a workspace owner.
-export async function recordClosure(tx: TenantTx, user: UserId, now: Date): Promise<Closure> {
+// Closed for its members: the paid period after the close has ended. Before that it is "closing".
+export const isClosedNow = (c: Closure | null, now: Date): boolean => c !== null && c.accessEndsAt <= now;
+
+// Closes the workspace. accessEndsAt: the end of the paid or trial period that Stripe now cancels
+// at, or `now` when nothing was paid. Cancels open invites (accepting one would add a member to a
+// closing workspace) and ends a staff exemption (decision 029: closing is the owner saying they
+// are done, so the data is not kept as if paid). A second call changes nothing. RLS refuses the
+// insert unless the signed-in user is a workspace owner.
+export async function recordClosure(tx: TenantTx, user: UserId, now: Date, accessEndsAt: Date): Promise<Closure> {
+  const ends = accessEndsAt > now ? accessEndsAt : now;
   await tx.query(
-    `INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, purge_after)
-     VALUES ($1, $2, $3, $2::timestamptz + make_interval(days => ${PURGE_AFTER_DAYS}))
+    `INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, access_ends_at, purge_after)
+     VALUES ($1, $2, $3, $4, $4::timestamptz + make_interval(days => ${PURGE_AFTER_DAYS}))
      ON CONFLICT (tenant_id) DO NOTHING`,
-    [tx.tenantId, now, user],
+    [tx.tenantId, now, user, ends],
   );
-  await tx.query("UPDATE supahound.projects SET paused = true WHERE tenant_id = $1 AND NOT paused", [tx.tenantId]);
   await tx.query(
     `UPDATE supahound.project_invites SET canceled_at = $2
      WHERE tenant_id = $1 AND accepted_at IS NULL AND canceled_at IS NULL`,
     [tx.tenantId, now],
+  );
+  await tx.query(
+    `UPDATE supahound.billing_accounts SET exempt_owner = NULL, exempt_at = NULL, updated_at = now()
+     WHERE tenant_id = $1 AND exempt_owner IS NOT NULL`,
+    [tx.tenantId],
   );
   return (await getClosure(tx))!;
 }
 
 export type ReopenResult = "reopened" | "not_closed" | "too_late";
 
-// Reopens a closed workspace before its purge and resumes polling. No code pauses a project for
-// any other reason, so every project resumes. Billing starts again from the billing page: closing
-// canceled the subscription.
-export async function reopenWorkspace(tx: TenantTx, now: Date): Promise<ReopenResult> {
+// Reopens a closed workspace before its purge. The caller resumes the Stripe subscription when its
+// cancel is still pending; once it has ended, the billing page asks for a card (no new trial).
+export async function reopenWorkspace(tx: TenantTx): Promise<ReopenResult> {
   const closure = await getClosure(tx);
   if (!closure) return "not_closed";
-  if (closure.purgedAt || closure.purgeAfter <= now) return "too_late";
+  if (closure.purgedAt) return "too_late";
   const rows = await tx.query(
     "DELETE FROM supahound.account_closures WHERE tenant_id = $1 AND purged_at IS NULL RETURNING tenant_id",
     [tx.tenantId],
   );
-  if (rows.length !== 1) return "too_late";
-  await tx.query("UPDATE supahound.projects SET paused = false WHERE tenant_id = $1 AND paused", [tx.tenantId]);
-  return "reopened";
+  return rows.length === 1 ? "reopened" : "too_late";
 }
 
-// The purge, once purge_after has passed. Copies the records Supahound keeps (decision 037) onto
-// the closure row, then deletes the tenant row: every other row of the tenant goes with it through
-// the foreign keys (ON DELETE CASCADE from tenants, connections and projects). Returns false, and
-// changes nothing, when no purge is due.
-export async function purgeTenant(tx: TenantTx, now: Date): Promise<boolean> {
-  const kept = await tx.query(
-    `UPDATE supahound.account_closures c SET
-       purged_at = $2,
-       stripe_customer_id = b.stripe_customer_id,
-       subscription_id = b.subscription_id,
-       terms_version = b.terms_version,
-       terms_accepted_at = b.terms_accepted_at,
-       card_verified_at = b.card_verified_at,
-       scan_consents = COALESCE((
-         SELECT jsonb_agg(jsonb_build_object(
-                  'domain', d.apex, 'tos_version', a.tos_version, 'email', a.email,
-                  'ip', host(a.ip), 'accepted_at', a.accepted_at) ORDER BY a.accepted_at)
-         FROM supahound.scan_authorizations a
-         JOIN supahound.scan_domains d ON d.tenant_id = a.tenant_id AND d.id = a.domain_id
-         WHERE a.tenant_id = $1), '[]'::jsonb)
-     FROM (SELECT $1::uuid AS tenant_id) t
-     LEFT JOIN supahound.billing_accounts b ON b.tenant_id = t.tenant_id
-     WHERE c.tenant_id = t.tenant_id AND c.tenant_id = $1 AND c.purged_at IS NULL AND c.purge_after <= $2
-     RETURNING c.tenant_id`,
+// While the workspace pays, the purge waits: it moves to 30 days after today, so it runs 30 days
+// after the last paid day.
+export async function deferPurge(tx: TenantTx, now: Date): Promise<void> {
+  await tx.query(
+    `UPDATE supahound.account_closures
+     SET purge_after = greatest(purge_after, $2::timestamptz + make_interval(days => ${PURGE_AFTER_DAYS}))
+     WHERE tenant_id = $1 AND purged_at IS NULL`,
     [tx.tenantId, now],
   );
-  if (kept.length !== 1) return false;
-  await tx.query("DELETE FROM supahound.tenants WHERE id = $1", [tx.tenantId]);
-  return true;
 }
 
-// Deletes the kept records KEEP_RECORDS_YEARS after the purge. RLS allows this delete only then.
-export async function expireKeptRecords(tx: TenantTx, now: Date): Promise<boolean> {
-  const rows = await tx.query(
-    `DELETE FROM supahound.account_closures
-     WHERE tenant_id = $1 AND purged_at < $2::timestamptz - make_interval(years => ${KEEP_RECORDS_YEARS})
+// The purge (decision 037): deletes the workspace's logs and history, and never its record. The
+// caller has checked, in this transaction, that the workspace does not pay. Returns false, and
+// changes nothing, when no purge is due.
+//
+// Deleted: Supabase connections (sealed tokens) and through them every project with its incidents,
+// findings, poll runs, service-key networks, usage, project roles and invites; OAuth states; scans
+// with their findings and jobs.
+// Kept: the tenants row, memberships (members still open the closed page), billing_accounts and
+// stripe_events (the payment history), audit_log (its rows lose their project link, decision 022),
+// scan domains and authorizations (the consent record), and the closure row.
+export async function purgeHistory(tx: TenantTx, now: Date): Promise<boolean> {
+  const due = await tx.query(
+    `UPDATE supahound.account_closures SET purged_at = $2
+     WHERE tenant_id = $1 AND purged_at IS NULL AND purge_after <= $2
      RETURNING tenant_id`,
     [tx.tenantId, now],
   );
-  return rows.length === 1;
-}
-
-export interface KeptRecord {
-  purgedAt: Date | null;
-  stripeCustomerId: string | null;
-  subscriptionId: string | null;
-  termsVersion: string | null;
-  termsAcceptedAt: Date | null;
-  cardVerifiedAt: Date | null;
-  scanConsents: unknown[];
-}
-
-// What the purge kept, for tests and support.
-export async function keptRecord(tx: TenantTx): Promise<KeptRecord | null> {
-  const [r] = await tx.query<{
-    purged_at: Date | null; stripe_customer_id: string | null; subscription_id: string | null; terms_version: string | null;
-    terms_accepted_at: Date | null; card_verified_at: Date | null; scan_consents: unknown[];
-  }>(
-    `SELECT purged_at, stripe_customer_id, subscription_id, terms_version, terms_accepted_at, card_verified_at, scan_consents
-     FROM supahound.account_closures WHERE tenant_id = $1`,
-    [tx.tenantId],
-  );
-  if (!r) return null;
-  return {
-    purgedAt: r.purged_at, stripeCustomerId: r.stripe_customer_id, subscriptionId: r.subscription_id,
-    termsVersion: r.terms_version, termsAcceptedAt: r.terms_accepted_at, cardVerifiedAt: r.card_verified_at,
-    scanConsents: r.scan_consents,
-  };
+  if (due.length !== 1) return false;
+  await tx.query("DELETE FROM supahound.connections WHERE tenant_id = $1", [tx.tenantId]);
+  // Projects always hang off a connection; this catches nothing today and anything added later.
+  await tx.query("DELETE FROM supahound.projects WHERE tenant_id = $1", [tx.tenantId]);
+  await tx.query("DELETE FROM supahound.oauth_states WHERE tenant_id = $1", [tx.tenantId]);
+  await tx.query("DELETE FROM supahound.scans WHERE tenant_id = $1", [tx.tenantId]);
+  return true;
 }

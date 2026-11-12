@@ -38,7 +38,7 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
       return { id: c.id };
     },
 
-    async createVerificationCheckout({ tenant, customerId, successUrl, cancelUrl }) {
+    async createVerificationCheckout({ tenant, customerId, successUrl, cancelUrl, trial }) {
       const s = await stripe.checkout.sessions.create({
         mode: "payment",
         customer: customerId,
@@ -59,8 +59,8 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
           description: "Supahound card check. This hold is released at once and never charged.",
           metadata: { tenant_id: tenant, purpose: PURPOSE },
         },
-        metadata: { tenant_id: tenant, purpose: PURPOSE },
-        custom_text: { submit: { message: termsText() } },
+        metadata: { tenant_id: tenant, purpose: PURPOSE, trial: trial ? "yes" : "no" },
+        custom_text: { submit: { message: termsText(trial) } },
         success_url: successUrl,
         cancel_url: cancelUrl,
       });
@@ -88,14 +88,13 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
       return live ? subscriptionFromStripe(asObj(live), prices) : null;
     },
 
-    async createTrialSubscription({ tenant, customerId, seats, paymentMethodId, cardVerifiedAt, idempotencyKey }) {
+    async createTrialSubscription({ tenant, customerId, seats, paymentMethodId, cardVerifiedAt, idempotencyKey, trial }) {
       const s = await stripe.subscriptions.create({
         customer: customerId,
         // Both tiers are always items, so a project changing tier only changes quantities.
         items: [{ price: prices.starter, quantity: seats.starter }, { price: prices.pro, quantity: seats.pro }],
-        trial_period_days: TRIAL_DAYS,
+        ...(trial ? { trial_period_days: TRIAL_DAYS, trial_settings: { end_behavior: { missing_payment_method: "cancel" as const } } } : {}),
         default_payment_method: paymentMethodId,
-        trial_settings: { end_behavior: { missing_payment_method: "cancel" } },
         payment_settings: { save_default_payment_method: "on_subscription" },
         metadata: { tenant_id: tenant, card_verified_at: cardVerifiedAt.toISOString() },
       }, { idempotencyKey });
@@ -118,16 +117,8 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
       });
     },
 
-    async cancelSubscription(id) {
-      try {
-        const s = await stripe.subscriptions.cancel(id, { prorate: false, invoice_now: false });
-        return subscriptionFromStripe(asObj(s), prices);
-      } catch (err) {
-        // Already canceled (a retry): read it back. Anything else is a real failure.
-        const current = await stripe.subscriptions.retrieve(id).catch(() => null);
-        if (current && current.status === "canceled") return subscriptionFromStripe(asObj(current), prices);
-        throw err;
-      }
+    async setCancelAtPeriodEnd(id, cancel) {
+      return subscriptionFromStripe(asObj(await stripe.subscriptions.update(id, { cancel_at_period_end: cancel })), prices);
     },
 
     async portalUrl(customerId, returnUrl) {
