@@ -95,9 +95,11 @@ test.describe("UAT: project navigation", () => {
     await expect(page.getByRole("button", { name: "Send invite" })).toBeVisible();
     await expect(nav(page).getByRole("link", { name: "People" })).not.toContainText("Soon");
 
+    // Security scan shipped with issue #100 (scanDomains.uat.spec.ts covers it in full).
     await page.goto(`${base}/findings`);
-    await expect(page.getByRole("main")).toContainText("Security scan findingsComing soon");
-    await expect(nav(page).getByRole("link", { name: "Security scan" })).toContainText("Soon");
+    await expect(page.getByRole("heading", { name: "Security scan", exact: true })).toBeVisible();
+    await expect(page.getByRole("main")).toContainText("No domain is linked");
+    await expect(nav(page).getByRole("link", { name: "Security scan" })).not.toContainText("Soon");
   });
 
   test("UAT-W21 a project ID from another workspace is a 404, and so is a made-up one", async ({ page, browser }) => {

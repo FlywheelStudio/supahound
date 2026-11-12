@@ -19,13 +19,15 @@ export const ROLE_HELP: Record<ProjectRole, string> = {
 
 // The role matrix (decision 036). Workspace-level actions (connect Supabase, add projects,
 // billing) keep the workspace role and are not here.
-export type ProjectAction = "view" | "edit_settings" | "manage_people" | "manage_owners";
+export type ProjectAction = "view" | "edit_settings" | "manage_people" | "manage_owners" | "link_domains";
 
 const MATRIX: Record<ProjectAction, readonly ProjectRole[]> = {
   view: ["owner", "admin", "editor", "viewer"],
   edit_settings: ["owner", "admin", "editor"],
   manage_people: ["owner", "admin"],
   manage_owners: ["owner"],
+  // Attach or detach a verified scan domain (issue #100, decision 040).
+  link_domains: ["owner", "admin"],
 };
 
 export function can(role: ProjectRole | null, action: ProjectAction): boolean {

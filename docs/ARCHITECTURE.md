@@ -149,6 +149,8 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `oauth_states` | Hashed OAuth state + PKCE verifier, 10-minute TTL, single use |
 | `posture_scans` | One per project: Scan now request, last attempt, status and time per source (decision 038) |
 | `posture_findings` | Latest posture findings per source: check, severity, object, structured evidence |
+| `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
+| `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
 | `audit_log` | Every query and model call, append-only |
 | `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |
 

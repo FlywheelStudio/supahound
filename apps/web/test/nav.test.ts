@@ -35,9 +35,9 @@ describe("project navigation (issue #98)", () => {
 
   it("badges only the placeholder pages as Soon", () => {
     const soon = projectNav(T, P, "dashboard").flatMap((g) => g.items).filter((i) => i.soon).map((i) => i.label);
-    // People shipped with issue #24.
-    expect(soon).toEqual(["Security scan"]);
-    expect([...SOON].sort()).toEqual(["findings"]);
+    // People shipped with issue #24, Security scan with issue #100.
+    expect(soon).toEqual([]);
+    expect([...SOON]).toEqual([]);
   });
 
   it("shows workspace billing only when billing is on", () => {
