@@ -141,11 +141,11 @@ export function actorAlias(actor: string): string {
   return `User ${fingerprint(actor).slice(0, 8)}`;
 }
 
-function detectorLabel(d: string): string {
+export function detectorLabel(d: string): string {
   return DETECTOR_LABEL[d as Finding["detector"]] ?? cleanText(d.replace(/_/g, " "), 60);
 }
 
-function signalLabel(s: string): string {
+export function signalLabel(s: string): string {
   return SIGNAL_LABEL[s] ?? cleanText(s.replace(/_/g, " "), 60);
 }
 
