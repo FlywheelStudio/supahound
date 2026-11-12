@@ -250,6 +250,21 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       await expect(withPaidTenantForUser(db.app, "stripe", owner, t, async () => undefined)).rejects.toBeInstanceOf(PaymentRequiredError);
     });
 
+    it("starts no trial for a checkout begun before the workspace closed, and still releases the hold (decision 037)", async () => {
+      const t = await workspace("Closed mid-checkout");
+      const session = await checkout(t);
+      await withTenant(db.app, t, (tx) => tx.query(
+        "INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, purge_after) VALUES ($1, now(), $2, now() + interval '30 days')",
+        [t, owner],
+      ));
+      stripe.pay(session, GOOD);
+      const creates = stripe.creates.length;
+      expect((await completeVerification(deps, session, t)).result).toBe("ignored");
+      expect(stripe.creates.length).toBe(creates);
+      expect(stripe.sessions.get(session)!.hold!.releasable).toBe(false);
+      expect((await withTenant(db.app, t, getBilling)).subscriptionId).toBeNull();
+    });
+
     it("accepts a CVC the issuer did not check", async () => {
       const t = await workspace("CVC unavailable");
       const session = await checkout(t);
