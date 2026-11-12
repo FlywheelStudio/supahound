@@ -17,6 +17,7 @@
     "discover-keys": "pnpm --filter @supahound/core discover-keys",
     "master-key": "pnpm --silent --filter @supahound/core master-key",
     "print-sql": "pnpm --silent --filter @supahound/core print-sql",
+    "subprocessor-notice": "pnpm --silent --filter @supahound/core subprocessor-notice",
     "e2e": "pnpm --filter @supahound/web e2e"
   },
   "devDependencies": {

@@ -20,12 +20,16 @@ describe("web app lint guards", () => {
     "apps/web/app/w/[tenantId]/projects/actions.ts",
     "apps/web/app/api/supabase/callback/route.ts",
     "apps/web/lib/picker.ts",
+    // A project's settings are gated; only the workspace settings page is not (decision 037).
+    "apps/web/app/w/[tenantId]/p/[projectId]/settings/page.tsx",
   ])("blocks withTenantForUser in %s", async (file) => {
     expect(await errors(UNGATED, file, "withPaidTenantForUser")).toBeGreaterThan(0);
   });
 
-  it("allows withTenantForUser in the billing routes only", async () => {
+  it("allows withTenantForUser in the billing and data-controls routes only", async () => {
     expect(await errors(UNGATED, "apps/web/app/w/[tenantId]/billing/page.tsx", "withPaidTenantForUser")).toBe(0);
+    expect(await errors(UNGATED, "apps/web/app/w/[tenantId]/settings/actions.ts", "withPaidTenantForUser")).toBe(0);
+    expect(await errors(UNGATED, "apps/web/app/w/[tenantId]/closed/page.tsx", "withPaidTenantForUser")).toBe(0);
     expect(await errors(UNGATED, "apps/web/app/w/[tenantId]/billing/return/route.ts", "withPaidTenantForUser")).toBe(0);
     expect(await errors(UNGATED, "packages/core/src/billing/flow.ts", "withPaidTenantForUser")).toBe(0);
   });

@@ -35,6 +35,9 @@ export function sessionFromStripe(s: Obj): VerificationSession {
     status: status === "complete" || status === "expired" ? status : "open",
     tenant: meta(s, "purpose") === PURPOSE ? meta(s, "tenant_id") : null,
     customerId: idOf(s.customer),
+    // Set by our server when it created the session (decision 037). Missing (a session from before
+    // this change) means the trial rule of that time: allowed.
+    trialAllowed: meta(s, "trial") !== "no",
     hold: pi
       ? {
           paymentIntentId: str(pi.id) ?? "",
@@ -110,11 +113,16 @@ export function billingEventFromStripe(e: Obj): BillingEvent {
 const millions = (n: number) => `${n / 1_000_000} million`;
 
 // The billing terms shown on our page and next to Stripe's pay button (decision 028, point 6).
-export function termsText(): string {
-  return `Free for ${TRIAL_DAYS} days. We place a $1 hold on your card to confirm it with your bank, and release it at once. ` +
-    `After the trial, each watched project costs ${PRICE_LABEL.starter} per month, or ${PRICE_LABEL.pro} per month if it sent more than ` +
+// trial false: the workspace or its owner already had the free trial (decision 037).
+export function termsText(trial = true): string {
+  const start = trial
+    ? `Free for ${TRIAL_DAYS} days. `
+    : "No free trial: this workspace or its owner already had one, so the first charge is today. ";
+  const end = trial ? "Cancel any time from Billing; cancel before the trial ends and you pay nothing." : "Cancel any time from Billing.";
+  return `${start}We place a $1 hold on your card to confirm it with your bank, and release it at once. ` +
+    `${trial ? "After the trial, each" : "Each"} watched project costs ${PRICE_LABEL.starter} per month, or ${PRICE_LABEL.pro} per month if it sent more than ` +
     `${millions(PRO_FROM_REQUESTS)} requests in the last ${USAGE_WINDOW_DAYS} days (you pay for at least one project). ` +
     `A project's price follows its traffic and changes at the next monthly charge. Above ${millions(ENTERPRISE_FROM_REQUESTS)} requests ` +
     `a project stays at ${PRICE_LABEL.pro} and we contact you about Enterprise. ` +
-    `Cancel any time from Billing; cancel before the trial ends and you pay nothing.`;
+    end;
 }

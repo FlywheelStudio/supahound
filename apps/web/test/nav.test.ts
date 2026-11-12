@@ -41,8 +41,9 @@ describe("project navigation (issue #98)", () => {
   });
 
   it("shows workspace billing only when billing is on", () => {
-    expect(workspaceNav(T, "overview", true).items.map((i) => i.label)).toEqual(["Overview", "Projects", "Billing"]);
-    expect(workspaceNav(T, "overview", false).items.map((i) => i.label)).toEqual(["Overview", "Projects"]);
+    expect(workspaceNav(T, "overview", true).items.map((i) => i.label)).toEqual(["Overview", "Projects", "Billing", "Settings"]);
+    expect(workspaceNav(T, "overview", false).items.map((i) => i.label)).toEqual(["Overview", "Projects", "Settings"]);
+    expect(workspaceNav(T, "settings", true).items.find((i) => i.current)?.href).toBe(`/w/${T}/settings`);
     expect(workspaceNav(T, null, true).items.some((i) => i.current)).toBe(false);
     expect(workspacePath(T)).toBe(`/w/${T}`);
     expect(workspacePath(T, "billing")).toBe(`/w/${T}/billing`);

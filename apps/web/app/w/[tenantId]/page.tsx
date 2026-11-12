@@ -1,5 +1,6 @@
 import { needsEnterprise, PRICE_LABEL, seatsFor } from "@supahound/core/billing/policy";
-import { getBilling, projectTiers } from "@supahound/core/db/billing";
+import { billedTiers, getBilling, projectTiers } from "@supahound/core/db/billing";
+import { getClosure } from "@supahound/core/db/closure";
 import { postureSummaries } from "@supahound/core/db/posture";
 import { countConnections, listOpenIncidents, listProjects, recordMemberEmail } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
@@ -20,6 +21,7 @@ import { startConnect } from "./actions";
 const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   welcome: { tone: "ok", text: "Card confirmed and the hold released. Your 7-day trial has started. Next, connect Supabase." },
   connected: { tone: "ok", text: "Supabase connected. Next, choose the projects to watch." },
+  reconnected: { tone: "ok", text: "Supabase reconnected. Its projects and their history are back, and polling has started again." },
   connect: { tone: "error", text: "Connecting Supabase failed or the link expired. Try again." },
   consent: { tone: "error", text: "Supabase access was not granted." },
   role: { tone: "error", text: "Only workspace owners and admins can connect Supabase." },
@@ -55,11 +57,12 @@ export default async function Workspace({
       posture: await postureSummaries(tx),
       incidents: await listOpenIncidents(tx, 20),
       connections: await countConnections(tx),
+      closure: await getClosure(tx),
     })).then(async (d) => {
       // The picker syncs seats; this catches a sync that failed after the picker committed. Only
       // workspace owners and admins see every project (decision 036), so only they can spot drift.
       if (d.role === "member") return d;
-      const want = seatsFor(d.tiers.map((t) => t.tier));
+      const want = seatsFor(billedTiers(d.tiers));
       if (d.billing.seats && (d.billing.seats.starter !== want.starter || d.billing.seats.pro !== want.pro)) {
         await syncSeatsAfterChange(pool, tenant, false);
       }
@@ -72,7 +75,10 @@ export default async function Workspace({
   });
 
   const query = await searchParams;
-  const notice = query.welcome ? NOTICES.welcome : query.connected ? NOTICES.connected : query.error ? NOTICES[query.error] : undefined;
+  const welcome = data.billing.status === "trialing"
+    ? NOTICES.welcome
+    : { tone: "ok" as const, text: "Card confirmed and the hold released. Your subscription is active. Next, connect Supabase." };
+  const notice = query.welcome ? welcome : query.connected ? NOTICES.connected : query.reconnected ? NOTICES.reconnected : query.error ? NOTICES[query.error] : undefined;
   const steps = onboardingSteps({ hasWorkspace: true, hasCard: mode() === "off" ? null : true, connections: data.connections, projects: data.projects.length });
   const setupLeft = currentStep(steps);
 
@@ -84,6 +90,12 @@ export default async function Workspace({
         <p role="alert" className="mb-6 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
           Your last payment failed. Stripe will retry it. Update your card in{" "}
           <Link href={`/w/${tenant}/billing`} className="underline">Billing</Link> to keep watching your projects.
+        </p>
+      )}
+      {data.closure && (
+        <p role="alert" className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          This workspace closes on {data.closure.accessEndsAt.toISOString().slice(0, 10)}.{" "}
+          <Link href={`/w/${tenant}/settings`} className="underline">Workspace settings</Link>
         </p>
       )}
       {data.billing.status === "trialing" && data.billing.trialEnd && (
@@ -172,7 +184,7 @@ export default async function Workspace({
                         const usage = t.requests30d === null ? "usage counted daily" : `${t.requests30d.toLocaleString("en-US")} requests in 30 days`;
                         return `${t.tier === "pro" ? "Pro" : "Starter"} ${PRICE_LABEL[t.tier]}/mo · ${usage} · `;
                       })()}
-                      {p.paused ? "paused" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
+                      {p.paused ? "Supabase disconnected" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
                       {" · "}{p.openIncidents} open
                     </span>
                   </div>

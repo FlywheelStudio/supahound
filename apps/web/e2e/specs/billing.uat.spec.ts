@@ -144,7 +144,7 @@ test.describe("UAT: a validated card before any use", () => {
     expect(r.status).toBe(400);
   });
 
-  test("UAT-B10 a canceled subscription closes the workspace again", async ({ page }) => {
+  test("UAT-B10 a canceled subscription closes the workspace again, and the next card gets no second trial", async ({ page }) => {
     const tenant = await newWorkspace(page, "b10");
     await toCheckout(page);
     await page.getByRole("link", { name: "Pay with a good card", exact: true }).click();
@@ -154,7 +154,8 @@ test.describe("UAT: a validated card before any use", () => {
     expect(res.status).toBe(200);
     await page.goto(`/w/${tenant}`);
     await expect(page).toHaveURL(new RegExp(`/w/${tenant}/billing$`));
-    await expect(page.getByRole("heading", { name: "Add a card to start your 7-day free trial" })).toBeVisible();
+    // Decision 037: one free trial per workspace, ever.
+    await expect(page.getByRole("heading", { name: "Add a card to start your subscription" })).toBeVisible();
   });
 
   test("UAT-B11 a member cannot add the card, and is told to ask an owner", async ({ page, browser }) => {

@@ -23,8 +23,9 @@ import type { SourceStatus } from "../posture/types.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
 import type { ProjectScope } from "../tenancy/scope.js";
+import { markRevoked, sendDisconnectEmails } from "../datacontrols/flow.js";
 import { accessTokenFor } from "../supabase/credentials.js";
-import { OAuthError, type OAuthClient } from "../supabase/oauth.js";
+import { isRevokedGrant, OAuthError, type OAuthClient } from "../supabase/oauth.js";
 import type { TokenVault } from "../vault/vault.js";
 
 // One poll of one project, entirely inside one tenant's scope. Transactions stay short and never
@@ -291,6 +292,18 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   try {
     token = await accessTokenFor(deps.app, deps.vault, scope.tenantId, project.connectionId, deps.oauth ?? null, now);
   } catch (err) {
+    // The grant was revoked at Supabase (decision 037): stop polling the connection, empty its
+    // token, and tell the affected members once. Transient failures stay "unable to assess".
+    if (isRevokedGrant(err)) {
+      const notice = await withTenant(deps.app, scope.tenantId, async (tx) => {
+        await repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: "grant_revoked" });
+        return markRevoked(tx, project.connectionId, now);
+      });
+      if (notice && deps.alerts) {
+        await sendDisconnectEmails(deps.app, scope.tenantId, notice, "revoked", null, deps.alerts);
+      }
+      return { status: "unable_to_assess", errorCode: "grant_revoked" };
+    }
     const code = err instanceof OAuthError ? errorCode(err) : "token_unavailable";
     await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
     return { status: "unable_to_assess", errorCode: code };

@@ -9,6 +9,7 @@
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
+| [features/data-controls.md](features/data-controls.md) | Data controls (#43): "paying" keeps all data; retention job; close at the period end, purge keeps the record; disconnect and revoked-grant emails; one trial ever; subprocessor notice CLI; tests |
 | [features/posture-scan.md](features/posture-scan.md) | Posture scan (#11): RLS coverage, open policies, views, Security Advisor; first poll, daily and Scan now; severity raise; fix prompts; tests |
 | [features/project-people.md](features/project-people.md) | People and roles per project (#24): Owner/Admin/Editor/Viewer, RLS by project, email invites, the role matrix, tests |
 | [features/incident-history.md](features/incident-history.md) | Incident history (#44): 30-day list per project with keyset pages, incident detail, 404 rules, tests |
@@ -58,5 +59,6 @@
 | [decisions/033-people-per-project.md](decisions/033-people-per-project.md) | Per-project roles Owner/Admin/Editor/Viewer with email invites, enforced by RLS (built, #24; how: 036) |
 | [decisions/034-scan-domains-per-project.md](decisions/034-scan-domains-per-project.md) | A verified scan domain belongs to one project; the project's Security scan tab lists them (not built, #100) |
 | [decisions/036-project-roles-and-invites.md](decisions/036-project-roles-and-invites.md) | Project roles: workspace owners/admins implicit on every project, RLS by project, the role matrix, single-use email-bound invites, alerts to the project's people (builds 033, amends 030) |
+| [decisions/037-data-controls.md](decisions/037-data-controls.md) | Data controls with Erik's answers: nothing deleted while paying; close cancels at the period end and never deletes the record or payment history; disconnect keeps history 30 days and emails; revoked grant detected from `invalid_grant`; one free trial per workspace and per owner; notifier role |
 | [decisions/038-posture-scan.md](decisions/038-posture-scan.md) | Posture scan in the poll: catalog SQL plus the Security Advisor, `public` only, severities by grants, structured evidence only, per-source results, raise on cross-tenant findings, Scan now for editors and up |
 | [decisions/035-incident-history-window.md](decisions/035-incident-history-window.md) | Incident history: last seen in 30 days or still open; keyset pages; actor alias; the suggested fix is the explainer's next steps, no generated SQL |

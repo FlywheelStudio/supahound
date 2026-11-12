@@ -27,7 +27,7 @@ class FakeStripe implements StripeGateway {
   customers: { id: string; tenant: string; key: string }[] = [];
   sessions = new Map<string, VerificationSession>();
   subscriptions = new Map<string, Sub>();
-  creates: { key: string; seats: Seats }[] = [];
+  creates: { key: string; seats: Seats; trial: boolean }[] = [];
   seatUpdates: { id: string; seats: Seats; prorate: boolean }[] = [];
   private byKey = new Map<string, string>();
   private n = 0;
@@ -40,9 +40,9 @@ class FakeStripe implements StripeGateway {
     this.customers.push(c);
     return { id: c.id };
   }
-  async createVerificationCheckout(i: { tenant: TenantId; customerId: string }) {
+  async createVerificationCheckout(i: { tenant: TenantId; customerId: string; trial: boolean }) {
     const id = this.id("cs");
-    this.sessions.set(id, { id, status: "open", tenant: i.tenant, customerId: i.customerId, hold: null });
+    this.sessions.set(id, { id, status: "open", tenant: i.tenant, customerId: i.customerId, trialAllowed: i.trial, hold: null });
     return { id, url: `https://checkout.stripe.test/${id}` };
   }
   // What Stripe does when the customer pays on the Checkout page.
@@ -65,14 +65,15 @@ class FakeStripe implements StripeGateway {
   async liveSubscription(customerId: string) {
     return [...this.subscriptions.values()].find((s) => s.customerId === customerId && s.status !== "canceled") ?? null;
   }
-  async createTrialSubscription(i: { tenant: TenantId; customerId: string; seats: Seats; paymentMethodId: string; cardVerifiedAt: Date; idempotencyKey: string }) {
-    this.creates.push({ key: i.idempotencyKey, seats: i.seats });
+  async createTrialSubscription(i: { tenant: TenantId; customerId: string; seats: Seats; paymentMethodId: string; cardVerifiedAt: Date; idempotencyKey: string; trial: boolean }) {
+    this.creates.push({ key: i.idempotencyKey, seats: i.seats, trial: i.trial });
     // Like Stripe: the same idempotency key returns the first result.
     const replay = this.byKey.get(i.idempotencyKey);
     if (replay) return { ...this.subscriptions.get(replay)! };
     const sub: Sub = {
-      id: this.id("sub"), customerId: i.customerId, status: "trialing", seats: { ...i.seats },
-      trialEnd: new Date(Date.now() + 7 * 86_400_000), currentPeriodEnd: null, cancelAtPeriodEnd: false,
+      id: this.id("sub"), customerId: i.customerId, status: i.trial ? "trialing" : "active", seats: { ...i.seats },
+      trialEnd: i.trial ? new Date(Date.now() + 7 * 86_400_000) : null,
+      currentPeriodEnd: i.trial ? null : new Date(Date.now() + 30 * 86_400_000), cancelAtPeriodEnd: false,
       tenant: i.tenant, cardVerifiedAt: i.cardVerifiedAt,
     };
     this.subscriptions.set(sub.id, sub);
@@ -91,6 +92,12 @@ class FakeStripe implements StripeGateway {
   async portalUrl() {
     return "https://billing.stripe.test/portal";
   }
+  async setCancelAtPeriodEnd(id: string, cancel: boolean) {
+    const s = this.subscriptions.get(id);
+    if (!s) throw new Error("no such subscription");
+    s.cancelAtPeriodEnd = cancel;
+    return { ...s };
+  }
 }
 
 describe.skipIf(pgInfo === null)("billing with a validated card", () => {
@@ -106,8 +113,14 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
     deps = { pool: db.app, stripe, appUrl: "https://app.supahound.test", now: () => new Date() };
   });
 
+  // `owner` adds the card in every workspace here. Decision 037 refuses a second trial to a user who
+  // OWNS another workspace that had one, so each workspace gets its own creator-owner and `owner`
+  // joins as admin (admins may add the card too). The per-owner rule has its own test below.
   async function workspace(name: string, user: UserId = owner): Promise<TenantId> {
-    return createWorkspace(db.app, user, name);
+    if (user !== owner) return createWorkspace(db.app, user, name);
+    const t = await createWorkspace(db.app, verifiedUserId(randomUUID()), name);
+    await db.admin.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')", [t, owner]);
+    return t;
   }
 
   async function checkout(tenant: TenantId): Promise<string> {
@@ -244,6 +257,72 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       await expect(withPaidTenantForUser(db.app, "stripe", owner, t, async () => undefined)).rejects.toBeInstanceOf(PaymentRequiredError);
     });
 
+    it("starts no trial for a checkout begun before the workspace closed, and still releases the hold (decision 037)", async () => {
+      const t = await workspace("Closed mid-checkout");
+      const session = await checkout(t);
+      await withTenant(db.app, t, (tx) => tx.query(
+        "INSERT INTO supahound.account_closures (tenant_id, closed_at, closed_by, access_ends_at, purge_after) VALUES ($1, now(), $2, now(), now() + interval '30 days')",
+        [t, owner],
+      ));
+      stripe.pay(session, GOOD);
+      const creates = stripe.creates.length;
+      expect((await completeVerification(deps, session, t)).result).toBe("ignored");
+      expect(stripe.creates.length).toBe(creates);
+      expect(stripe.sessions.get(session)!.hold!.releasable).toBe(false);
+      expect((await withTenant(db.app, t, getBilling)).subscriptionId).toBeNull();
+    });
+
+    it("gives one free trial per workspace, ever: a second card starts a paid subscription (decision 037)", async () => {
+      const t = await paidWorkspace("Second card");
+      const sub = await subOf(t);
+      stripe.subscriptions.get(sub)!.status = "canceled";
+      await refreshSubscription(deps, sub);
+      const session = await checkout(t);
+      expect(stripe.sessions.get(session)!.trialAllowed).toBe(false);
+      stripe.pay(session, GOOD);
+      expect((await completeVerification(deps, session, t)).result).toBe("subscribed");
+      expect(stripe.creates.at(-1)!.trial).toBe(false);
+      expect((await withTenant(db.app, t, getBilling)).status).toBe("active");
+    });
+
+    it("gives one trial even when two checkouts start before either finishes (decision 037)", async () => {
+      const t = await workspace("Two tabs");
+      const first = await checkout(t);
+      const second = await checkout(t);
+      expect([stripe.sessions.get(first)!.trialAllowed, stripe.sessions.get(second)!.trialAllowed]).toEqual([true, true]);
+      stripe.pay(first, GOOD);
+      await completeVerification(deps, first, t);
+      expect(stripe.creates.at(-1)!.trial).toBe(true);
+      // The first subscription ends; the second tab's checkout still says "trial", the workspace does not.
+      stripe.subscriptions.get(await subOf(t))!.status = "canceled";
+      await refreshSubscription(deps, await subOf(t));
+      stripe.pay(second, GOOD);
+      expect((await completeVerification(deps, second, t)).result).toBe("subscribed");
+      expect(stripe.creates.at(-1)!.trial).toBe(false);
+    });
+
+    it("refuses a trial to a user who owns another workspace that had one, but not to a new owner (decision 037)", async () => {
+      const repeat = verifiedUserId(randomUUID());
+      const first = await createWorkspace(db.app, repeat, "First owned");
+      const s1 = (await startCheckout(deps, { user: repeat, email: null, tenant: first, acceptedTerms: true })).split("/").at(-1)!;
+      stripe.pay(s1, GOOD);
+      await completeVerification(deps, s1, first);
+      expect(stripe.creates.at(-1)!.trial).toBe(true);
+
+      const second = await createWorkspace(db.app, repeat, "Second owned");
+      const s2 = (await startCheckout(deps, { user: repeat, email: null, tenant: second, acceptedTerms: true })).split("/").at(-1)!;
+      expect(stripe.sessions.get(s2)!.trialAllowed).toBe(false);
+      stripe.pay(s2, GOOD);
+      await completeVerification(deps, s2, second);
+      expect(stripe.creates.at(-1)!.trial).toBe(false);
+      // A user who never owned a trialed workspace still gets one, even as another workspace's admin.
+      const fresh = verifiedUserId(randomUUID());
+      const third = await createWorkspace(db.app, fresh, "Fresh owner");
+      await db.admin.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')", [first, fresh]);
+      const s3 = (await startCheckout(deps, { user: fresh, email: null, tenant: third, acceptedTerms: true })).split("/").at(-1)!;
+      expect(stripe.sessions.get(s3)!.trialAllowed).toBe(true);
+    });
+
     it("accepts a CVC the issuer did not check", async () => {
       const t = await workspace("CVC unavailable");
       const session = await checkout(t);
@@ -311,7 +390,7 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       stripe.pay(session, GOOD);
       const customer = stripe.customers.find((c) => c.tenant === t)!.id;
       const sub = await stripe.createTrialSubscription({
-        tenant: t, customerId: customer, seats: { starter: 1, pro: 0 }, paymentMethodId: "pm_x", cardVerifiedAt: new Date(), idempotencyKey: "early",
+        tenant: t, customerId: customer, seats: { starter: 1, pro: 0 }, paymentMethodId: "pm_x", cardVerifiedAt: new Date(), idempotencyKey: "early", trial: true,
       });
       expect(await refreshSubscription(deps, sub.id)).toBe(t);
       expect((await withTenant(db.app, t, getBilling)).status).toBe("trialing");
