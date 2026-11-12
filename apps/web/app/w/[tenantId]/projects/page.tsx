@@ -12,10 +12,13 @@ import { mode, paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
 import { canRemoveProject } from "../../../../lib/people";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { requireUser } from "../../../../lib/supabase";
-import { removeProjectAction, watchProjectsAction } from "./actions";
+import { keepProjectAction, removeProjectAction, watchProjectsAction } from "./actions";
 import { Notice, Shell } from "../../../../components/Shell";
 import { projectPath } from "../../../../lib/nav";
 import { getBilling, projectTiers } from "@supahound/core/db/billing";
+import { removalPreview } from "@supahound/core/db/removal";
+import { projectId as parseProjectId } from "@supahound/core/tenancy/scope";
+import { keepNote, removalPreviewSentence, removalSentence } from "../../../../lib/removal";
 
 const ERRORS: Record<string, string> = {
   none: "Select at least one running project.",
@@ -24,7 +27,7 @@ const ERRORS: Record<string, string> = {
   reconnect: "Supabase refused the request. Reconnect Supabase from the overview, then try again.",
   supabase: "Supabase did not answer. Try again in a minute.",
   mismatch: "The name did not match. Nothing was removed.",
-  missing: "That project is not watched in this workspace.",
+  missing: "That project is not watched in this workspace, or its removal is no longer scheduled.",
   alerts_missing: "That project is not watched in this workspace.",
 };
 
@@ -52,6 +55,15 @@ export default async function Projects({
     notFound();
   }
 
+  const query = await searchParams;
+  let removeId: ReturnType<typeof parseProjectId> | null = null;
+  try {
+    removeId = query.remove ? parseProjectId(query.remove) : null;
+  } catch {
+    removeId = null;
+  }
+  const now = new Date();
+
   // Membership, watched projects and connection tokens in one transaction. Members get no token,
   // so their visit never calls Supabase. The Supabase calls run after the transaction commits.
   const data = await withPool((pool) =>
@@ -71,7 +83,13 @@ export default async function Projects({
           tokens.push({ connectionId: c.id, label: c.label, token });
         }
       }
-      return { role, watched, tiers: await projectTiers(tx), connections: connections.length, tokens, perProject: (await getBilling(tx)).model === "project" };
+      const billing = await getBilling(tx);
+      // Decision 042: the dates a removal would get, shown before the user confirms.
+      const preview = removeId && watched.some((p) => p.id === removeId && !p.removal) ? await removalPreview(tx, removeId, now) : null;
+      return {
+        role, watched, tiers: await projectTiers(tx), connections: connections.length, tokens, preview,
+        perProject: billing.model === "project", billedPerProject: billing.model === "project" && !billing.exempt,
+      };
     }),
   ).catch((err: unknown) => {
     toBillingIfUnpaid(err);
@@ -91,18 +109,20 @@ export default async function Projects({
     }),
   );
 
-  const query = await searchParams;
   const canEdit = data.role !== "member";
-  const watchedRefs = new Set(data.watched.map((p) => p.supabaseRef));
+  // A project whose removal is scheduled can be picked again: that keeps it (decision 042).
+  const watchedRefs = new Set(data.watched.filter((p) => !p.removal).map((p) => p.supabaseRef));
   const mayRemove = (p: ProjectSummary) => canRemoveProject(p.role, data.role);
-  const removing: ProjectSummary | undefined = query.remove ? data.watched.find((p) => p.id === query.remove && mayRemove(p)) : undefined;
+  const removing: ProjectSummary | undefined = query.remove ? data.watched.find((p) => p.id === query.remove && mayRemove(p) && !p.removal) : undefined;
   const notice = query.added
     ? { tone: "ok", text: query.added === "0" ? "Those projects are already watched." : `Watching ${query.added} new project${query.added === "1" ? "" : "s"}. The first poll runs within a few minutes.` }
     : query.removed
-      ? { tone: "ok", text: "Project removed. Its incidents and findings are deleted; its audit log entries are kept." }
-      : query.error && ERRORS[query.error]
-        ? { tone: "error", text: ERRORS[query.error]! }
-        : undefined;
+      ? { tone: "ok", text: "Removal scheduled. The project's dates are below; you can keep it until it is deleted." }
+      : query.kept
+        ? { tone: "ok", text: "Project kept. Its removal is canceled." }
+        : query.error && ERRORS[query.error]
+          ? { tone: "error", text: ERRORS[query.error]! }
+          : undefined;
 
   return (
     <Shell tenant={tenant} role={data.role} projects={data.watched} tiers={data.tiers} billingOn={mode() !== "off"} active={{ kind: "workspace", page: "projects" }}>
@@ -113,11 +133,13 @@ export default async function Projects({
       {removing && (
         <section aria-labelledby="remove-heading" className="mb-10 rounded-md border border-red-300 bg-red-50 p-6">
           <h2 id="remove-heading" className="mb-2 font-semibold text-red-900">Remove {removing.name}?</h2>
+          {data.preview && (
+            <p className="mb-2 text-sm font-medium text-red-900" data-testid="removal-preview">{removalPreviewSentence(data.preview, now)}</p>
+          )}
           <p className="mb-4 text-sm text-red-900">
-            Supahound stops watching this project and permanently deletes its incidents, findings and poll history.
-            You cannot undo this. Audit log entries for the project are kept. To watch it again later, pick it again;
-            history starts from zero.
-            {mode() !== "off" && data.perProject && " Its subscription stops at the end of its paid month: nothing more is charged for it, and nothing is refunded."}
+            On the deletion date Supahound permanently deletes its incidents, findings and poll history. Until then, an
+            Owner or Admin can keep it. Audit log entries for the project are kept.
+            {mode() !== "off" && data.perProject && " Its subscription stops at the end of its paid period: nothing more is charged for it, and nothing is refunded."}
           </p>
           <form action={removeProjectAction} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="tenantId" value={tenant} />
@@ -143,12 +165,27 @@ export default async function Projects({
                 <span>
                   <Link href={projectPath(tenant, p.id)} className="font-medium hover:underline">{p.name}</Link>
                   <span className="ml-2 font-mono text-xs text-slate-500">{p.supabaseRef}</span>
+                  {p.removal && (
+                    <span className="mt-1 block text-sm text-amber-900" data-testid="removal-scheduled">
+                      <strong>Removal scheduled.</strong> {removalSentence(p.removal, now)}
+                      {mayRemove(p) && keepNote(p.removal, now, mode() !== "off" && data.billedPerProject) !== null && (
+                        <> {keepNote(p.removal, now, true)}</>
+                      )}
+                    </span>
+                  )}
                 </span>
                 <span className="flex flex-wrap items-center gap-4">
                   <Link href={projectPath(tenant, p.id, "general")} className="text-sm text-slate-700 hover:text-slate-950">
                     Settings<span className="sr-only"> for {p.name}</span>
                   </Link>
-                  {mayRemove(p) && (
+                  {mayRemove(p) && p.removal && (
+                    <form action={keepProjectAction}>
+                      <input type="hidden" name="tenantId" value={tenant} />
+                      <input type="hidden" name="projectId" value={p.id} />
+                      <button className="text-sm font-medium text-slate-950 underline" aria-label={`Keep ${p.name}`}>Keep project</button>
+                    </form>
+                  )}
+                  {mayRemove(p) && !p.removal && (
                     <Link href={`/w/${tenant}/projects?remove=${p.id}`} className="text-sm text-red-700 hover:text-red-900" aria-label={`Remove ${p.name}`}>
                       Remove
                     </Link>

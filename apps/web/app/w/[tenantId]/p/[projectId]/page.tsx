@@ -11,6 +11,7 @@ import { incidentPath, projectPath, utc } from "../../../../../lib/nav";
 import { ROLE_LABEL } from "../../../../../lib/people";
 import { countsText, postureState, sourceNotes, stateText } from "../../../../../lib/posture";
 import { loadProjectPage } from "../../../../../lib/projectPage";
+import { removalSentence } from "../../../../../lib/removal";
 
 // The project dashboard (issue #98): status, usage and plan, detector coverage, posture (#11),
 // open incidents.
@@ -43,7 +44,9 @@ export default async function ProjectDashboard({
   const billingOn = mode() !== "off";
   const tier = d.tiers.find((t) => t.id === p.id);
   const note = crossTenantNote(p.crossTenant);
-  const status = p.paused ? "Paused" : p.lastRunStatus === "unable_to_assess" ? "Unable to assess" : p.lastRunStatus === "ok" ? "Watching" : p.lastRunStatus === "running" ? "Polling" : "Waiting for first poll";
+  const now = new Date();
+  const stopped = p.removal !== null && p.removal.activeUntil <= now;
+  const status = stopped ? "Stopped (removal scheduled)" : p.paused ? "Paused" : p.lastRunStatus === "unable_to_assess" ? "Unable to assess" : p.lastRunStatus === "ok" ? "Watching" : p.lastRunStatus === "running" ? "Polling" : "Waiting for first poll";
 
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={billingOn} active={{ kind: "project", project: p, page: "dashboard" }}>
@@ -52,6 +55,12 @@ export default async function ProjectDashboard({
         <p className="font-mono text-xs text-slate-500">{p.supabaseRef}</p>
       </header>
       {joined && <Notice tone="ok">You joined {p.name} as {ROLE_LABEL[d.projectRole]}.</Notice>}
+      {p.removal && (
+        <p data-testid="removal-scheduled" className="mb-6 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <strong>Removal scheduled.</strong> {removalSentence(p.removal, now)}{" "}
+          <Link href={projectPath(tenant, p.id, "plan")} className="underline">Plan &amp; billing</Link>
+        </p>
+      )}
 
       <section aria-label="Project status" className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Status" value={status} detail={p.lastPolledAt ? `Last poll ${utc(p.lastPolledAt)}` : undefined} />

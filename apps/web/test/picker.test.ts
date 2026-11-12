@@ -3,7 +3,7 @@ import { ManagementApiError, type SupabaseProject } from "@supahound/core/supaba
 import { OAuthError } from "@supahound/core/supabase/oauth";
 import { connectionId, tenantId } from "@supahound/core/tenancy/scope";
 import { describe, expect, it } from "vitest";
-import { handleWatch, MAX_PICK, removalOutcome, submittedRefs, type WatchDeps } from "../lib/picker";
+import { handleWatch, keepOutcome, MAX_PICK, picksPath, removalOutcome, submittedRefs, type WatchDeps } from "../lib/picker";
 
 const T = tenantId("aaaaaaaa-0000-4000-8000-000000000001");
 const C = connectionId("cccccccc-0000-4000-8000-000000000001");
@@ -121,4 +121,26 @@ describe("removalOutcome", () => {
     ["owner", shop, "", "mismatch"],
     ["admin", shop, "Sho", "mismatch"],
   ] as const)("%s, %j, %j → %s", (role, p, typed, expected) => expect(removalOutcome(role, p, typed)).toBe(expected));
+});
+
+describe("keepOutcome (decision 042)", () => {
+  const removal = { activeUntil: new Date(), deleteAfter: new Date() };
+  it("keeps for the people who may remove, while a removal is scheduled", () => {
+    expect(keepOutcome("owner", { role: "admin", removal })).toBe("kept");
+    expect(keepOutcome("admin", { role: "admin", removal })).toBe("kept");
+    expect(keepOutcome("member", { role: "owner", removal })).toBe("kept");
+  });
+  it.each([
+    ["member", { role: "admin", removal }, "role"],
+    ["member", { role: "editor", removal }, "role"],
+    ["member", { role: "viewer", removal }, "role"],
+    ["member", null, "role"],
+    ["owner", null, "missing"],
+    ["owner", { role: "admin", removal: null }, "missing"],
+  ] as const)("%s, %j → %s", (role, p, expected) => expect(keepOutcome(role, p)).toBe(expected));
+  it("sends the notices to the projects page", () => {
+    const t = "00000000-0000-4000-8000-000000000001" as Parameters<typeof picksPath>[0];
+    expect(picksPath(t, "kept")).toBe(`/w/${t}/projects?kept=1`);
+    expect(picksPath(t, "removed")).toBe(`/w/${t}/projects?removed=1`);
+  });
 });
