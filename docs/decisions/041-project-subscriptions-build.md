@@ -1,7 +1,8 @@
 # 041: How one subscription per project is built, and how seat subscriptions move
 
 Date: 2026-11-12 · Issue #99 · Builds [032](032-subscription-per-project.md); amends
-[028](028-card-validated-trial.md) points 1, 4 and 4a and [037](037-data-controls.md) point 1
+[028](028-card-validated-trial.md) points 1, 4 and 4a, [029](029-staff-billing-exemption.md)
+points 6 and 7, and [037](037-data-controls.md) point 1
 
 ## Context
 
@@ -78,7 +79,10 @@ operator CLI with a dry run. This record fixes the parts those calls leave open.
   recorded email is on `SUPAHOUND_BILLING_EXEMPT_DOMAINS` but whose exemption is not granted yet;
   a closing or closed workspace; no customer; no live seat subscription; a seat subscription
   the owner already set to cancel; any status but `trialing` or `active`; a period end within
-  the hour; a workspace already converted.
+  the hour; a seat subscription with a discount (the coupon would not carry over to the new
+  subscriptions: move it by hand); a seat subscription with no default card (the new ones could
+  not charge); a workspace with no watched project, unless `--include-empty` is passed
+  (converting it ends the minimum charge, which point 4 leaves open); a workspace already converted.
 - **No double charge, no skipped day.** A paid (`active`) seat subscription: each project's new
   subscription starts now with `billing_cycle_anchor` = the seat subscription's period end and
   `proration_behavior: none`: Stripe charges nothing until the anchor, then monthly. A trialing
@@ -96,6 +100,14 @@ operator CLI with a dry run. This record fixes the parts those calls leave open.
 - **Safety.** A dry run is the default and sends no write. `--apply` with a live key needs
   `--confirm-live`. Run it only after the new web Worker and poller are deployed: old code
   would prorate seat changes onto a converted seat subscription.
+
+### The portal and staff workspaces (amends 029 points 6 and 7)
+
+The portal configuration turns subscription cancellation off (point 11 and the alternatives
+below). Decision 029 relies on the portal for staff to cancel a seat subscription left from before
+their exemption. So the rollout changes the portal last, after the conversion. Until then staff
+cancel a leftover seat subscription through the portal button on the "Complimentary" billing page;
+after it, an operator cancels it in the Stripe Dashboard.
 
 ## Alternatives considered
 
@@ -122,8 +134,8 @@ operator CLI with a dry run. This record fixes the parts those calls leave open.
 - Live Stripe needs: the portal configuration without subscription cancellation; dunning set to
   cancel after the last retry; optionally `invoice.payment_action_required` on the webhook. No new
   price, product or secret.
-- Erik's own workspace is staff-exempt (029) and is skipped. Its old trialing seat subscription
-  still charges at its trial end unless he cancels it in the portal (029 point 7).
+- A staff-exempt workspace (029) is skipped. A seat subscription it still has charges at its
+  trial or period end unless its owner cancels it (029 point 7, before the portal change).
 - The poller's daily job now reconciles (a revoked grant's paused projects cancel within a day).
 - A project whose first charge is `incomplete` is in grace but is not polled (the scheduler polls
   `trialing`, `active` and `past_due`).

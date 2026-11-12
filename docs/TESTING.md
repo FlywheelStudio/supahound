@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 794 core (unit + Postgres + detection UAT), 166 web |
-| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 269, within the 794 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 797 core (unit + Postgres + detection UAT), 167 web |
+| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 269, within the 797 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 794 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 797 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 60 |
 
-Totals on `feature/project-subscriptions` (2026-11-12): core 794, web 166, poller 15, E2E 71.
+Totals on `feature/project-subscriptions` (2026-11-12): core 797, web 167, poller 15, E2E 71.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -328,6 +328,9 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | The conversion skips exempt workspaces (#99) | The exempt check removed | 2 tests fail |
 | The conversion skips staff workspaces not yet granted (#99) | `exemptEligible` always false | 1 Postgres test fails |
 | A dry run changes nothing (#99) | `convertSubscriptions` applies without `--apply` | 1 Postgres test fails |
+| The conversion skips a seat subscription with a coupon (#99) | The discount check removed; separately, `subscriptionFromStripe` never sees a discount | 1 unit test fails each |
+| The conversion skips a seat subscription with no card (#99) | The card check removed | 1 unit test fails |
+| The conversion skips an empty workspace unless asked (#99) | The empty-workspace check removed | 1 unit test fails |
 | A repeated conversion keeps what exists (#99) | The planner ignores existing project subscriptions | 1 unit test fails (the fake's 24-hour key memory hides it in Postgres, as Stripe would within a day) |
 | A converted seat subscription is never charged again (#99) | `syncSeats` drops its model check | 1 Postgres test fails |
 | Paying counts project subscriptions (#99) | `payingAccount` ignores the per-project model | 2 tests fail |

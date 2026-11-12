@@ -78,12 +78,24 @@ signed-in user, or a workspace owner or admin). No DELETE grant: the rows are pa
 
 ## Rollout (needs Erik's approval at each step)
 
+0. Independent of this change: a staff owner whose workspace still has a seat subscription opens
+   Billing (the exemption is granted there) and cancels it with the portal button before it charges.
 1. Apply the migration to production (additive; the code before it keeps working).
-2. Stripe live: turn off subscription cancellation in the portal configuration; set dunning to
-   cancel after the last retry; optionally add `invoice.payment_action_required` to the webhook.
-3. Deploy the web Worker and the poller together from this code.
-4. `pnpm convert-subscriptions` dry run with the live key; read every line.
+2. Deploy the web Worker and the poller together from this code.
+3. Rehearse in Stripe test mode: one `--apply` on a test seat subscription, then preview the next
+   invoice of the seat subscription and of each new one: no charge before the anchor, no final
+   seat invoice, pending prorations on the next invoice.
+4. `pnpm convert-subscriptions` dry run with the live key; read every line. A staff workspace must
+   read "skip (staff exemption ...)".
 5. `pnpm convert-subscriptions --apply --confirm-live`; run it again to see "already converted".
+6. Stripe live: turn off subscription cancellation in the portal configuration (last, see decision
+   041 on 029); set dunning to cancel after the last retry; optionally add
+   `invoice.payment_action_required` to the webhook.
+
+Rollback: the migration can stay in place whatever happens (the old code passes on it). The old
+code can be redeployed only until the first per-project workspace exists: its gate blocks status
+`none`, so a new workspace with no project would be locked out. After `--apply`, only a forward fix
+is safe: old code would prorate seat changes onto converted seat subscriptions.
 
 ## Testing
 
@@ -114,4 +126,7 @@ signed-in user, or a workspace owner or admin). No DELETE grant: the rows are pa
 - **The staff exemption is granted on the billing page.** A staff workspace whose owner has not
   opened Billing since the exemption shipped is not exempt yet; the CLI skips it by its owner's
   recorded email. Tested: "skips exempt workspaces and staff workspaces whose exemption is not granted yet".
+- **The conversion refuses what it cannot carry over:** a coupon on the seat subscription, a seat
+  subscription with no card, and (without `--include-empty`) a workspace with no project. Tested in
+  `projects.test.ts` ("skips ...").
 - **`incomplete` is grace at the gate but not polled** (the scheduler polls `trialing`, `active`, `past_due`).
