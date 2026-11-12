@@ -14,6 +14,7 @@
 | [features/data-controls.md](features/data-controls.md) | Data controls (#43): "paying" keeps all data; retention job; close at the period end, purge keeps the record; disconnect and revoked-grant emails; one trial ever; subprocessor notice CLI; tests |
 | [features/posture-scan.md](features/posture-scan.md) | Posture scan (#11): RLS coverage, open policies, views, Security Advisor; first poll, daily and Scan now; severity raise; fix prompts; tests |
 | [features/project-people.md](features/project-people.md) | People and roles per project (#24): Owner/Admin/Editor/Viewer, RLS by project, email invites, the role matrix, tests |
+| [features/web-latency.md](features/web-latency.md) | Web latency: Worker placed next to Postgres, one round trip to open a transaction, pending bar on links, no loading.tsx |
 | [features/incident-history.md](features/incident-history.md) | Incident history (#44): 30-day list per project with keyset pages, incident detail, 404 rules, tests |
 | [features/project-navigation.md](features/project-navigation.md) | Project navigation (#98): project dropdown, project dashboard and settings, the URL holds the project |
 | [features/incident-alert-email.md](features/incident-alert-email.md) | Incident alert email (#16): threshold per project, the incident row as outbox, tests; recipients per project since #24 |
@@ -65,4 +66,5 @@
 | [decisions/038-posture-scan.md](decisions/038-posture-scan.md) | Posture scan in the poll: catalog SQL plus the Security Advisor, `public` only, severities by grants, structured evidence only, per-source results, raise on cross-tenant findings, Scan now for editors and up |
 | [decisions/040-scan-domain-links.md](decisions/040-scan-domain-links.md) | Scan domain links: a bridge table, one project per verified domain, Owners and Admins link, scan data follows the link in RLS, unlinked domains are workspace data, evidence allowlist (builds 034) |
 | [decisions/035-incident-history-window.md](decisions/035-incident-history-window.md) | Incident history: last seen in 30 days or still open; keyset pages; actor alias; the suggested fix is the explainer's next steps, no generated SQL |
+| [decisions/039-web-latency.md](decisions/039-web-latency.md) | Web latency: placement region next to Postgres, `begin()` in one round trip, asymmetric JWT keys, why not loading.tsx |
 | [decisions/041-project-subscriptions-build.md](decisions/041-project-subscriptions-build.md) | How per-project billing is built: billing model column, card check makes no subscription, standing, reconcile, no minimum charge, removal keeps payment history, "paying" per project, conversion with `billing_cycle_anchor` at the seat period end (amends 028, 037) |

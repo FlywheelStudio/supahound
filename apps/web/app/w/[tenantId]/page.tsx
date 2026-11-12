@@ -6,7 +6,7 @@ import { postureSummaries } from "@supahound/core/db/posture";
 import { countConnections, listOpenIncidents, listProjects, recordMemberEmail } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
-import Link from "next/link";
+import Link from "../../../components/NavLink";
 import { notFound } from "next/navigation";
 import { Checklist } from "../../../components/Checklist";
 import { Notice, SeverityBadge, Shell } from "../../../components/Shell";

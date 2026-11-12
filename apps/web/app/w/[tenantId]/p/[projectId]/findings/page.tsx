@@ -1,5 +1,5 @@
 import { MAX_FINDINGS_PER_SCAN, projectScanResults } from "@supahound/core/db/scanDomains";
-import Link from "next/link";
+import Link from "../../../../../../components/NavLink";
 import { SeverityBadge, Shell } from "../../../../../../components/Shell";
 import { mode } from "../../../../../../lib/billing";
 import { loadProjectPage } from "../../../../../../lib/projectPage";

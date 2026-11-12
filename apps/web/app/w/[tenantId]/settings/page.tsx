@@ -6,7 +6,7 @@ import { RETENTION_DAYS } from "@supahound/core/db/retention";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
-import Link from "next/link";
+import Link from "../../../../components/NavLink";
 import { notFound, redirect } from "next/navigation";
 import { Connections } from "../../../../components/Connections";
 import { Notice, Shell } from "../../../../components/Shell";

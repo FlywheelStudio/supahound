@@ -2,7 +2,7 @@ import { ENTERPRISE_FROM_REQUESTS, needsEnterprise, PRICE_LABEL, PRO_FROM_REQUES
 import { currentSubFor, trialEndsAt } from "@supahound/core/billing/projects";
 import type { InvoiceSummary } from "@supahound/core/billing/stripeMap";
 import { getBilling, listProjectSubscriptions } from "@supahound/core/db/billing";
-import Link from "next/link";
+import Link from "../../../../../../../components/NavLink";
 import { Shell } from "../../../../../../../components/Shell";
 import { mode } from "../../../../../../../lib/billing";
 import { workspacePath } from "../../../../../../../lib/nav";
