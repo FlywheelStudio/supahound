@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 797 core (unit + Postgres + detection UAT), 167 web |
-| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 269, within the 797 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 818 core (unit + Postgres + detection UAT), 182 web |
+| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 287, within the 818 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 797 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 818 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 60 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
 
-Totals on `feature/project-subscriptions` (2026-11-12): core 797, web 167, poller 15, E2E 71.
+Totals on `feature/project-removal-grace` (2026-11-12): core 818, web 182, poller 15, E2E 72.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -127,7 +127,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W11 | The owner picks a project; it shows "waiting for first poll"; inactive projects cannot be picked |
 | UAT-W12 | A forged pick adds only running projects Supabase lists, with Supabase's name, each once |
 | UAT-W13 | A viewer sees watched projects, gets no picker or Remove, triggers no Supabase call; a replayed owner form is refused |
-| UAT-W14 | Remove needs the exact name; it deletes the project and its incidents and keeps its audit rows |
+| UAT-W14 | Remove needs the exact name and shows the dates first; it schedules the deletion (decision 042); the data job deletes the project and its incidents at `delete_after`, not before, and keeps its audit rows |
 | UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
 | UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 | UAT-W17 | The owner's address is on file; every incident emails by default; the owner raises the threshold (`alerts.uat.spec.ts`) |
@@ -156,9 +156,10 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W40 | Another workspace's project is a 404 on the Security scan tab and its settings; my own project shows nothing of its domain |
 | UAT-W45 | A project added during the trial gets its own subscription that ends the trial with the workspace; its plan page shows "Free trial" and the first charge; workspace billing lists it with the total (`projectBilling.uat.spec.ts`, decision 041) |
 | UAT-W46 | A project added after the trial is billed from that day (no `trial_end`, active, an invoice), and its plan page shows the next charge and the invoice |
-| UAT-W47 | Removing a project (the warning says so) cancels its subscription at the period end and keeps the row; workspace billing shows when it ends; adding the project back resumes the same subscription with no second charge |
+| UAT-W47 | Removing a project (the warning says so, with the dates) cancels its subscription at the period end; the project and its row stay until deletion; workspace billing shows when it ends and lists the removal; picking the project again keeps it and resumes the same subscription with no second charge |
 | UAT-W48 | A project Viewer sees the plan and status but no portal button and no invoices; a replayed owner portal form is refused and opens no portal session |
 | UAT-W49 | The owner opens the Billing Portal from the plan page; the portal returns to that page |
+| UAT-W50 | Remove → the projects page, project dashboard, workspace billing and Plan & billing all say "stays active until <period end> and is deleted on <+7 days> unless you keep it"; Keep project on the plan page cancels the removal and resumes the same subscription (decision 042) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
@@ -347,5 +348,19 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | A Viewer cannot open the portal (#99) | `canManageBilling` always true; separately, the portal action skips its role check | UAT-W48 fails each time |
 | The #99 migration keeps the old code working | — (a check, not a mutation): `develop` @ 345fa77's unchanged suites on the new schema | Core 738 of 740 (the 2 are the table-list check and the purge test's "every table has rows"), web 157, poller 15, E2E 65 of 65 |
 | The production migration keeps the old code working (#43) | — (a check, not a mutation): `develop` @ c366a6d's unchanged suites on the new schema | Core 662 of 663 (the 1 is the table-list check), web 137, poller 12, E2E 55 of 55 |
+| Removal: scheduled projects are not billed (042) | `watchedProjects` drops `removal_requested_at IS NULL` | `removalGrace.test.ts` fails (reconcile resumes) |
+| Removal: only the 036 rule changes the columns (042) | The trigger's role test set to `false` | `people.test.ts` fails (raw Editor UPDATE passes) |
+| Removal: schedule checks the role (042) | `MAY_REMOVE` accepts any project role | `people.test.ts` fails |
+| Removal: deleted at `delete_after`, not before (042) | The DELETE compares `active_until` | `removalGrace.test.ts` fails |
+| Removal: deleted while the workspace pays (042) | The delete skipped while paying | `removalGrace.test.ts` fails |
+| Removal: webhook acts only on a change (042) | `applyPortalCancel` drops the change check | `removalGrace.test.ts` fails (failed resume rescheduled) |
+| Removal: close undoes racing portal schedules (042) | The close's cleanup UPDATE matches nothing | `removalGrace.test.ts` fails |
+| Removal: paused projects never scheduled by webhook (042) | The paused check removed | `removalGrace.test.ts` fails |
+| Removal: polling stops at `active_until` (042) | `dueProjects` or `claimProject` drop the `active_until` test | `removalGrace.test.ts` fails (each) |
+| Removal: the scheduler sees `active_until` only (042) | Grant also `delete_after` | `isolation.test.ts` fails |
+| Removal: the trial end counts during the trial (042) | `removalActiveUntil` uses the period end | `billing/projects.test.ts` fails |
+| Removal: picking again keeps the project (042) | `watchProjects` conflict update matches nothing | `removalGrace.test.ts` fails |
+| Removal: Keep needs a scheduled removal (042) | `keepOutcome` always "kept" | `apps/web/test/picker.test.ts` fails |
+| Removal: the words before and after the period (042) | `removalSentence` ignores the date | `apps/web/test/removal.test.ts` fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

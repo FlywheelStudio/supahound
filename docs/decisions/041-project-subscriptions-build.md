@@ -49,8 +49,9 @@ operator CLI with a dry run. This record fixes the parts those calls leave open.
    use the idempotency key `project-sub-<tenant>-<project>-<n>` (n counts the project's earlier
    subscriptions); before creating, it adopts a live subscription Stripe already has for the
    project, so a lost database write never makes a second one.
-7. **Removal.** Decision 022 still applies: the project's history goes at once, by the user's
-   typed choice. The subscription cancels at its period end (no refund, nothing more charged),
+7. **Removal.** *Superseded by [042](042-project-removal-grace.md): the project stays active until
+   its period ends and is deleted 7 days later; the rest of this point still holds.* ~~Decision 022
+   still applies: the project's history goes at once, by the user's typed choice.~~ The subscription cancels at its period end (no refund, nothing more charged),
    and its row stays as payment history: `project_subscriptions` has no DELETE grant, and the
    project's removal only clears `project_id`. Re-adding the same Supabase project (same ref)
    while that period runs takes the subscription back and resumes it, so nothing is charged twice.
