@@ -8,8 +8,10 @@ import type { TenantTx } from "./tenant.js";
 // The rules, in this order, in one transaction:
 //   1. An OPEN incident last seen more than 30 days ago is resolved. The engine resolves an
 //      incident only when its actor acts again, so a quiet actor leaves it open forever. Open
-//      incidents are never deleted: they are resolved first. The UPDATE re-checks last_seen_at under
-//      the row lock, so an incident the poller just updated stays open.
+//      incidents are never deleted: they are resolved first. The UPDATE re-checks last_seen_at
+//      after any committed poll save, so an incident the poller already updated stays open. A poll
+//      that loaded the incident before this job and saves after it fails once on the findings
+//      foreign key; the queue retries it, and the retry opens a new incident.
 //   2. A RESOLVED incident last seen more than 30 days ago is deleted.
 //   3. A finding created more than 30 days ago is deleted. No page reads findings; the incident
 //      row holds the counts the pages show.

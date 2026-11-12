@@ -26,7 +26,10 @@ the history window of decision 035: 30 days after an incident's last activity. I
 5. An expired OAuth state is deleted (it holds a PKCE verifier).
 
 So an open incident is never deleted by `last_seen_at` alone: it is resolved first, and the UPDATE
-re-checks `last_seen_at` under the row lock, so an incident the poller just updated stays open. The
+re-checks `last_seen_at` after any committed poll save, so an incident the poller already updated
+stays open. A poll loads open incidents and saves in two transactions; one that loaded an idle
+incident before the job and saves after it fails once on the findings foreign key, the queue
+retries it, and the retry opens a new incident. Nothing is lost. The
 net rule for customers: "an incident is kept for 30 days after its last activity". The dashboard and
 the history agree at every step, because both read the same rows.
 

@@ -29,7 +29,8 @@ The workspace sidebar has a new **Settings** item (`/w/<tenant>/settings`): Supa
 5. Delete expired OAuth states.
 
 An open incident is never deleted directly: step 1 resolves it first, and its UPDATE re-checks
-`last_seen_at` under the row lock. Not touched: `audit_log` (append-only for the app; its retention
+`last_seen_at` after any committed poll save. A poll that loaded the incident before the job and
+saves after it fails once on the findings foreign key; the queue retry opens a new incident. Not touched: `audit_log` (append-only for the app; its retention
 needs its own decision), `project_usage`, `service_role_networks`.
 
 ### The daily data job (`packages/core/src/datacontrols/flow.ts`, `apps/poller/src/index.ts`)
