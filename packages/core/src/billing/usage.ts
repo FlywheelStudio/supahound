@@ -38,7 +38,7 @@ export async function countDailyUsage(tenant: TenantId, deps: UsageDeps): Promis
   const sql = edgeRequestCountSql(deps.env);
   const projects = await withTenant(deps.app, tenant, (tx) =>
     tx.query<{ id: ProjectId; connection_id: ConnectionId; supabase_ref: string }>(
-      "SELECT id, connection_id, supabase_ref FROM supahound.projects WHERE tenant_id = $1 AND NOT paused",
+      "SELECT id, connection_id, supabase_ref FROM supahound.projects WHERE tenant_id = $1 AND NOT paused AND removal_requested_at IS NULL",
       [tenant],
     ),
   );

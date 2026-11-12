@@ -12,10 +12,10 @@ import type { ConnectionId, TenantId } from "@supahound/core/tenancy/scope";
 export const MAX_PICK = 100;
 
 export type PickerNotice =
-  | "added" | "removed" | "none" | "role" | "connection" | "reconnect" | "supabase" | "mismatch" | "missing";
+  | "added" | "removed" | "kept" | "none" | "role" | "connection" | "reconnect" | "supabase" | "mismatch" | "missing";
 
 export const picksPath = (tenant: TenantId, notice: PickerNotice, n?: number) =>
-  `/w/${tenant}/projects?${notice === "added" ? `added=${n ?? 0}` : notice === "removed" ? "removed=1" : `error=${notice}`}`;
+  `/w/${tenant}/projects?${notice === "added" ? `added=${n ?? 0}` : notice === "removed" || notice === "kept" ? `${notice}=1` : `error=${notice}`}`;
 
 export function submittedRefs(values: unknown[]): Set<string> {
   const refs = new Set<string>();
@@ -77,4 +77,15 @@ export function removalOutcome(
   if (!canRemoveProject(project.role, role)) return "role";
   if (typed.trim() !== project.name) return "mismatch";
   return "removed";
+}
+
+// "Keep project" (decision 042): the same people who may remove the project, and only while its
+// removal is scheduled.
+export function keepOutcome(
+  role: Role,
+  project: { role: ProjectRole | null; removal: unknown } | null,
+): "kept" | "role" | "missing" {
+  if (!project) return role === "member" ? "role" : "missing";
+  if (!canRemoveProject(project.role, role)) return "role";
+  return project.removal ? "kept" : "missing";
 }

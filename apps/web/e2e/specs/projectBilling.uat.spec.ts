@@ -44,7 +44,7 @@ async function ownerWithCard(page: Page, tag: string, projects: { ref: string; n
 
 async function watch(page: Page, tenant: string, name: string): Promise<string> {
   await page.goto(`/w/${tenant}/projects`);
-  await page.getByLabel(new RegExp(name)).check();
+  await page.getByRole("checkbox", { name: new RegExp(name) }).check();
   await page.getByRole("button", { name: "Watch selected projects" }).click();
   await expect(page.getByRole("status")).toHaveText(/Watching 1 new project/);
   const [p] = await adminQuery<{ id: string }>("SELECT id FROM supahound.projects WHERE tenant_id = $1 AND name = $2", [tenant, name]);
@@ -56,11 +56,15 @@ async function remove(page: Page, tenant: string, name: string): Promise<void> {
   await settled(page);
   await page.getByRole("link", { name: `Remove ${name}` }).click();
   await expect(page.getByRole("heading", { name: `Remove ${name}?` })).toBeVisible();
-  await expect(page.getByText("Its subscription stops at the end of its paid month")).toBeVisible();
+  await expect(page.getByText("Its subscription stops at the end of its paid period")).toBeVisible();
+  await expect(page.getByTestId("removal-preview")).toHaveText(SENTENCE);
   await page.getByLabel(/to confirm/).fill(name);
   await page.getByRole("button", { name: "Remove project" }).click();
-  await expect(page.getByRole("status")).toHaveText(/Project removed/);
+  await expect(page.getByRole("status")).toHaveText(/Removal scheduled/);
 }
+
+// Erik's rule (decision 042), as every page words it.
+const SENTENCE = new RegExp(`The project stays active until (${DAY.source}) and is deleted on (${DAY.source}) unless you keep it\\.`);
 
 const endTrial = (tenant: string) =>
   adminQuery("UPDATE supahound.billing_accounts SET trial_end = now() - interval '1 day' WHERE tenant_id = $1", [tenant]);
@@ -98,7 +102,7 @@ test.describe("UAT: one subscription per project", () => {
     await expect(page.getByRole("region", { name: "Invoices" })).toContainText("$19.99 · paid");
   });
 
-  test("UAT-W47 removing a project cancels its subscription at the period end; adding it back resumes it with no second charge", async ({ page }) => {
+  test("UAT-W47 removing a project cancels its subscription at the period end; picking it again keeps it and resumes it with no second charge", async ({ page }) => {
     const { tenant } = await ownerWithCard(page, "w47", [{ ref: "gonegonegonegonegone", name: "Gone app" }]);
     await endTrial(tenant);
     await watch(page, tenant, "Gone app");
@@ -106,14 +110,45 @@ test.describe("UAT: one subscription per project", () => {
     await remove(page, tenant, "Gone app");
     await expect.poll(async () => (await projectSubs(tenant))[0]!.cancel_at_period_end).toBe(true);
     expect((await projectSubs(tenant))[0]!.status).toBe("active");
-    // The row stays as payment history, without its project.
-    expect(await adminQuery("SELECT 1 FROM supahound.project_subscriptions WHERE subscription_id = $1 AND project_id IS NULL", [sub!.id])).toHaveLength(1);
+    // The project stays until its deletion date (decision 042), so the row keeps its link.
+    expect(await adminQuery("SELECT 1 FROM supahound.project_subscriptions WHERE subscription_id = $1 AND project_id IS NOT NULL", [sub!.id])).toHaveLength(1);
     await page.goto(`/w/${tenant}/billing`);
-    await expect(page.getByRole("table", { name: "Subscriptions by project" })).toContainText(/Removed project \(gonegonegonegonegone\).*Ends \d{4}-\d{2}-\d{2}, nothing more is charged/);
+    await expect(page.getByRole("table", { name: "Subscriptions by project" })).toContainText(/Gone app.*Ends \d{4}-\d{2}-\d{2}, nothing more is charged/);
+    await expect(page.getByRole("region", { name: "Removals scheduled" })).toContainText(SENTENCE);
 
     await watch(page, tenant, "Gone app");
-    const subs = await projectSubs(tenant);
-    expect(subs.map((s) => [s.id, s.cancel_at_period_end])).toEqual([[sub!.id, false]]);
+    await expect.poll(async () => (await projectSubs(tenant)).map((s) => [s.id, s.cancel_at_period_end])).toEqual([[sub!.id, false]]);
+    expect(await adminQuery("SELECT 1 FROM supahound.projects WHERE tenant_id = $1 AND removal_requested_at IS NOT NULL", [tenant])).toHaveLength(0);
+  });
+
+  test("UAT-W50 remove shows the dates on every page, and Keep project cancels the removal and resumes the subscription", async ({ page }) => {
+    const { tenant } = await ownerWithCard(page, "w50", [{ ref: "keepkeepkeepkeepkeep", name: "Kept app" }]);
+    await endTrial(tenant);
+    const project = await watch(page, tenant, "Kept app");
+    const [sub] = await projectSubs(tenant);
+    await remove(page, tenant, "Kept app");
+    await expect.poll(async () => (await projectSubs(tenant))[0]!.cancel_at_period_end).toBe(true);
+
+    // The dates: the subscription's period end, and 7 days after it.
+    const [row] = await adminQuery<{ active_until: Date; delete_after: Date }>("SELECT active_until, delete_after FROM supahound.projects WHERE id = $1", [project]);
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const words = `The project stays active until ${day(row!.active_until)} and is deleted on ${day(row!.delete_after)} unless you keep it.`;
+    expect(row!.delete_after.getTime() - row!.active_until.getTime()).toBe(7 * 86_400_000);
+    await expect(page.getByTestId("removal-scheduled")).toContainText(words);
+    await page.goto(`/w/${tenant}/p/${project}`);
+    await expect(page.getByTestId("removal-scheduled")).toContainText(words);
+    await page.goto(`/w/${tenant}/billing`);
+    await expect(page.getByRole("region", { name: "Removals scheduled" })).toContainText(words);
+    await page.goto(`/w/${tenant}/p/${project}/settings/plan`);
+    await expect(page.getByTestId("removal-scheduled")).toContainText(words);
+    await expect(page.getByTestId("removal-scheduled")).toContainText("nothing extra is charged");
+
+    await page.getByRole("button", { name: "Keep project" }).click();
+    await expect(page).toHaveURL(new RegExp(`/settings/plan\\?kept=1$`));
+    await expect(page.getByRole("status")).toHaveText("Project kept. Its removal is canceled.");
+    await expect(page.getByTestId("removal-scheduled")).toHaveCount(0);
+    await expect.poll(async () => (await projectSubs(tenant)).map((s) => [s.id, s.cancel_at_period_end])).toEqual([[sub!.id, false]]);
+    expect(await adminQuery("SELECT 1 FROM supahound.projects WHERE id = $1 AND removal_requested_at IS NULL", [project])).toHaveLength(1);
   });
 
   test("UAT-W48 a project Viewer sees the plan but cannot manage billing or see invoices, even by a replayed form", async ({ page, browser }) => {

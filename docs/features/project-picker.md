@@ -27,12 +27,15 @@ poller runs.
      name;
    - re-checks the role in the insert transaction.
 
-   `repo.watchProjects` uses `ON CONFLICT (tenant_id, supabase_ref) DO NOTHING`, so a repeat
-   submit adds nothing.
+   `repo.watchProjects` uses `ON CONFLICT (tenant_id, supabase_ref)`, so a repeat submit adds
+   nothing. A ref whose removal is scheduled is listed again, and picking it keeps the project
+   (decision 042).
 4. **Remove** (`removeProjectAction` → `removalOutcome`). `?remove=<id>` shows a red panel that
-   states what is deleted. The user types the exact name. One transaction checks the role, finds
-   the project in the tenant, compares the name and deletes. Audit rows stay with
-   `project_id = null` (decision 022).
+   states the dates before the user confirms. The user types the exact name. One transaction
+   checks the role, finds the project in the tenant, compares the name and schedules the removal.
+   Since decision 042 nothing is deleted at once: see
+   [project-removal-grace.md](project-removal-grace.md). Audit rows stay with `project_id = null`
+   when the data job deletes the project (decision 022).
 5. **Errors.** A 401 or 403 from Supabase, or a failed token refresh, shows "Reconnect Supabase".
    Other failures show "try again". Neither returns a 500.
 

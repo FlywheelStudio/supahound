@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { POSTURE_SQL } from "../../src/config/posture.js";
 import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
+import * as removal from "../../src/db/removal.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { createWorkspace, withTenantForUser } from "../../src/db/user.js";
 import type { ExplainResult } from "../../src/explainer/llm.js";
@@ -387,8 +388,10 @@ describe.skipIf(pgInfo === null)("posture storage and RLS for signed-in users", 
     await expect(tryInsert(p1, scanB)).rejects.toThrow(/foreign key/);
   });
 
-  it("removes a project's posture with the project, when its owner removes it", async () => {
-    expect(await as(u.owner, A, (tx) => repo.removeProject(tx, p2))).toBe(true);
+  it("removes a project's posture with the project, when its owner removes it and the data job deletes it", async () => {
+    const s = await as(u.owner, A, (tx) => removal.scheduleRemoval(tx, p2, new Date()));
+    expect(s).not.toBeNull();
+    expect(await withTenant(db.app, A, (tx) => removal.deleteRemovedProjects(tx, s!.deleteAfter))).toBe(1);
     const left = await db.admin.query("SELECT (SELECT count(*) FROM supahound.posture_scans WHERE project_id = $1)::int AS s, (SELECT count(*) FROM supahound.posture_findings WHERE project_id = $1)::int AS f", [p2]);
     expect(left.rows[0]).toEqual({ s: 0, f: 0 });
   });

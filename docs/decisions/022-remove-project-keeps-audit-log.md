@@ -15,7 +15,10 @@ rows, which are the customer's record of every query Supahound ran against their
    delete transaction.
 2. The user must type the project's exact name. The page states what is deleted and that the
    step cannot be undone. No browser dialog.
-3. Removal deletes the project's incidents, findings, poll runs and service-key networks.
+3. ~~Removal deletes the project's incidents, findings, poll runs and service-key networks.~~
+   **Superseded by [042](042-project-removal-grace.md):** removal schedules the deletion. The project
+   stays active until its paid period ends, and the data job deletes it 7 days later unless an
+   Owner or Admin keeps it. What the deletion removes and keeps is unchanged.
 4. Removal keeps the project's audit rows. Migration
    `20261109000000_audit_log_keep_on_project_delete.sql` changes the foreign key to
    `ON DELETE SET NULL (project_id)`.

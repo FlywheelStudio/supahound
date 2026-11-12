@@ -66,6 +66,8 @@ export interface ProjectRecord {
   ownershipError: string | null;
   expectedAsns: number[];
   paused: boolean;
+  // Decision 042: a removed project is polled until this time; null when no removal is scheduled.
+  activeUntil: Date | null;
   // The lowest severity that emails members, or "off" (decision 030).
   emailAlerts: AlertLevel;
 }
@@ -74,9 +76,9 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
   const rows = await tx.query<{
     connection_id: string; supabase_ref: string; ownership: OwnershipMap; expected_asns: number[]; paused: boolean;
     ownership_refreshed_at: Date | null; ownership_attempted_at: Date | null; ownership_error: string | null;
-    email_alerts: AlertLevel; name: string;
+    email_alerts: AlertLevel; name: string; active_until: Date | null;
   }>(
-    `SELECT name, connection_id, supabase_ref, ownership, expected_asns, paused,
+    `SELECT name, connection_id, supabase_ref, ownership, expected_asns, paused, active_until,
             ownership_refreshed_at, ownership_attempted_at, ownership_error, email_alerts
      FROM supahound.projects WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, id],
@@ -94,6 +96,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
     ownershipError: r.ownership_error,
     expectedAsns: r.expected_asns,
     paused: r.paused,
+    activeUntil: r.active_until,
     emailAlerts: r.email_alerts,
   };
 }
@@ -141,7 +144,7 @@ export async function failOwnershipRefresh(tx: TenantTx, id: ProjectId, errorCod
 export async function claimProject(tx: TenantTx, id: ProjectId, now: Date, intervalSeconds: number): Promise<boolean> {
   const rows = await tx.query(
     `UPDATE supahound.projects SET last_polled_at = $3
-     WHERE tenant_id = $1 AND id = $2 AND NOT paused
+     WHERE tenant_id = $1 AND id = $2 AND NOT paused AND (active_until IS NULL OR active_until > $3)
        AND (last_polled_at IS NULL OR last_polled_at <= $3::timestamptz - make_interval(secs => $4))
      RETURNING id`,
     [tx.tenantId, id, now, intervalSeconds],
@@ -322,7 +325,7 @@ export async function appendAudit(
 // billing "stripe" skips tenants whose subscription may not be polled (decision 028), unless the
 // workspace is exempt (decision 029); "off" is for self-hosting without billing. A closed
 // workspace whose paid period has ended (decision 037) is skipped in both modes. Projects of a
-// disconnected connection are paused. The scheduler
+// disconnected connection are paused. A removed project stops at its active_until (decision 042). The scheduler
 // reads billing_accounts (tenant_id, status, exempt_at) only. A membership trigger clears
 // exempt_at when the owners change, so the scheduler needs no access to memberships.
 export async function dueProjects(
@@ -334,13 +337,15 @@ export async function dueProjects(
   const res = await schedulerPool.query<{ tenant_id: string; id: string }>(
     billing === "off"
       ? `SELECT p.tenant_id, p.id FROM supahound.projects p
-         WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+         WHERE NOT p.paused AND (p.active_until IS NULL OR p.active_until > now())
+           AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
            AND NOT EXISTS (SELECT 1 FROM supahound.account_closures c WHERE c.tenant_id = p.tenant_id AND c.access_ends_at <= now())
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`
       : `SELECT p.tenant_id, p.id FROM supahound.projects p
          JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND (b.status = ANY($3::text[]) OR b.exempt_at IS NOT NULL)
-         WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+         WHERE NOT p.paused AND (p.active_until IS NULL OR p.active_until > now())
+           AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
            AND NOT EXISTS (SELECT 1 FROM supahound.account_closures c WHERE c.tenant_id = p.tenant_id AND c.access_ends_at <= now())
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`,
@@ -390,6 +395,8 @@ export interface ProjectSummary {
   emailAlerts: AlertLevel;
   // The signed-in user's role on this project (decision 036); null outside a user transaction.
   role: ProjectRole | null;
+  // Decision 042: the scheduled removal, or null.
+  removal: { activeUntil: Date; deleteAfter: Date } | null;
 }
 
 function crossTenantCoverage(lastUnassessed: string[] | null, loaded: boolean, empty: boolean): ProjectSummary["crossTenant"] {
@@ -403,9 +410,9 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
     last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean; email_alerts: AlertLevel;
-    role: ProjectRole | null;
+    role: ProjectRole | null; active_until: Date | null; delete_after: Date | null;
   }>(
-    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts,
+    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts, p.active_until, p.delete_after,
             supahound.project_role(p.id) AS role,
             p.ownership_refreshed_at IS NOT NULL AS ownership_loaded,
             p.ownership = '{}'::jsonb AS ownership_empty,
@@ -425,6 +432,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     crossTenant: crossTenantCoverage(r.last_unassessed, r.ownership_loaded, r.ownership_empty),
     emailAlerts: r.email_alerts,
     role: r.role,
+    removal: r.active_until && r.delete_after ? { activeUntil: r.active_until, deleteAfter: r.delete_after } : null,
   }));
 }
 
@@ -565,7 +573,9 @@ export async function listConnections(tx: TenantTx): Promise<ConnectionSummary[]
 }
 
 // The project picker (issue #9). A ref already watched in this tenant is skipped, so a double
-// submit or two admins picking at once never fails and never duplicates. Returns the refs added.
+// submit or two admins picking at once never fails and never duplicates. A ref whose removal is
+// scheduled (decision 042) is kept instead: the removal is cleared and the project keeps its
+// history. Returns the refs added or kept.
 export async function watchProjects(
   tx: TenantTx,
   connection: ConnectionId,
@@ -575,18 +585,13 @@ export async function watchProjects(
   const rows = await tx.query<{ supabase_ref: string }>(
     `INSERT INTO supahound.projects (tenant_id, connection_id, supabase_ref, name)
      SELECT $1, $2, p.ref, p.name FROM unnest($3::text[], $4::text[]) AS p(ref, name)
-     ON CONFLICT (tenant_id, supabase_ref) DO NOTHING
+     ON CONFLICT (tenant_id, supabase_ref) DO UPDATE
+       SET removal_requested_at = NULL, active_until = NULL, delete_after = NULL, removal_source = NULL
+       WHERE projects.removal_requested_at IS NOT NULL
      RETURNING supabase_ref`,
     [tx.tenantId, connection, projects.map((p) => p.ref), projects.map((p) => p.name)],
   );
   return rows.map((r) => r.supabase_ref);
-}
-
-// Stops watching a project. Its incidents, findings and poll runs go with it (cascade); its
-// audit_log rows stay with project_id set to null (decision 022). The caller confirms the name.
-export async function removeProject(tx: TenantTx, id: ProjectId): Promise<boolean> {
-  const rows = await tx.query("DELETE FROM supahound.projects WHERE tenant_id = $1 AND id = $2 RETURNING id", [tx.tenantId, id]);
-  return rows.length === 1;
 }
 
 // Workspace settings (decision 037): each connection, live or disconnected, with the number of

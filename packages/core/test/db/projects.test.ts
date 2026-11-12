@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as repo from "../../src/db/repo.js";
+import * as removal from "../../src/db/removal.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { createWorkspace, withTenantForUser } from "../../src/db/user.js";
 import { accessTokenInTx } from "../../src/supabase/credentials.js";
@@ -52,7 +53,7 @@ describe.skipIf(pgInfo === null)("Project picker storage (issue #9)", () => {
     expect(conns.map((c) => c.id)).toEqual([connA]);
   });
 
-  it("removes a project and its history, keeps its audit rows, and leaves the other tenant alone", async () => {
+  it("schedules a removal, keeps the history 7 days, then deletes it with the audit rows kept, and leaves the other tenant alone", async () => {
     const shop = (await withTenantForUser(db.app, alice, a, (tx) => repo.listProjects(tx))).find((p) => p.supabaseRef === REF)!;
     await withTenant(db.app, a, async (tx) => {
       const run = await repo.startPollRun(tx, shop.id, { start: new Date(NOW.getTime() - 60_000), end: NOW });
@@ -60,11 +61,20 @@ describe.skipIf(pgInfo === null)("Project picker storage (issue #9)", () => {
       await repo.appendAudit(tx, { projectId: shop.id, action: "logs_query", detail: { rows: 1 } });
     });
 
+    const schedule = (u: typeof alice, t: TenantId) => withTenantForUser(db.app, u, t, (tx) => removal.scheduleRemoval(tx, shop.id, NOW));
     // Bob cannot remove Alice's project: it is not in his tenant.
-    expect(await withTenantForUser(db.app, bob, b, (tx) => repo.removeProject(tx, shop.id))).toBe(false);
+    expect(await schedule(bob, b)).toBeNull();
 
-    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.removeProject(tx, shop.id))).toBe(true);
-    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.removeProject(tx, shop.id))).toBe(false);
+    // No billing row: the project stops now and is deleted 7 days later (decision 042).
+    const s = (await schedule(alice, a))!;
+    expect([s.activeUntil, s.deleteAfter, s.source]).toEqual([NOW, new Date(NOW.getTime() + 7 * 86_400_000), "user"]);
+    expect(await schedule(alice, a)).toBeNull();
+    // Still listed, with the dates; the history is still there until delete_after.
+    const listed = (await withTenantForUser(db.app, alice, a, (tx) => repo.listProjects(tx))).find((p) => p.id === shop.id)!;
+    expect(listed.removal).toEqual({ activeUntil: s.activeUntil, deleteAfter: s.deleteAfter });
+    expect(await withTenant(db.app, a, (tx) => removal.deleteRemovedProjects(tx, new Date(s.deleteAfter.getTime() - 1)))).toBe(0);
+    expect(await withTenant(db.app, b, (tx) => removal.deleteRemovedProjects(tx, new Date(s.deleteAfter.getTime() + 1)))).toBe(0);
+    expect(await withTenant(db.app, a, (tx) => removal.deleteRemovedProjects(tx, s.deleteAfter))).toBe(1);
 
     const left = await db.admin.query(
       `SELECT (SELECT count(*)::int FROM supahound.poll_runs WHERE project_id = $1) AS runs,
