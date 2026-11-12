@@ -83,7 +83,7 @@ describe("subscriptionFromStripe", () => {
       id: "sub_1", customerId: "cus_1", status: "trialing", seats: { starter: 3, pro: 1 },
       trialEnd: new Date(1_800_000_000_000), currentPeriodEnd: new Date(1_800_000_000_000), cancelAtPeriodEnd: false,
       tenant: TENANT, cardVerifiedAt: new Date("2026-11-10T12:00:00.000Z"),
-      projectId: null, supabaseRef: null, tier: null, converted: false, defaultPaymentMethod: null,
+      projectId: null, supabaseRef: null, tier: null, converted: false, defaultPaymentMethod: null, hasDiscount: false,
     });
   });
 
@@ -119,6 +119,14 @@ describe("subscriptionFromStripe", () => {
 
   it("reads the conversion mark on a seat subscription", () => {
     expect(subscriptionFromStripe({ ...sub, metadata: { ...sub.metadata, converted: "yes" } }, PRICES).converted).toBe(true);
+  });
+
+  it("sees a discount on the subscription or an item, not on the customer", () => {
+    expect(subscriptionFromStripe({ ...sub, discounts: ["di_1"] }, PRICES).hasDiscount).toBe(true);
+    expect(subscriptionFromStripe({ ...sub, discounts: [] }, PRICES).hasDiscount).toBe(false);
+    const itemDiscount = { ...sub, items: { data: [{ ...sub.items.data[0]!, discounts: ["di_2"] }] } };
+    expect(subscriptionFromStripe(itemDiscount, PRICES).hasDiscount).toBe(true);
+    expect(subscriptionFromStripe({ ...sub, customer: { id: "cus_1", discount: { id: "di_3" } } }, PRICES).hasDiscount).toBe(false);
   });
 });
 

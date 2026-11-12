@@ -38,7 +38,7 @@ const USAGE = `Usage:
   supahound master-key [--rotate]
   supahound subprocessor-notice --name <n> --purpose <p> --location <l> --effective YYYY-MM-DD --contact <email>
                [--policy-url <https url>] [--test-to <email> | --send --journal <file>]
-  supahound convert-subscriptions [--tenant <id>] [--apply [--confirm-live]]
+  supahound convert-subscriptions [--tenant <id>] [--include-empty] [--apply [--confirm-live]]
 
 --ownership takes a JSON object {"table": ["owner_col", ...]} or a JSON array of pg_policies rows
 (run the SQL from print-sql). Live calls read SUPABASE_ACCESS_TOKEN (analytics:read) from the env or .env.
@@ -260,7 +260,9 @@ export interface ConvertCliDeps {
 // The conversion of seat subscriptions (decision 041). Safe by default: without --apply it reads
 // and prints. Returns the exit code.
 export async function runConvertSubscriptions(args: string[], deps: ConvertCliDeps): Promise<number> {
-  const { values } = parseArgs({ args, options: { apply: { type: "boolean" }, tenant: { type: "string" }, "confirm-live": { type: "boolean" } } });
+  const { values } = parseArgs({
+    args, options: { apply: { type: "boolean" }, tenant: { type: "string" }, "confirm-live": { type: "boolean" }, "include-empty": { type: "boolean" } },
+  });
   const e = deps.env;
   const missing = ["SUPAHOUND_APP_DATABASE_URL", "SUPAHOUND_SCHEDULER_DATABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO"]
     .filter((k) => !e[k]);
@@ -288,7 +290,7 @@ export async function runConvertSubscriptions(args: string[], deps: ConvertCliDe
   const app = deps.pool(e.SUPAHOUND_APP_DATABASE_URL!);
   const scheduler = deps.pool(e.SUPAHOUND_SCHEDULER_DATABASE_URL!);
   try {
-    const r = await convertSubscriptions({ app, scheduler, stripe, now: deps.now, exemptDomains, out: deps.out }, { apply: values.apply === true, only });
+    const r = await convertSubscriptions({ app, scheduler, stripe, now: deps.now, exemptDomains, out: deps.out }, { apply: values.apply === true, only, includeEmpty: values["include-empty"] === true });
     return r.failed > 0 ? 1 : 0;
   } finally {
     await Promise.all([app.end(), scheduler.end()]);

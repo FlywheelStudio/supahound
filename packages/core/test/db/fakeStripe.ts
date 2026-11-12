@@ -116,7 +116,7 @@ export class FakeStripe implements StripeGateway {
         seats: { starter: i.tier === "starter" ? 1 : 0, pro: i.tier === "pro" ? 1 : 0 },
         trialEnd: i.trialEnd, currentPeriodEnd: i.trialEnd ?? i.anchor ?? new Date(now.getTime() + 30 * 86_400_000),
         cancelAtPeriodEnd: false, tenant: i.tenant, cardVerifiedAt: null, projectId: i.projectId, supabaseRef: i.supabaseRef,
-        tier: i.tier, converted: false, defaultPaymentMethod: null, anchor: i.anchor, createKey: i.idempotencyKey,
+        tier: i.tier, converted: false, defaultPaymentMethod: null, hasDiscount: false, anchor: i.anchor, createKey: i.idempotencyKey,
       };
       this.subscriptions.set(s.id, s);
       this.writes.push({ kind: "create", id: s.id });
@@ -146,7 +146,7 @@ export class FakeStripe implements StripeGateway {
       id: this.id("sub"), customerId: i.customerId, status: i.trial ? "trialing" : "active", seats: { ...i.seats },
       trialEnd: i.trial ? i.periodEnd : null, currentPeriodEnd: i.periodEnd, cancelAtPeriodEnd: false, tenant: i.tenant,
       cardVerifiedAt: new Date(), projectId: null, supabaseRef: null, tier: null, converted: false,
-      defaultPaymentMethod: i.paymentMethod ?? this.id("pm"), anchor: null, createKey: null,
+      defaultPaymentMethod: i.paymentMethod ?? this.id("pm"), hasDiscount: false, anchor: null, createKey: null,
     };
     this.subscriptions.set(s.id, s);
     return s;

@@ -139,6 +139,8 @@ export interface LegacySub {
   // instead of skipping a workspace whose seat subscription already cancels.
   converted: boolean;
   defaultPaymentMethod: string | null;
+  // A coupon on the seat subscription. The new subscriptions would not get it.
+  hasDiscount: boolean;
 }
 
 export interface ConversionInput {
@@ -155,6 +157,9 @@ export interface ConversionInput {
   watched: readonly WatchedProject[];
   // The customer's project subscriptions in Stripe (metadata.project_id), live or not.
   existing: readonly ProjectSub[];
+  // --include-empty: also convert a workspace with no watched project. Converting it ends the
+  // seat subscription's minimum charge (decision 041 point 4), so it waits for Erik's answer.
+  includeEmpty?: boolean;
 }
 
 // No subscription starts within this long of the seat subscription's end: the CLI could still be
@@ -194,6 +199,9 @@ export function planConversion(i: ConversionInput): ConversionPlan {
   if (legacy.cancelAtPeriodEnd && !legacy.converted) return skip("the seat subscription already cancels at its period end");
   if (i.model === "project" && legacy.cancelAtPeriodEnd) return skip("already converted");
   if (legacy.status !== "trialing" && legacy.status !== "active") return skip(`seat subscription is ${legacy.status}: run again after it resolves`);
+  if (legacy.hasDiscount) return skip("seat subscription has a discount the new subscriptions would not get: move it by hand");
+  if (!legacy.defaultPaymentMethod) return skip("seat subscription has no default card: the new subscriptions could not charge");
+  if (i.watched.length === 0 && !i.includeEmpty) return skip("no watched projects: converting ends its minimum charge; pass --include-empty to convert it");
   const mode = legacy.status === "trialing" ? "trial" : "anchor";
   const anchor = mode === "trial" ? legacy.trialEnd : legacy.currentPeriodEnd;
   if (!anchor) return skip(`seat subscription has no ${mode === "trial" ? "trial end" : "period end"}`);

@@ -45,11 +45,14 @@ function legacyFrom(s: StripeSubscription): LegacySub {
   return {
     subscriptionId: s.id, status: s.status, trialEnd: s.trialEnd, currentPeriodEnd: s.currentPeriodEnd,
     cancelAtPeriodEnd: s.cancelAtPeriodEnd, converted: s.converted, defaultPaymentMethod: s.defaultPaymentMethod,
+    hasDiscount: s.hasDiscount,
   };
 }
 
 // Builds one workspace's plan from the database and Stripe. Reads only.
-export async function workspacePlan(deps: Pick<ConvertDeps, "app" | "stripe" | "now" | "exemptDomains">, tenant: TenantId): Promise<ConversionPlan> {
+export async function workspacePlan(
+  deps: Pick<ConvertDeps, "app" | "stripe" | "now" | "exemptDomains">, tenant: TenantId, includeEmpty = false,
+): Promise<ConversionPlan> {
   const db = await withTenant(deps.app, tenant, async (tx) => {
     const billing = await getBilling(tx);
     const owners = await tx.query<{ email: string | null }>(
@@ -73,7 +76,7 @@ export async function workspacePlan(deps: Pick<ConvertDeps, "app" | "stripe" | "
   }
   return planConversion({
     tenant, now: deps.now(), model: db.billing.model, exempt: db.billing.exempt, exemptEligible: db.exemptEligible,
-    closed: db.closed, customerId: db.billing.customerId, legacy: seat ? legacyFrom(seat) : null, watched: db.watched, existing,
+    closed: db.closed, customerId: db.billing.customerId, legacy: seat ? legacyFrom(seat) : null, watched: db.watched, existing, includeEmpty,
   });
 }
 
@@ -123,7 +126,9 @@ export async function applyPlan(deps: Pick<ConvertDeps, "app" | "stripe">, plan:
 }
 
 // Every workspace with a billing row, or just `only`. Returns the exit code's inputs.
-export async function convertSubscriptions(deps: ConvertDeps, opts: { apply: boolean; only?: TenantId | undefined }): Promise<ConvertResult> {
+export async function convertSubscriptions(
+  deps: ConvertDeps, opts: { apply: boolean; only?: TenantId | undefined; includeEmpty?: boolean },
+): Promise<ConvertResult> {
   const tenants = opts.only
     ? [opts.only]
     : (await deps.scheduler.query<{ tenant_id: string }>("SELECT tenant_id FROM supahound.billing_accounts ORDER BY tenant_id")).rows
@@ -132,7 +137,7 @@ export async function convertSubscriptions(deps: ConvertDeps, opts: { apply: boo
   const tierName = (t: "starter" | "pro") => (t === "pro" ? "Pro" : "Starter");
   for (const tenant of tenants) {
     try {
-      const plan = await workspacePlan(deps, tenant);
+      const plan = await workspacePlan(deps, tenant, opts.includeEmpty === true);
       result.plans.push(plan);
       for (const line of describePlan(plan, tierName)) deps.out(line);
       if (plan.action === "convert" && opts.apply) {

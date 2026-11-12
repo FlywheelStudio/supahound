@@ -148,7 +148,7 @@ class FakeStripe implements Pick<StripeGateway, "setCancelAtPeriodEnd"> {
   }
 }
 
-const SEAT_FIELDS = { tenant: null, cardVerifiedAt: null, projectId: null, supabaseRef: null, tier: null, converted: false, defaultPaymentMethod: null };
+const SEAT_FIELDS = { tenant: null, cardVerifiedAt: null, projectId: null, supabaseRef: null, tier: null, converted: false, defaultPaymentMethod: null, hasDiscount: false };
 
 async function subscribe(db: Db, w: Workspace, stripe: FakeStripe, periodEnd: Date, status: "active" | "trialing" = "active"): Promise<string> {
   const id = `sub_${w.tenant.replace(/-/g, "").slice(0, 16)}`;

@@ -81,6 +81,9 @@ export type StripeSubscription = SubscriptionSnapshot & {
   // metadata.converted: the conversion CLI set this seat subscription to cancel (decision 041).
   converted: boolean;
   defaultPaymentMethod: string | null;
+  // A discount on the subscription or one of its items. A customer-level discount is not
+  // counted: it applies to the customer's new subscriptions too.
+  hasDiscount: boolean;
 };
 
 export function subscriptionFromStripe(s: Obj, prices: PriceIds): StripeSubscription {
@@ -105,8 +108,12 @@ export function subscriptionFromStripe(s: Obj, prices: PriceIds): StripeSubscrip
     tier: meta(s, "project_id") === null ? null : seats.pro > 0 ? "pro" : seats.starter > 0 ? "starter" : null,
     converted: meta(s, "converted") === "yes",
     defaultPaymentMethod: idOf(s.default_payment_method),
+    hasDiscount: hasDiscounts(s) || ((obj(s.items)?.data as unknown[] | undefined) ?? []).some((i) => hasDiscounts(obj(i))),
   };
 }
+
+const hasDiscounts = (o: Obj | null): boolean =>
+  (Array.isArray(o?.discounts) && o.discounts.length > 0) || (o?.discount !== undefined && o?.discount !== null);
 
 // A project subscription in the shape project_subscriptions stores. Null when it is not one, or
 // when its item is not at a known price (fail closed: no row, so it counts for nothing).

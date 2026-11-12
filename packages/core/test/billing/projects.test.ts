@@ -118,7 +118,7 @@ describe("reconcile: Stripe follows the watched projects (decision 041)", () => 
 describe("the conversion planner (decision 041)", () => {
   const legacy = (over: Partial<LegacySub> = {}): LegacySub => ({
     subscriptionId: "sub_seat", status: "active", trialEnd: null, currentPeriodEnd: at(10), cancelAtPeriodEnd: false,
-    converted: false, defaultPaymentMethod: "pm_card", ...over,
+    converted: false, defaultPaymentMethod: "pm_card", hasDiscount: false, ...over,
   });
   const input = (over: Partial<ConversionInput> = {}): ConversionInput => ({
     tenant: "t1", now: NOW, model: "workspace", exempt: false, exemptEligible: false, closed: false, customerId: "cus_1",
@@ -156,6 +156,9 @@ describe("the conversion planner (decision 041)", () => {
     ["a failed payment", { legacy: legacy({ status: "past_due" }) }, /past_due: run again/],
     ["a renewal within the hour", { legacy: legacy({ currentPeriodEnd: new Date(NOW.getTime() + CONVERSION_MIN_LEAD_MS - 1) }) }, /within an hour/],
     ["a converted workspace", { model: "project" as const, legacy: legacy({ cancelAtPeriodEnd: true, converted: true }) }, /already converted/],
+    ["a seat subscription with a coupon (it would not carry over)", { legacy: legacy({ hasDiscount: true }) }, /has a discount/],
+    ["a seat subscription with no card", { legacy: legacy({ defaultPaymentMethod: null }) }, /no default card/],
+    ["a workspace with no watched project, unless asked", { watched: [] }, /--include-empty/],
   ])("skips %s", (_name, over, reason) => {
     const plan = planConversion(input(over));
     expect(plan.action).toBe("skip");
@@ -175,7 +178,7 @@ describe("the conversion planner (decision 041)", () => {
     expect(planConversion(input())).toEqual(planConversion(input()));
   });
 
-  it("cancels the seat subscription of a workspace with no watched projects: nothing is charged after it", () => {
-    expect(planConversion(input({ watched: [] }))).toMatchObject({ action: "convert", creates: [], kept: [], cancelLegacy: true });
+  it("with --include-empty, cancels the seat subscription of a workspace with no watched projects: nothing is charged after it", () => {
+    expect(planConversion(input({ watched: [], includeEmpty: true }))).toMatchObject({ action: "convert", creates: [], kept: [], cancelLegacy: true });
   });
 });
