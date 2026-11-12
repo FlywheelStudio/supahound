@@ -173,6 +173,11 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     expect(await repo.dueProjects(db.scheduler, 60, 100, "off")).toEqual([]);
     await expect(db.scheduler.query("SELECT supabase_ref FROM supahound.projects")).rejects.toThrow(/permission denied/);
     await expect(db.scheduler.query("SELECT * FROM supahound.projects")).rejects.toThrow(/permission denied/);
+    // Decision 042: when a removed project stops, and nothing else about the removal.
+    await db.scheduler.query("SELECT tenant_id, id, paused, last_polled_at, active_until FROM supahound.projects");
+    for (const col of ["removal_requested_at", "delete_after", "removal_source"]) {
+      await expect(db.scheduler.query(`SELECT ${col} FROM supahound.projects`), col).rejects.toThrow(/permission denied/);
+    }
     for (const table of TABLES.filter((t) => t !== "projects" && t !== "billing_accounts" && t !== "account_closures")) {
       await expect(db.scheduler.query(`SELECT 1 FROM supahound.${table}`), table).rejects.toThrow(/permission denied/);
     }

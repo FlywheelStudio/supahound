@@ -190,21 +190,24 @@ export interface ProjectTier {
   // Paused projects (their Supabase connection is disconnected, decision 037) are not watched, so
   // they are not billed.
   paused: boolean;
+  // A project whose removal is scheduled (decision 042) is not billed: its subscription runs out.
+  removing: boolean;
 }
 
 export async function projectTiers(tx: TenantTx): Promise<ProjectTier[]> {
-  const rows = await tx.query<{ id: ProjectId; billing_tier: string; requests_30d: string | null; paused: boolean }>(
-    "SELECT id, billing_tier, requests_30d, paused FROM supahound.projects WHERE tenant_id = $1 ORDER BY created_at",
+  const rows = await tx.query<{ id: ProjectId; billing_tier: string; requests_30d: string | null; paused: boolean; removing: boolean }>(
+    `SELECT id, billing_tier, requests_30d, paused, removal_requested_at IS NOT NULL AS removing
+     FROM supahound.projects WHERE tenant_id = $1 ORDER BY created_at`,
     [tx.tenantId],
   );
   return rows.map((r) => ({
     id: r.id, tier: isTier(r.billing_tier) ? r.billing_tier : "starter", requests30d: r.requests_30d === null ? null : Number(r.requests_30d),
-    paused: r.paused,
+    paused: r.paused, removing: r.removing,
   }));
 }
 
-// The tiers billed: one seat per watched (not paused) project.
-export const billedTiers = (tiers: readonly ProjectTier[]): Tier[] => tiers.filter((t) => !t.paused).map((t) => t.tier);
+// The tiers billed: one seat per watched project (not paused, no removal scheduled).
+export const billedTiers = (tiers: readonly ProjectTier[]): Tier[] => tiers.filter((t) => !t.paused && !t.removing).map((t) => t.tier);
 
 // Decision 037: whether the workspace pays now (billing/policy.ts payingAccount). Every deletion
 // path asks this inside the transaction that would delete.
@@ -293,10 +296,11 @@ export async function listProjectSubscriptions(tx: TenantTx): Promise<ProjectSub
 }
 
 // The projects Supahound bills now: every project that is not paused (decision 037: a paused
-// project is not watched and not billed).
+// project is not watched and not billed) and whose removal is not scheduled (decision 042: its
+// subscription cancels at its period end; an undo makes it billed again, and reconcile resumes it).
 export async function watchedProjects(tx: TenantTx): Promise<WatchedProject[]> {
   const rows = await tx.query<{ id: string; supabase_ref: string; billing_tier: string }>(
-    "SELECT id, supabase_ref, billing_tier FROM supahound.projects WHERE tenant_id = $1 AND NOT paused ORDER BY created_at, id",
+    "SELECT id, supabase_ref, billing_tier FROM supahound.projects WHERE tenant_id = $1 AND NOT paused AND removal_requested_at IS NULL ORDER BY created_at, id",
     [tx.tenantId],
   );
   return rows.map((r) => ({ id: r.id, supabaseRef: r.supabase_ref, tier: isTier(r.billing_tier) ? r.billing_tier : "starter" }));

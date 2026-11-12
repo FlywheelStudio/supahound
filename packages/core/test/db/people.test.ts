@@ -4,6 +4,7 @@ import * as billing from "../../src/db/billing.js";
 import * as people from "../../src/db/people.js";
 import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
+import * as removal from "../../src/db/removal.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { createWorkspace, NotAMemberError, withTenantForUser } from "../../src/db/user.js";
 import { projectId, tenantId, verifiedUserId, type ProjectId, type TenantId, type UserId } from "../../src/tenancy/scope.js";
@@ -146,7 +147,7 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
       await grant(A, p3, u.admin, "owner");
       expect(await as(u.admin, A, (tx) => people.projectRole(tx, p3))).toBe("owner");
       expect(await as(u.admin, A, (tx) => people.projectRole(tx, p1))).toBe("admin");
-      await sys(A, (tx) => repo.removeProject(tx, p3));
+      await sys(A, (tx) => removal.deleteProject(tx, p3));
     });
   });
 
@@ -164,12 +165,33 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
       const p3 = await addProject(A, "Disposable", "eeeeeeeeeeeeeeeeeeee");
       await grant(A, p3, u.editor, "editor");
       await grant(A, p3, u.viewer, "admin");
-      expect(await as(u.editor, A, (tx) => repo.removeProject(tx, p3))).toBe(false);
-      expect(await as(u.viewer, A, (tx) => repo.removeProject(tx, p3))).toBe(false);
+      const schedule = (who: UserId, p: ProjectId) => as(who, A, async (tx) => (await removal.scheduleRemoval(tx, p, new Date())) !== null);
+      const keep = (who: UserId, p: ProjectId) => as(who, A, (tx) => removal.cancelRemoval(tx, p));
+      expect(await schedule(u.editor, p3)).toBe(false);
+      expect(await schedule(u.viewer, p3)).toBe(false);
       await sys(A, (tx) => tx.query("UPDATE supahound.project_members SET role = 'owner' WHERE project_id = $1 AND user_id = $2", [p3, u.editor]));
-      expect(await as(u.editor, A, (tx) => repo.removeProject(tx, p3))).toBe(true);
+      expect(await schedule(u.editor, p3)).toBe(true);
       const p4 = await addProject(A, "Disposable 2", "ffffffffffffffffffff");
-      expect(await as(u.admin, A, (tx) => repo.removeProject(tx, p4))).toBe(true);
+      expect(await schedule(u.admin, p4)).toBe(true);
+      // Undo (decision 042) follows the same rule: a project Admin or Editor cannot keep it.
+      await grant(A, p4, u.viewer, "admin");
+      const editor4 = user();
+      await addMember(A, editor4, "member");
+      await grant(A, p4, editor4, "editor");
+      expect(await keep(u.viewer, p4)).toBe(false);
+      expect(await keep(editor4, p4)).toBe(false);
+      expect(await keep(u.admin, p4)).toBe(true);
+      expect(await keep(u.admin, p4)).toBe(false);
+      // A raw UPDATE of the removal columns is refused by the trigger, even for an Editor whom the
+      // project_settings policy lets update the row.
+      const raw = (who: UserId, sql: string) => as(who, A, (tx) => tx.query(sql, [A, p4]));
+      await expect(raw(editor4, "UPDATE supahound.projects SET removal_requested_at = now(), active_until = now(), delete_after = now() + interval '7 days', removal_source = 'user' WHERE tenant_id = $1 AND id = $2"))
+        .rejects.toThrow(/may schedule or undo a removal/);
+      expect(await schedule(u.owner, p4)).toBe(true);
+      await expect(raw(editor4, "UPDATE supahound.projects SET removal_requested_at = NULL, active_until = NULL, delete_after = NULL, removal_source = NULL WHERE tenant_id = $1 AND id = $2"))
+        .rejects.toThrow(/may schedule or undo a removal/);
+      // The Editor still changes other settings.
+      expect(await setAlerts(editor4, p4)).toBe(true);
     });
 
     const insertMember = (who: UserId, p: ProjectId, target: UserId, role: people.ProjectRole) =>

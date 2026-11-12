@@ -122,6 +122,34 @@ export function planReconcile(input: ReconcileInput): ReconcileAction[] {
   return actions;
 }
 
+// --- Removal with a grace period (decision 042) -------------------------------------------------
+
+// A removed project is deleted this many days after its active period ends (Erik, 2026-11-12).
+// The migration's CHECK holds the same number.
+export const REMOVAL_GRACE_DAYS = 7;
+const DAY_MS = 86_400_000;
+
+// When a removed project stops: the end of the period its subscription has paid (or trials) for,
+// never before `now`. No subscription, an ended or blocked one, an exempt or seat workspace, or
+// billing off: the removal time (the caller passes sub = null).
+export function removalActiveUntil(sub: Pick<ProjectSub, "status" | "trialEnd" | "currentPeriodEnd"> | null, now: Date): Date {
+  if (!sub) return now;
+  let end: Date | null = null;
+  if (sub.status === "trialing") end = sub.trialEnd ?? sub.currentPeriodEnd;
+  else if (sub.status === "active" || sub.status === "past_due") end = sub.currentPeriodEnd;
+  return end && end > now ? end : now;
+}
+
+export interface RemovalDates {
+  activeUntil: Date;
+  deleteAfter: Date;
+}
+
+export function removalDates(sub: Pick<ProjectSub, "status" | "trialEnd" | "currentPeriodEnd"> | null, now: Date): RemovalDates {
+  const activeUntil = removalActiveUntil(sub, now);
+  return { activeUntil, deleteAfter: new Date(activeUntil.getTime() + REMOVAL_GRACE_DAYS * DAY_MS) };
+}
+
 // The Stripe idempotency key for a project's subscription. `attempt` counts the project's earlier
 // subscriptions, so a retry reuses the key and a new subscription after an ended one gets a new key.
 export const createKey = (tenant: string, projectId: string, attempt: number) => `project-sub-${tenant}-${projectId}-${attempt}`;
