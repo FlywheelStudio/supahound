@@ -243,6 +243,19 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
         sub.last_proration_behavior = body.proration_behavior;
         return ok(sub);
       }
+      // Closing a workspace (decision 037): cancel at once. Like Stripe, it also sends the event.
+      const subCancel = /^\/v1\/subscriptions\/(sub_[a-z0-9]+)$/.exec(path);
+      if (req.method === "DELETE" && subCancel) {
+        const sub = subscriptions.get(subCancel[1]!);
+        if (!sub) return error(404, "resource_missing", "No such subscription");
+        if (sub.status === "canceled") return error(400, "resource_missing", "This subscription is already canceled");
+        sub.status = "canceled";
+        sub.canceled_at = Math.floor(Date.now() / 1000);
+        sub.cancel_params = body;
+        ok(sub);
+        void deliver("customer.subscription.deleted", { ...sub });
+        return;
+      }
       const subGet = /^\/v1\/subscriptions\/(sub_[a-z0-9]+)$/.exec(path);
       if (req.method === "GET" && subGet) {
         const s = subscriptions.get(subGet[1]!);

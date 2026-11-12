@@ -6,7 +6,7 @@ import type { ProjectId, TenantId } from "@supahound/core/tenancy/scope";
 // Pure functions, so every branch is testable without a browser.
 
 export type ProjectPage = "dashboard" | "incidents" | "findings" | "general" | "notifications" | "plan" | "people";
-export type WorkspacePage = "overview" | "projects" | "billing";
+export type WorkspacePage = "overview" | "projects" | "billing" | "settings";
 
 const PROJECT_SUFFIX: Record<ProjectPage, string> = {
   dashboard: "",
@@ -63,6 +63,8 @@ export function workspaceNav(tenant: TenantId, active: WorkspacePage | null, bil
     item("Projects", workspacePath(tenant, "projects"), active === "projects"),
   ];
   if (billingOn) items.push(item("Billing", workspacePath(tenant, "billing"), active === "billing"));
+  // Supabase connections, data retention, close workspace (decision 037).
+  items.push(item("Settings", workspacePath(tenant, "settings"), active === "settings"));
   return { label: "Workspace", items };
 }
 

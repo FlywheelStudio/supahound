@@ -1,6 +1,7 @@
 import { accessFor, accessForAccount, isExemptEmail, needsEnterprise, PRICE_LABEL, REJECTION_TEXT, TRIAL_DAYS } from "@supahound/core/billing/policy";
 import { termsText } from "@supahound/core/billing/stripeMap";
 import { getBilling, grantExemption, projectTiers } from "@supahound/core/db/billing";
+import { getClosure } from "@supahound/core/db/closure";
 import { listProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
@@ -51,24 +52,27 @@ export default async function Billing({
   const staff = isExemptEmail(user.email, exemptDomains());
   const data = await withPool((pool) =>
     withTenantForUser(pool, user.id, tenant, async (tx, role) => {
+      // A closed workspace has no billing page; its closed page explains what happens (decision 037).
+      if (await getClosure(tx)) return { closed: true as const };
       let billing = await getBilling(tx);
       if (!billing.exempt && staff && role === "owner") {
         const blocked = accessForAccount(billing) === "blocked";
         if (await grantExemption(tx, user.id, new Date())) {
-          if (blocked) return { granted: true as const };
+          if (blocked) return { closed: false as const, granted: true as const };
           billing = await getBilling(tx);
         }
       }
       const projects = await listProjects(tx);
       const names = new Map(projects.map((p) => [p.id, p.name]));
       const tiers = (await projectTiers(tx)).map((t) => ({ ...t, name: names.get(t.id) ?? "Project" }));
-      return { granted: false as const, role, billing, tiers, projects };
+      return { closed: false as const, granted: false as const, role, billing, tiers, projects };
     }),
   ).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();
     throw err;
   });
 
+  if (data.closed) redirect(`/w/${tenant}/closed`);
   // A new staff workspace: straight on to the overview, after the transaction committed.
   if (data.granted) redirect(`/w/${tenant}`);
 
@@ -180,6 +184,11 @@ export default async function Billing({
               Add card and start trial
             </button>
           </form>
+          {canManage && (
+            <p className="mt-6 text-sm text-slate-600">
+              To disconnect Supabase or close this workspace instead, open <a href={`/w/${tenant}/settings`} className="underline">Workspace settings</a>.
+            </p>
+          )}
         </section>
       )}
     </>

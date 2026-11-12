@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 
-// A stand-in for the Supabase Management API: only GET /v1/projects, which the project picker
-// (issue #9) calls from the Worker. Browser-side page.route cannot see server-side calls, so the
+// A stand-in for the Supabase Management API: GET /v1/projects, which the project picker
+// (issue #9) calls from the Worker, and POST /v1/oauth/revoke, which Disconnect calls (#43). Browser-side page.route cannot see server-side calls, so the
 // Worker reaches this through SUPABASE_API_URL. Each bearer token gets its own answer, set by a
 // test through /__test/projects; an unknown token gets 401, like a revoked grant.
 
@@ -28,6 +28,9 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 export async function startFakeManagement(port: number): Promise<FakeManagement> {
   const answers = new Map<string, { status: number; projects: FakeProject[] }>();
   const calls: { token: string; path: string }[] = [];
+  // Disconnect (decision 037): POST /v1/oauth/revoke. Refresh tokens listed here are refused.
+  const revokes: { client_id: unknown; refresh_token: unknown }[] = [];
+  const refuse = new Set<string>();
 
   const server: Server = createServer((req, res) => {
     void (async () => {
@@ -42,6 +45,18 @@ export async function startFakeManagement(port: number): Promise<FakeManagement>
         return send(200, {});
       }
       if (req.method === "GET" && path === "/__test/calls") return send(200, calls);
+      if (req.method === "GET" && path === "/__test/revokes") return send(200, revokes);
+      if (req.method === "POST" && path === "/__test/refuse-revoke") {
+        refuse.add(String((await readJson(req)).refresh_token));
+        return send(200, {});
+      }
+      if (req.method === "POST" && path === "/v1/oauth/revoke") {
+        const b = await readJson(req);
+        revokes.push({ client_id: b.client_id, refresh_token: b.refresh_token });
+        if (!b.client_secret || refuse.has(String(b.refresh_token))) return send(403, { message: "Forbidden action" });
+        res.writeHead(204).end();
+        return;
+      }
       if (req.method === "GET" && path === "/v1/projects") {
         const token = (req.headers.authorization ?? "").replace(/^Bearer /, "");
         calls.push({ token, path });
