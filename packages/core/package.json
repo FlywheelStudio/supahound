@@ -13,6 +13,7 @@
     "master-key": "tsx src/cli.ts master-key",
     "print-sql": "tsx src/cli.ts print-sql",
     "subprocessor-notice": "tsx src/cli.ts subprocessor-notice",
+    "convert-subscriptions": "tsx src/cli.ts convert-subscriptions",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

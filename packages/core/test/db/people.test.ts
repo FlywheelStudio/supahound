@@ -14,7 +14,7 @@ import { pgInfo, useDb } from "./harness.js";
 
 const PROJECT_TABLES = [
   "projects", "service_role_networks", "poll_runs", "incidents", "findings", "project_usage", "audit_log",
-  "posture_scans", "posture_findings",
+  "posture_scans", "posture_findings", "project_subscriptions",
 ] as const;
 const NOW = new Date("2026-11-12T12:00:00Z");
 const user = () => verifiedUserId(randomUUID());
@@ -47,6 +47,10 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
       await repo.saveNetworks(tx, p, [16509]);
       await repo.appendAudit(tx, { projectId: p, action: "logs_query", detail: { rows: 1 } });
       await billing.saveDailyUsage(tx, p, "2026-11-11", 10);
+      await billing.saveProjectSubscription(tx, {
+        subscriptionId: `sub_${ref}`, supabaseRef: ref, tier: "starter", status: "active", trialEnd: null,
+        currentPeriodEnd: NOW, cancelAtPeriodEnd: false,
+      }, p);
       const scanId = (await posture.claimPostureScan(tx, p, NOW, { refreshSeconds: 1, retrySeconds: 1 }))!;
       await posture.savePostureScan(tx, p, scanId, {
         catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },

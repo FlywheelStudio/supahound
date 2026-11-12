@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { startCheckout, type FlowDeps, type StripeGateway } from "../../src/billing/flow.js";
-import { billedTiers, getBilling, isPaying, projectTiers, saveSubscription, withPaidTenantForUser, type SubscriptionSnapshot } from "../../src/db/billing.js";
+import type { StripeSubscription } from "../../src/billing/stripeMap.js";
+import { billedTiers, getBilling, isPaying, projectTiers, saveSubscription, withPaidTenantForUser } from "../../src/db/billing.js";
 import { getClosure, purgeHistory, recordClosure, WorkspaceClosedError } from "../../src/db/closure.js";
 import { storeConnection } from "../../src/db/connections.js";
 import * as repo from "../../src/db/repo.js";
@@ -136,9 +137,9 @@ const stopPaying = (db: Db, w: Workspace) =>
 
 class FakeStripe implements Pick<StripeGateway, "setCancelAtPeriodEnd"> {
   calls: { id: string; cancel: boolean }[] = [];
-  subs = new Map<string, SubscriptionSnapshot>();
+  subs = new Map<string, StripeSubscription>();
   fail = false;
-  async setCancelAtPeriodEnd(id: string, cancel: boolean): Promise<SubscriptionSnapshot> {
+  async setCancelAtPeriodEnd(id: string, cancel: boolean): Promise<StripeSubscription> {
     if (this.fail) throw new Error("stripe down");
     this.calls.push({ id, cancel });
     const s = this.subs.get(id)!;
@@ -147,11 +148,13 @@ class FakeStripe implements Pick<StripeGateway, "setCancelAtPeriodEnd"> {
   }
 }
 
+const SEAT_FIELDS = { tenant: null, cardVerifiedAt: null, projectId: null, supabaseRef: null, tier: null, converted: false, defaultPaymentMethod: null };
+
 async function subscribe(db: Db, w: Workspace, stripe: FakeStripe, periodEnd: Date, status: "active" | "trialing" = "active"): Promise<string> {
   const id = `sub_${w.tenant.replace(/-/g, "").slice(0, 16)}`;
-  const s: SubscriptionSnapshot = {
+  const s: StripeSubscription = {
     id, customerId: `cus_${w.tenant.replace(/-/g, "").slice(0, 16)}`, status, seats: { starter: 1, pro: 0 },
-    trialEnd: status === "trialing" ? periodEnd : null, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: false,
+    trialEnd: status === "trialing" ? periodEnd : null, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: false, ...SEAT_FIELDS,
   };
   stripe.subs.set(id, s);
   await withTenant(db.app, w.tenant, (tx) => saveSubscription(tx, s, ago(1)));
@@ -375,7 +378,8 @@ describe.skipIf(pgInfo === null)("closing a workspace (decision 037)", () => {
 
 describe.skipIf(pgInfo === null)("purging a closed workspace (decision 037)", () => {
   const db = useDb();
-  const KEPT = ["account_closures", "audit_log", "billing_accounts", "memberships", "scan_authorizations", "scan_domains", "stripe_events", "tenants"];
+  // project_subscriptions is payment history (decision 041): the purge keeps it, unlinked.
+  const KEPT = ["account_closures", "audit_log", "billing_accounts", "memberships", "project_subscriptions", "scan_authorizations", "scan_domains", "stripe_events", "tenants"];
 
   it("deletes the logs and history, keeps the record and payment history, and leaves the other tenant exactly as it was", async () => {
     const a = await seedFullTenant(db, "Leaving", "token-of-leaving");

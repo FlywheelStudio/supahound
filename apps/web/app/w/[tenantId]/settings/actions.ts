@@ -6,7 +6,7 @@ import { revokeGrant } from "@supahound/core/supabase/oauth";
 import { connectionId, tenantId as parseTenantId, type ConnectionId, type TenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
 import { notFound, redirect } from "next/navigation";
-import { mode, syncSeatsAfterChange } from "../../../../lib/billing";
+import { mode, syncBillingAfterChange } from "../../../../lib/billing";
 import { closeRedirect, disconnectRedirect, parseBack } from "../../../../lib/dataControls";
 import { withPool } from "../../../../lib/db";
 import { oauthClient, vault } from "../../../../lib/oauth";
@@ -45,8 +45,9 @@ export async function disconnectAction(formData: FormData): Promise<void> {
         appUrl: env.APP_URL,
       });
     }
-    // Paused projects are not billed: bill fewer seats now (pro rata), as when a project is removed.
-    if (r.projectsPaused > 0) await syncSeatsAfterChange(pool, tenant);
+    // Paused projects are not billed: seat model, bill fewer seats now (pro rata); per-project model,
+    // their subscriptions cancel at the end of the paid period (decision 041).
+    if (r.projectsPaused > 0) await syncBillingAfterChange(pool, tenant);
     return r;
   }).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();

@@ -8,7 +8,7 @@ import { connectionId, projectId, tenantId as parseTenantId, type ConnectionId, 
 import { env } from "cloudflare:workers";
 import { notFound, redirect } from "next/navigation";
 import { withPool } from "../../../../lib/db";
-import { paidTenant, syncSeatsAfterChange, toBillingIfUnpaid } from "../../../../lib/billing";
+import { paidTenant, syncBillingAfterChange, toBillingIfUnpaid } from "../../../../lib/billing";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { handleWatch, picksPath, removalOutcome } from "../../../../lib/picker";
 import { requireUser } from "../../../../lib/supabase";
@@ -44,7 +44,7 @@ export async function watchProjectsAction(formData: FormData): Promise<void> {
       insert: (conn, projects) =>
         paidTenant(pool, user.id, tenant, (tx, role) => (role === "member" ? Promise.resolve(null) : watchProjects(tx, conn, projects))),
     }).then(async (next) => {
-      if (next.includes("added=")) await syncSeatsAfterChange(pool, tenant);
+      if (next.includes("added=")) await syncBillingAfterChange(pool, tenant);
       return next;
     }),
   ).catch(memberOr404);
@@ -65,7 +65,7 @@ export async function removeProjectAction(formData: FormData): Promise<void> {
       if (result === "removed" && !(await removeProject(tx, project))) return "missing" as const;
       return result;
     }).then(async (r) => {
-      if (r === "removed") await syncSeatsAfterChange(pool, tenant);
+      if (r === "removed") await syncBillingAfterChange(pool, tenant);
       return r;
     }),
   ).catch(memberOr404);

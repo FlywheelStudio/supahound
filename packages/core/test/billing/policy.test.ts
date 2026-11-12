@@ -80,17 +80,43 @@ describe("staff exemption (decision 029)", () => {
   });
 
   it("gives an exempt workspace full access whatever its Stripe status", () => {
-    expect(accessForAccount({ status: "none", exempt: true })).toBe("full");
-    expect(accessForAccount({ status: "canceled", exempt: true })).toBe("full");
-    expect(accessForAccount({ status: "none", exempt: false })).toBe("blocked");
-    expect(accessForAccount({ status: "past_due", exempt: false })).toBe("grace");
+    const seat = { model: "workspace" as const, cardVerifiedAt: null };
+    expect(accessForAccount({ status: "none", exempt: true, ...seat })).toBe("full");
+    expect(accessForAccount({ status: "canceled", exempt: true, ...seat })).toBe("full");
+    expect(accessForAccount({ status: "none", exempt: false, ...seat })).toBe("blocked");
+    expect(accessForAccount({ status: "past_due", exempt: false, ...seat })).toBe("grace");
+  });
+
+  it("per-project model: a validated card with nothing billed is full access; the standing decides the rest (decision 041)", () => {
+    const card = new Date();
+    const project = (status: BillingStatus, cardVerifiedAt: Date | null = card) => accessForAccount({ status, exempt: false, model: "project", cardVerifiedAt });
+    expect(Object.fromEntries(ALL.map((s) => [s, project(s)]))).toEqual({
+      none: "full", incomplete: "grace", incomplete_expired: "blocked", trialing: "full", active: "full",
+      past_due: "grace", canceled: "blocked", unpaid: "blocked", paused: "blocked",
+    });
+    expect(project("none", null)).toBe("blocked");
+    expect(accessForAccount({ status: "canceled", exempt: true, model: "project", cardVerifiedAt: null })).toBe("full");
   });
 });
 
-describe("payingAccount (decision 037)", () => {
-  it("counts active, past_due and a staff exemption as paying, and nothing else", () => {
-    const all: BillingStatus[] = ["none", "incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"];
-    expect(all.filter((status) => payingAccount({ status, exempt: false }))).toEqual(["active", "past_due"]);
-    expect(all.every((status) => payingAccount({ status, exempt: true }))).toBe(true);
+describe("payingAccount (decisions 037 and 041)", () => {
+  it("seat model: counts active, past_due and a staff exemption as paying, and nothing else", () => {
+    const seat = (status: BillingStatus, exempt = false) => payingAccount({ status, exempt, model: "workspace", projectStatuses: [] });
+    expect(ALL.filter((status) => seat(status))).toEqual(["active", "past_due"]);
+    expect(ALL.every((status) => seat(status, true))).toBe(true);
+    // A seat workspace ignores project subscriptions (none exist until the conversion).
+    expect(payingAccount({ status: "trialing", exempt: false, model: "workspace", projectStatuses: ["active"] })).toBe(false);
+  });
+
+  it("per-project model: pays while any project subscription is active or past_due, whatever the standing", () => {
+    const project = (projectStatuses: BillingStatus[], status: BillingStatus = "none") => payingAccount({ status, exempt: false, model: "project", projectStatuses });
+    for (const s of ALL) expect([s, project([s])]).toEqual([s, s === "active" || s === "past_due"]);
+    // A removed project's subscription runs out its paid period: still paying.
+    expect(project(["canceled", "active"])).toBe(true);
+    expect(project(["trialing", "canceled"])).toBe(false);
+    expect(project([])).toBe(false);
+    // The standing is not a Stripe status in this model: "active" there alone does not count.
+    expect(project([], "active")).toBe(false);
+    expect(payingAccount({ status: "none", exempt: true, model: "project", projectStatuses: [] })).toBe(true);
   });
 });

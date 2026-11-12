@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { describe, expect, it } from "vitest";
 import { checkCard } from "@supahound/core/billing/policy";
-import { billingEventFromStripe, sessionFromStripe, subscriptionFromStripe, termsText } from "@supahound/core/billing/stripeMap";
+import { billingEventFromStripe, invoiceFromStripe, projectSubFromStripe, sessionFromStripe, subscriptionFromStripe, termsText } from "@supahound/core/billing/stripeMap";
 import { verifyStripeEvent } from "../lib/stripeWebhook";
 
 // Stripe objects → the billing flow's inputs (decision 028), and the webhook signature check.
@@ -83,11 +83,52 @@ describe("subscriptionFromStripe", () => {
       id: "sub_1", customerId: "cus_1", status: "trialing", seats: { starter: 3, pro: 1 },
       trialEnd: new Date(1_800_000_000_000), currentPeriodEnd: new Date(1_800_000_000_000), cancelAtPeriodEnd: false,
       tenant: TENANT, cardVerifiedAt: new Date("2026-11-10T12:00:00.000Z"),
+      projectId: null, supabaseRef: null, tier: null, converted: false, defaultPaymentMethod: null,
     });
+  });
+
+  // Decision 041: one subscription per project, one item at the project's tier.
+  const project = {
+    id: "sub_p1", customer: "cus_1", status: "active", trial_end: null, cancel_at_period_end: true, default_payment_method: "pm_1",
+    metadata: { tenant_id: TENANT, project_id: "11111111-2222-4333-8444-555555555555", supabase_ref: "abcdefghijklmnopqrst" },
+    items: { data: [{ id: "si_p", quantity: 1, current_period_end: 1_800_000_000, price: { id: "price_pro" } }] },
+  };
+
+  it("reads a project subscription's project, ref and tier, and maps it to a stored row", () => {
+    const s = subscriptionFromStripe(project, PRICES);
+    expect([s.projectId, s.supabaseRef, s.tier, s.cancelAtPeriodEnd, s.defaultPaymentMethod]).toEqual([
+      "11111111-2222-4333-8444-555555555555", "abcdefghijklmnopqrst", "pro", true, "pm_1",
+    ]);
+    expect(projectSubFromStripe(s)).toEqual({
+      subscriptionId: "sub_p1", projectId: "11111111-2222-4333-8444-555555555555", supabaseRef: "abcdefghijklmnopqrst", tier: "pro",
+      status: "active", trialEnd: null, currentPeriodEnd: new Date(1_800_000_000_000), cancelAtPeriodEnd: true,
+    });
+  });
+
+  it("fails closed on a project subscription at an unknown price or with a bad ref: no row", () => {
+    const unknown = { ...project, items: { data: [{ id: "si_x", quantity: 1, price: { id: "price_someone_elses" } }] } };
+    expect(projectSubFromStripe(subscriptionFromStripe(unknown, PRICES))).toBeNull();
+    const badRef = { ...project, metadata: { ...project.metadata, supabase_ref: "../../etc" } };
+    expect(projectSubFromStripe(subscriptionFromStripe(badRef, PRICES))).toBeNull();
+    expect(projectSubFromStripe(subscriptionFromStripe(sub, PRICES))).toBeNull();
   });
 
   it("treats a status it does not know as canceled, which closes the gate", () => {
     expect(subscriptionFromStripe({ ...sub, status: "something_new" }, PRICES).status).toBe("canceled");
+  });
+
+  it("reads the conversion mark on a seat subscription", () => {
+    expect(subscriptionFromStripe({ ...sub, metadata: { ...sub.metadata, converted: "yes" } }, PRICES).converted).toBe(true);
+  });
+});
+
+describe("invoiceFromStripe", () => {
+  it("keeps only https links from Stripe", () => {
+    const i = { id: "in_1", number: "A-1", created: 1_800_000_000, total: 1999, currency: "usd", status: "paid", hosted_invoice_url: "https://invoice.stripe.com/i/x" };
+    expect(invoiceFromStripe(i)).toEqual({
+      id: "in_1", number: "A-1", created: new Date(1_800_000_000_000), totalCents: 1999, currency: "usd", status: "paid", hostedUrl: "https://invoice.stripe.com/i/x",
+    });
+    expect(invoiceFromStripe({ ...i, hosted_invoice_url: "javascript:alert(1)" }).hostedUrl).toBeNull();
   });
 });
 
@@ -103,6 +144,17 @@ describe("billingEventFromStripe", () => {
     });
     const invoice = { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: "sub_1", metadata: { tenant_id: TENANT } } } };
     expect(billingEventFromStripe(event("invoice.payment_failed", invoice))).toMatchObject({ tenant: TENANT, subscriptionId: "sub_1" });
+  });
+
+  it("maps a project subscription's events and invoices to its tenant and subscription (decision 041)", () => {
+    const meta = { tenant_id: TENANT, project_id: "11111111-2222-4333-8444-555555555555" };
+    for (const type of ["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"]) {
+      expect(billingEventFromStripe(event(type, { id: "sub_p1", metadata: meta }))).toMatchObject({ type, tenant: TENANT, subscriptionId: "sub_p1" });
+    }
+    for (const type of ["invoice.paid", "invoice.payment_failed", "invoice.payment_action_required"]) {
+      const invoice = { id: "in_p", parent: { subscription_details: { subscription: "sub_p1", metadata: meta } } };
+      expect(billingEventFromStripe(event(type, invoice))).toMatchObject({ type, tenant: TENANT, subscriptionId: "sub_p1" });
+    }
   });
 
   it("gives no tenant to other checkouts and other event types", () => {
@@ -132,9 +184,12 @@ describe("verifyStripeEvent", () => {
 });
 
 describe("termsText", () => {
-  it("states the hold, the trial, both prices, the thresholds, the minimum and how to cancel", () => {
+  it("states the hold, the trial, both prices, the thresholds, the per-project rules and how to cancel", () => {
     const t = termsText();
     for (const part of ["$1 hold", "release it at once", "7 days", "$19.99", "$99", "1 million", "10 million", "Enterprise",
-      "at least one project", "next monthly charge", "pay nothing"]) expect(t).toContain(part);
+      "its own monthly subscription", "billed from the day you add it", "end of its paid month", "next monthly charge", "pay nothing"]) expect(t).toContain(part);
+    // Decision 041: no minimum charge for a workspace with no project.
+    expect(t).not.toContain("at least one project");
+    expect(termsText(false)).toContain("A project is billed from the day you add it");
   });
 });

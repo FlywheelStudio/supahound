@@ -1,6 +1,7 @@
 import { accessFor, accessForAccount, isExemptEmail, needsEnterprise, PRICE_LABEL, REJECTION_TEXT, TRIAL_DAYS } from "@supahound/core/billing/policy";
 import { termsText } from "@supahound/core/billing/stripeMap";
-import { getBilling, grantExemption, projectTiers, trialAvailable } from "@supahound/core/db/billing";
+import { trialEndsAt } from "@supahound/core/billing/projects";
+import { getBilling, grantExemption, listProjectSubscriptions, projectTiers, trialAvailable } from "@supahound/core/db/billing";
 import { getClosure, isClosedNow } from "@supahound/core/db/closure";
 import { listProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
@@ -8,6 +9,7 @@ import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
 import { notFound, redirect } from "next/navigation";
 import { exemptDomains, mode } from "../../../../lib/billing";
+import { dollars, monthlyTotalCents, subscriptionLine, summaryRows, tierLabel } from "../../../../lib/projectBilling";
 import { brandFrom } from "../../../../lib/brand";
 import { withPool } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/supabase";
@@ -65,7 +67,10 @@ export default async function Billing({
       const projects = await listProjects(tx);
       const names = new Map(projects.map((p) => [p.id, p.name]));
       const tiers = (await projectTiers(tx)).map((t) => ({ ...t, name: names.get(t.id) ?? "Project" }));
-      return { closed: false as const, granted: false as const, role, billing, tiers, projects, trial: await trialAvailable(tx, user.id) };
+      return {
+        closed: false as const, granted: false as const, role, billing, tiers, projects, trial: await trialAvailable(tx, user.id),
+        subs: await listProjectSubscriptions(tx),
+      };
     }),
   ).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();
@@ -84,6 +89,17 @@ export default async function Billing({
   const liveSubscription = billing.subscriptionId !== null && accessFor(billing.status) !== "blocked";
   const brand = brandFrom(env);
   const canManage = role !== "member";
+  const now = new Date();
+  const trialEnd = trialEndsAt(billing, now);
+  const rows = summaryRows(data.subs, new Map(tiers.map((t) => [t.id, t.name])));
+  const portal = (
+    <form action={openPortalAction} className="mt-6">
+      <input type="hidden" name="tenantId" value={tenant} />
+      <button className="rounded-md bg-slate-950 px-4 py-2 font-medium text-white hover:bg-slate-800">
+        Manage card and invoices
+      </button>
+    </form>
+  );
 
   const content = (
     <>
@@ -120,6 +136,43 @@ export default async function Billing({
               </button>
             </form>
           )}
+        </section>
+      ) : access !== "blocked" && billing.model === "project" ? (
+        <section aria-label="Project subscriptions" className="rounded-md border border-slate-200 bg-white p-6">
+          <dl className="grid grid-cols-[10rem_1fr] gap-y-2 text-sm">
+            <dt className="text-slate-500">Status</dt>
+            <dd>{access === "grace" ? "Payment failed, retrying" : trialEnd ? `Free trial until ${trialEnd.toISOString().slice(0, 10)}` : "Active"}</dd>
+            <dt className="text-slate-500">Monthly total</dt>
+            <dd>{dollars(monthlyTotalCents(data.subs))} for {rows.filter((r) => !r.sub.cancelAtPeriodEnd && r.sub.status !== "canceled").length} projects</dd>
+          </dl>
+          <p className="mt-4 text-sm text-slate-600">
+            Each project has its own subscription. A project added after the trial is billed from the day you add it. Removing a
+            project stops its charges at the end of its paid month.
+          </p>
+          {rows.length === 0 ? (
+            <p className="mt-6 text-sm text-slate-600">No project is billed yet. Add a project to start watching it.</p>
+          ) : (
+            <table aria-label="Subscriptions by project" className="mt-6 w-full text-left text-sm">
+              <thead className="text-slate-500">
+                <tr><th className="py-2 font-medium">Project</th><th className="font-medium">Plan</th><th className="font-medium">Status</th><th className="font-medium">Next</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {rows.map(({ sub, name }) => {
+                  const line = subscriptionLine(sub, now);
+                  const t = tiers.find((x) => x.id === sub.projectId);
+                  return (
+                    <tr key={sub.subscriptionId}>
+                      <td className="py-2">{sub.projectId ? <a href={`/w/${tenant}/p/${sub.projectId}/settings/plan`} className="underline">{name}</a> : name}</td>
+                      <td>{tierLabel(sub.tier)} · {line.price}{t && needsEnterprise(t.requests30d) ? " · Enterprise: we will contact you" : ""}</td>
+                      <td>{line.status}</td>
+                      <td className="text-slate-600">{line.next}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          {canManage && portal}
         </section>
       ) : access !== "blocked" ? (
         <section className="rounded-md border border-slate-200 bg-white p-6">
@@ -187,6 +240,12 @@ export default async function Billing({
               {trial ? "Add card and start trial" : "Add card and subscribe"}
             </button>
           </form>
+          {billing.model === "project" && billing.customerId && data.subs.some((x) => x.status === "unpaid" || x.status === "past_due") && (
+            <div className="mt-6 border-t border-slate-200 pt-6">
+              <p className="text-sm text-slate-700">A project subscription has an unpaid invoice. Pay it with a working card in the portal.</p>
+              {portal}
+            </div>
+          )}
           {canManage && (
             <p className="mt-6 text-sm text-slate-600">
               To disconnect Supabase or close this workspace instead, open <a href={`/w/${tenant}/settings`} className="underline">Workspace settings</a>.

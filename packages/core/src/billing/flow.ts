@@ -1,13 +1,16 @@
 import type { Pool } from "pg";
 import {
-  acceptBillingTerms, billedTiers, claimStripeEvent, getBilling, isStripeEventProcessed, projectTiers, recordCardRejected, trialAvailable,
-  refreshProjectTiers, saveSeats, saveSubscription, setStripeCustomer, type SubscriptionSnapshot,
+  acceptBillingTerms, billedTiers, claimStripeEvent, getBilling, isStripeEventProcessed, listProjectSubscriptions, projectTiers,
+  recordCardRejected, refreshProjectTiers, refreshStanding, relinkProjectSubscription, saveProjectSubscription, saveSeats,
+  saveSubscription, setStripeCustomer, startProjectBilling, trialAvailable, watchedProjects,
 } from "../db/billing.js";
 import { getClosure } from "../db/closure.js";
 import { withTenant } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
 import { tenantId as parseTenantId, type TenantId, type UserId } from "../tenancy/scope.js";
-import { accessFor, accessForAccount, checkCard, seatsFor, TERMS_VERSION, type CardEvidence, type CardRejection, type Seats } from "./policy.js";
+import { accessFor, accessForAccount, checkCard, seatsFor, TERMS_VERSION, TRIAL_DAYS, type CardEvidence, type CardRejection, type Seats, type Tier } from "./policy.js";
+import { createKey, isLive, planReconcile } from "./projects.js";
+import { projectSubFromStripe, type InvoiceSummary, type StripeSubscription } from "./stripeMap.js";
 
 // The billing flow (decision 028). Stripe sits behind StripeGateway, so the flow runs against a
 // fake in tests. No Stripe call ever runs inside a tenant transaction.
@@ -29,20 +32,31 @@ export interface StripeGateway {
   }): Promise<{ id: string; url: string }>;
   getVerificationSession(id: string): Promise<VerificationSession>;
   releaseHold(paymentIntentId: string): Promise<void>;
-  // The customer's subscription that is not canceled, if one exists.
-  liveSubscription(customerId: string): Promise<(SubscriptionSnapshot & { cardVerifiedAt: Date | null }) | null>;
-  // trial false: no free trial, the first charge is at once (decision 037: one trial ever).
-  createTrialSubscription(input: {
-    tenant: TenantId; customerId: string; seats: Seats; paymentMethodId: string;
-    cardVerifiedAt: Date; idempotencyKey: string; trial: boolean;
-  }): Promise<SubscriptionSnapshot>;
-  getSubscription(id: string): Promise<SubscriptionSnapshot & { tenant: string | null; cardVerifiedAt: Date | null }>;
+  // The customer's seat subscription (decision 028) that has not ended, if one exists. Project
+  // subscriptions (metadata.project_id) are never returned.
+  liveSubscription(customerId: string): Promise<StripeSubscription | null>;
+  getSubscription(id: string): Promise<StripeSubscription>;
   // prorate: true when the customer adds or removes a project (charged now, pro rata); false when
   // a project changes tier from its usage, which takes effect at the next renewal (decision 028).
   setSeats(subscriptionId: string, seats: Seats, prorate: boolean): Promise<void>;
   portalUrl(customerId: string, returnUrl: string): Promise<string>;
   // Closing a workspace cancels at the end of the paid period; reopening undoes it (decision 037).
-  setCancelAtPeriodEnd(subscriptionId: string, cancel: boolean): Promise<SubscriptionSnapshot>;
+  // converted: the conversion CLI marks the seat subscription it cancels (decision 041).
+  setCancelAtPeriodEnd(
+    subscriptionId: string, cancel: boolean, options?: { converted?: boolean; idempotencyKey?: string },
+  ): Promise<StripeSubscription>;
+
+  // One subscription per project (decision 041).
+  // Every project subscription bills the customer's default card, so a new card reaches them all.
+  setInvoicePaymentMethod(customerId: string, paymentMethodId: string, idempotencyKey: string): Promise<void>;
+  createProjectSubscription(input: {
+    tenant: TenantId; projectId: string; supabaseRef: string; customerId: string; tier: Tier;
+    trialEnd: Date | null; anchor: Date | null; idempotencyKey: string;
+  }): Promise<StripeSubscription>;
+  // Every subscription of the customer, live or not.
+  customerSubscriptions(customerId: string): Promise<StripeSubscription[]>;
+  setProjectTier(subscriptionId: string, tier: Tier): Promise<StripeSubscription>;
+  invoices(subscriptionId: string, limit: number): Promise<InvoiceSummary[]>;
 }
 
 export interface FlowDeps {
@@ -130,38 +144,52 @@ export async function completeVerification(
     return { tenant, result: "not_authorized" };
   }
 
-  // Reuse a live subscription: a retry after the idempotency window must not start a second one.
+  // A seat subscription that is still live (decision 028; a workspace not yet converted): keep it.
   const existing = await deps.stripe.liveSubscription(s.customerId);
   const now = deps.now();
-  let sub: SubscriptionSnapshot;
-  let verifiedAt: Date;
   if (existing) {
-    sub = existing;
-    verifiedAt = existing.cardVerifiedAt ?? now;
-  } else {
-    const tiers = await withTenant(deps.pool, tenant, (tx) => projectTiers(tx));
-    // One trial per workspace, ever, and none for an owner who had one elsewhere (decision 037):
-    // the session carries the owner check; the workspace check runs here again.
-    const trial = s.trialAllowed && billing.cardVerifiedAt === null && billing.trialEnd === null;
-    sub = await deps.stripe.createTrialSubscription({
-      tenant, customerId: s.customerId, seats: seatsFor(billedTiers(tiers)), paymentMethodId: s.hold.paymentMethodId,
-      cardVerifiedAt: now, idempotencyKey: `trial-${s.id}`, trial,
-    });
-    verifiedAt = now;
+    await withTenant(deps.pool, tenant, (tx) => saveSubscription(tx, existing, existing.cardVerifiedAt ?? now));
+    return { tenant, result: "subscribed" };
   }
-  await withTenant(deps.pool, tenant, (tx) => saveSubscription(tx, sub, verifiedAt));
+
+  // Decision 041: one subscription per project. The card check itself creates no subscription; it
+  // starts the workspace's one trial (decision 032), which every project added during it shares.
+  // One trial per workspace, ever, and none for an owner who had one elsewhere (decision 037): the
+  // session carries the owner check; the workspace check runs here again.
+  const trial = s.trialAllowed && billing.cardVerifiedAt === null && billing.trialEnd === null;
+  await deps.stripe.setInvoicePaymentMethod(s.customerId, s.hold.paymentMethodId, `default-pm-${s.id}`);
+  await withTenant(deps.pool, tenant, (tx) => startProjectBilling(tx, now, trial ? new Date(now.getTime() + TRIAL_DAYS * DAY_MS) : null));
+  // A new card after a failed one: projects whose subscription ended get a new one, billed now.
+  try {
+    await reconcileProjects(deps, tenant, { afterCardCheck: true });
+  } catch {
+    // The card is saved; the overview and the daily job reconcile again.
+  }
   return { tenant, result: "subscribed" };
 }
 
-// Copies Stripe's current view of a subscription into the tenant's row. Stripe is the source of
-// truth, so event order does not matter.
+const DAY_MS = 86_400_000;
+
+// Copies Stripe's current view of a subscription into the tenant's rows. Stripe is the source of
+// truth, so event order does not matter. A project subscription (metadata.project_id, decision 041)
+// goes to project_subscriptions and never touches the seat columns; a seat subscription of a
+// converted workspace only runs out its period, so nothing is stored for it.
 export async function refreshSubscription(deps: FlowDeps, subscriptionId: string): Promise<TenantId | null> {
   const sub = await deps.stripe.getSubscription(subscriptionId);
   const tenant = parseTenant(sub.tenant);
   if (!tenant) return null;
+  const project = projectSubFromStripe(sub);
   const saved = await withTenant(deps.pool, tenant, async (tx) => {
     const billing = await getBilling(tx);
     if (billing.customerId !== sub.customerId) return false;
+    if (project) {
+      await saveProjectSubscription(tx, project, project.projectId);
+      await refreshStanding(tx);
+      return true;
+    }
+    // A project subscription whose item is at no known price: fail closed, store nothing.
+    if (sub.projectId) return false;
+    if (billing.model === "project") return true;
     // A subscription row needs a verified card (migration CHECK). Our subscriptions carry the
     // verification time in their metadata; one without it was not created by this flow.
     if (!billing.cardVerifiedAt && !sub.cardVerifiedAt) return false;
@@ -171,13 +199,84 @@ export async function refreshSubscription(deps: FlowDeps, subscriptionId: string
   return saved ? tenant : null;
 }
 
+export interface ReconcileOutcome {
+  actions: number;
+  failed: number;
+}
+
+// Decision 041: makes Stripe match the watched projects (billing/projects.ts planReconcile). Runs
+// after a project is added or removed, after a disconnect or reconnect, after the daily usage count
+// (tier changes), when the overview sees drift, and after a new card. Safe to run at any time and
+// more than once: creates use idempotency keys, and a subscription Stripe already has for the
+// project (a create whose row was never written) is adopted, not created again. Does nothing for a
+// seat or exempt workspace, a closing one (closing cancels everything) or a blocked one (a new
+// card must come first; afterCardCheck is that card).
+export async function reconcileProjects(deps: FlowDeps, tenant: TenantId, opts: { afterCardCheck?: boolean } = {}): Promise<ReconcileOutcome> {
+  const pre = await withTenant(deps.pool, tenant, async (tx) => {
+    const billing = await getBilling(tx);
+    if (billing.model !== "project" || billing.exempt || !billing.customerId || !billing.cardVerifiedAt) return null;
+    if (await getClosure(tx)) return null;
+    if (!opts.afterCardCheck && accessForAccount(billing) === "blocked") return null;
+    const subs = await listProjectSubscriptions(tx);
+    return {
+      customerId: billing.customerId,
+      plan: planReconcile({ now: deps.now(), workspaceTrialEnd: billing.trialEnd, watched: await watchedProjects(tx), subs }),
+    };
+  });
+  if (!pre || pre.plan.length === 0) return { actions: 0, failed: 0 };
+
+  const inStripe = pre.plan.some((a) => a.kind === "create") ? await deps.stripe.customerSubscriptions(pre.customerId) : [];
+  let failed = 0;
+  for (const a of pre.plan) {
+    try {
+      let sub: StripeSubscription;
+      switch (a.kind) {
+        case "relink":
+          await withTenant(deps.pool, tenant, (tx) => relinkProjectSubscription(tx, a.subscriptionId, a.projectId));
+          continue;
+        case "create":
+          sub = inStripe.find((s) => s.projectId === a.projectId && s.tenant === tenant && isLive(s.status))
+            ?? await deps.stripe.createProjectSubscription({
+              tenant, projectId: a.projectId, supabaseRef: a.supabaseRef, customerId: pre.customerId, tier: a.tier,
+              trialEnd: a.trialEnd, anchor: null, idempotencyKey: createKey(tenant, a.projectId, a.attempt),
+            });
+          break;
+        case "resume":
+          sub = await deps.stripe.setCancelAtPeriodEnd(a.subscriptionId, false);
+          break;
+        case "cancel":
+          sub = await deps.stripe.setCancelAtPeriodEnd(a.subscriptionId, true);
+          break;
+        case "tier":
+          sub = await deps.stripe.setProjectTier(a.subscriptionId, a.tier);
+          break;
+      }
+      const row = projectSubFromStripe(sub);
+      if (row) await withTenant(deps.pool, tenant, (tx) => saveProjectSubscription(tx, row, row.projectId));
+    } catch {
+      failed++;
+    }
+  }
+  await withTenant(deps.pool, tenant, (tx) => refreshStanding(tx));
+  if (failed > 0) throw new Error(`reconcile: ${failed} of ${pre.plan.length} Stripe changes failed`);
+  return { actions: pre.plan.length, failed };
+}
+
+// Bills a change in the watched projects or their tiers, in whichever model the workspace uses.
+export async function syncBilling(deps: FlowDeps, tenant: TenantId, prorate: boolean): Promise<void> {
+  const model = await withTenant(deps.pool, tenant, async (tx) => (await getBilling(tx)).model);
+  if (model === "project") await reconcileProjects(deps, tenant);
+  else await syncSeats(deps, tenant, prorate);
+}
+
 // Bills one seat per watched project at its tier. Called after the picker adds or removes a
 // project (prorate: true), after the daily usage count (prorate: false), and when the overview
 // sees the stored seats drift from the projects.
 export async function syncSeats(deps: FlowDeps, tenant: TenantId, prorate: boolean): Promise<void> {
   const want = await withTenant(deps.pool, tenant, async (tx) => {
     const billing = await getBilling(tx);
-    if (!billing.subscriptionId || accessFor(billing.status) === "blocked") return null;
+    // A converted workspace's seat subscription only runs out its period: never charge it again.
+    if (billing.model !== "workspace" || !billing.subscriptionId || accessFor(billing.status) === "blocked") return null;
     const seats = seatsFor(billedTiers(await projectTiers(tx)));
     const same = billing.seats && billing.seats.starter === seats.starter && billing.seats.pro === seats.pro;
     return same ? null : { subscriptionId: billing.subscriptionId, seats };
@@ -191,7 +290,7 @@ export async function syncSeats(deps: FlowDeps, tenant: TenantId, prorate: boole
 // tiers from the next renewal. A project above the Enterprise line stays on Pro (decision 028).
 export async function applyUsageTiers(deps: FlowDeps, tenant: TenantId, today: string): Promise<void> {
   await withTenant(deps.pool, tenant, (tx) => refreshProjectTiers(tx, today));
-  await syncSeats(deps, tenant, false);
+  await syncBilling(deps, tenant, false);
 }
 
 // A verified Stripe event, reduced to what the flow needs (apps/web/lib/stripe.ts builds it).

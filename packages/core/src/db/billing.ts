@@ -1,8 +1,9 @@
 import type { Pool } from "pg";
 import {
-  accessForAccount, isBillingStatus, isTier, payingAccount, tierFor, USAGE_WINDOW_DAYS,
-  type Access, type BillingStatus, type CardRejection, type Seats, type Tier,
+  accessForAccount, isBillingModel, isBillingStatus, isTier, payingAccount, tierFor, USAGE_WINDOW_DAYS,
+  type Access, type BillingModel, type BillingStatus, type CardRejection, type Seats, type Tier,
 } from "../billing/policy.js";
+import { planReconcile, workspaceStanding, type ProjectSub, type WatchedProject } from "../billing/projects.js";
 import type { ProjectId, TenantId, UserId } from "../tenancy/scope.js";
 import { getClosure, isClosedNow, WorkspaceClosedError } from "./closure.js";
 import type { TenantTx } from "./tenant.js";
@@ -42,6 +43,11 @@ export interface BillingAccount {
   // exemption. The database computes it on every read.
   exempt: boolean;
   exemptAt: Date | null;
+  // Decision 041: "workspace" (seats) or "project" (one subscription per project). In the
+  // per-project model, status is the workspace's standing (billing/projects.ts workspaceStanding).
+  model: BillingModel;
+  // The status of every project subscription the reader may see (payingAccount).
+  projectStatuses: BillingStatus[];
 }
 
 interface Row {
@@ -59,12 +65,14 @@ interface Row {
   terms_accepted_at: Date | null;
   exempt: boolean;
   exempt_at: Date | null;
+  billing_model: string;
+  project_statuses: string[];
 }
 
 const NONE: BillingAccount = {
   customerId: null, status: "none", subscriptionId: null, seats: null, trialEnd: null, currentPeriodEnd: null,
   cancelAtPeriodEnd: false, cardVerifiedAt: null, verificationError: null, termsVersion: null, termsAcceptedAt: null,
-  exempt: false, exemptAt: null,
+  exempt: false, exemptAt: null, model: "workspace", projectStatuses: [],
 };
 
 // The owners of the tenant, as a list, are exactly [exempt_owner]. Shared by getBilling and grantExemption.
@@ -77,7 +85,8 @@ export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
   const [r] = await tx.query<Row>(
     `SELECT stripe_customer_id, status, subscription_id, starter_seats, pro_seats, trial_end, current_period_end,
             cancel_at_period_end, card_verified_at, verification_error, terms_version, terms_accepted_at,
-            exempt_owner IS NOT NULL AND ${SOLE_OWNER_IS("exempt_owner")} AS exempt, exempt_at
+            exempt_owner IS NOT NULL AND ${SOLE_OWNER_IS("exempt_owner")} AS exempt, exempt_at, billing_model,
+            ARRAY(SELECT s.status FROM supahound.project_subscriptions s WHERE s.tenant_id = $1) AS project_statuses
      FROM supahound.billing_accounts WHERE tenant_id = $1`,
     [tx.tenantId],
   );
@@ -96,6 +105,8 @@ export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
     termsAcceptedAt: r.terms_accepted_at,
     exempt: r.exempt,
     exemptAt: r.exempt ? r.exempt_at : null,
+    model: isBillingModel(r.billing_model) ? r.billing_model : "workspace",
+    projectStatuses: r.project_statuses.filter(isBillingStatus),
   };
 }
 
@@ -249,6 +260,120 @@ export async function refreshProjectTiers(tx: TenantTx, today: string): Promise<
     );
   }
   return projectTiers(tx);
+}
+
+// --- One subscription per project (decisions 032 and 041) ---------------------------------------
+
+interface SubRow {
+  subscription_id: string;
+  project_id: string | null;
+  supabase_ref: string;
+  tier: string;
+  status: string;
+  trial_end: Date | null;
+  current_period_end: Date | null;
+  cancel_at_period_end: boolean;
+}
+
+const toSub = (r: SubRow): ProjectSub => ({
+  subscriptionId: r.subscription_id, projectId: r.project_id, supabaseRef: r.supabase_ref,
+  tier: isTier(r.tier) ? r.tier : "starter", status: isBillingStatus(r.status) && r.status !== "none" ? r.status : "canceled",
+  trialEnd: r.trial_end, currentPeriodEnd: r.current_period_end, cancelAtPeriodEnd: r.cancel_at_period_end,
+});
+
+// Every project subscription of the workspace the reader may see, in creation order. RLS shows a
+// signed-in user only the projects they have a role on (decision 036).
+export async function listProjectSubscriptions(tx: TenantTx): Promise<ProjectSub[]> {
+  const rows = await tx.query<SubRow>(
+    `SELECT subscription_id, project_id, supabase_ref, tier, status, trial_end, current_period_end, cancel_at_period_end
+     FROM supahound.project_subscriptions WHERE tenant_id = $1 ORDER BY created_at, id`,
+    [tx.tenantId],
+  );
+  return rows.map(toSub);
+}
+
+// The projects Supahound bills now: every project that is not paused (decision 037: a paused
+// project is not watched and not billed).
+export async function watchedProjects(tx: TenantTx): Promise<WatchedProject[]> {
+  const rows = await tx.query<{ id: string; supabase_ref: string; billing_tier: string }>(
+    "SELECT id, supabase_ref, billing_tier FROM supahound.projects WHERE tenant_id = $1 AND NOT paused ORDER BY created_at, id",
+    [tx.tenantId],
+  );
+  return rows.map((r) => ({ id: r.id, supabaseRef: r.supabase_ref, tier: isTier(r.billing_tier) ? r.billing_tier : "starter" }));
+}
+
+// Writes Stripe's current view of a project subscription. A new row links to `projectId` when that
+// project exists in this workspace and has no other live subscription; otherwise it is stored
+// unlinked (the next reconcile cancels it at its period end). An existing row keeps its link:
+// only relinkProjectSubscription and the project's removal change it.
+export async function saveProjectSubscription(tx: TenantTx, s: Omit<ProjectSub, "projectId">, projectId: string | null): Promise<void> {
+  const [link] = projectId
+    ? await tx.query<{ ok: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM supahound.projects WHERE tenant_id = $1 AND id = $2)
+                AND NOT EXISTS (SELECT 1 FROM supahound.project_subscriptions
+                                WHERE tenant_id = $1 AND project_id = $2 AND subscription_id <> $3
+                                  AND status NOT IN ('canceled', 'incomplete_expired')) AS ok`,
+        [tx.tenantId, projectId, s.subscriptionId],
+      )
+    : [{ ok: false }];
+  await tx.query(
+    `INSERT INTO supahound.project_subscriptions
+       (tenant_id, project_id, supabase_ref, subscription_id, tier, status, trial_end, current_period_end, cancel_at_period_end)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (subscription_id) DO UPDATE SET
+       tier = EXCLUDED.tier, status = EXCLUDED.status, trial_end = EXCLUDED.trial_end,
+       current_period_end = EXCLUDED.current_period_end, cancel_at_period_end = EXCLUDED.cancel_at_period_end, updated_at = now()
+     WHERE project_subscriptions.tenant_id = EXCLUDED.tenant_id`,
+    [tx.tenantId, link?.ok ? projectId : null, s.supabaseRef, s.subscriptionId, s.tier, s.status, s.trialEnd, s.currentPeriodEnd, s.cancelAtPeriodEnd],
+  );
+}
+
+// A removed project added again takes back its unlinked subscription (billing/projects.ts planReconcile).
+export async function relinkProjectSubscription(tx: TenantTx, subscriptionId: string, projectId: string): Promise<void> {
+  await tx.query(
+    "UPDATE supahound.project_subscriptions SET project_id = $3, updated_at = now() WHERE tenant_id = $1 AND subscription_id = $2 AND project_id IS NULL",
+    [tx.tenantId, subscriptionId, projectId],
+  );
+}
+
+// Recomputes the standing from the watched projects' subscriptions and stores it as the status
+// the gate and the scheduler read. Per-project model only; a seat workspace is left as it is.
+export async function refreshStanding(tx: TenantTx): Promise<BillingStatus | null> {
+  const billing = await getBilling(tx);
+  if (billing.model !== "project") return null;
+  const standing = workspaceStanding(await watchedProjects(tx), await listProjectSubscriptions(tx));
+  await tx.query("UPDATE supahound.billing_accounts SET status = $2, updated_at = now() WHERE tenant_id = $1 AND status <> $2", [tx.tenantId, standing]);
+  return standing;
+}
+
+// Whether Stripe differs from the watched projects (decision 041): a project without a live
+// subscription, a removed or paused project's subscription that does not cancel, or a tier change.
+// The overview reconciles when it sees drift, which catches a sync that failed after a change.
+export async function projectBillingDrift(tx: TenantTx, now: Date): Promise<boolean> {
+  const billing = await getBilling(tx);
+  if (billing.model !== "project" || billing.exempt || !billing.cardVerifiedAt) return false;
+  const plan = planReconcile({ now, workspaceTrialEnd: billing.trialEnd, watched: await watchedProjects(tx), subs: await listProjectSubscriptions(tx) });
+  return plan.length > 0;
+}
+
+// A card passed the check in the per-project model: the workspace moves to (or stays on) one
+// subscription per project. The first check sets the card time and, when allowed, the one
+// workspace trial; a later check (a new card after a failed one) keeps both.
+export async function startProjectBilling(tx: TenantTx, verifiedAt: Date, trialEnd: Date | null): Promise<void> {
+  await upsert(
+    tx,
+    `billing_model = 'project', card_verified_at = COALESCE(card_verified_at, $2),
+     trial_end = CASE WHEN card_verified_at IS NULL THEN $3 ELSE trial_end END, verification_error = NULL`,
+    [verifiedAt, trialEnd],
+  );
+  await refreshStanding(tx);
+}
+
+// The conversion CLI moved this workspace off its seat subscription (decision 041). The seat
+// columns stay as they are: the record of the old subscription.
+export async function markConverted(tx: TenantTx): Promise<void> {
+  await upsert(tx, "billing_model = 'project'", []);
+  await refreshStanding(tx);
 }
 
 // The gate (decision 028, point 7). The only tenant entry point for signed-in pages and actions

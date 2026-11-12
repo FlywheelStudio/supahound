@@ -1,8 +1,9 @@
 import type { SubscriptionSnapshot } from "../db/billing.js";
 import type { BillingEvent, VerificationSession } from "./flow.js";
 import {
-  ENTERPRISE_FROM_REQUESTS, isBillingStatus, PRICE_LABEL, PRO_FROM_REQUESTS, TRIAL_DAYS, USAGE_WINDOW_DAYS, type Seats,
+  ENTERPRISE_FROM_REQUESTS, isBillingStatus, PRICE_LABEL, PRO_FROM_REQUESTS, TRIAL_DAYS, USAGE_WINDOW_DAYS, type Seats, type Tier,
 } from "./policy.js";
+import type { ProjectSub } from "./projects.js";
 
 // Stripe objects → the shapes the billing flow works with. Pure, so the tests run on plain
 // fixtures. Fields are read defensively: an API version change must fail closed (no access),
@@ -68,10 +69,21 @@ export function seatsFromItems(items: unknown, prices: PriceIds): Seats & { item
   return out;
 }
 
-export function subscriptionFromStripe(s: Obj, prices: PriceIds): SubscriptionSnapshot & {
+// A subscription as the flow reads it from Stripe: a seat subscription (decision 028) or a project
+// subscription (decision 041: metadata.project_id, one item at the project's tier).
+export type StripeSubscription = SubscriptionSnapshot & {
   tenant: string | null;
   cardVerifiedAt: Date | null;
-} {
+  projectId: string | null;
+  supabaseRef: string | null;
+  // The tier of a project subscription's item; null for a seat subscription.
+  tier: Tier | null;
+  // metadata.converted: the conversion CLI set this seat subscription to cancel (decision 041).
+  converted: boolean;
+  defaultPaymentMethod: string | null;
+};
+
+export function subscriptionFromStripe(s: Obj, prices: PriceIds): StripeSubscription {
   const seats = seatsFromItems(s.items, prices);
   const firstItem = obj((obj(s.items)?.data as unknown[] | undefined)?.[0]);
   const status = str(s.status);
@@ -88,6 +100,41 @@ export function subscriptionFromStripe(s: Obj, prices: PriceIds): SubscriptionSn
     cancelAtPeriodEnd: s.cancel_at_period_end === true,
     tenant: meta(s, "tenant_id"),
     cardVerifiedAt: verifiedAt && !Number.isNaN(verifiedAt.getTime()) ? verifiedAt : null,
+    projectId: meta(s, "project_id"),
+    supabaseRef: meta(s, "supabase_ref"),
+    tier: meta(s, "project_id") === null ? null : seats.pro > 0 ? "pro" : seats.starter > 0 ? "starter" : null,
+    converted: meta(s, "converted") === "yes",
+    defaultPaymentMethod: idOf(s.default_payment_method),
+  };
+}
+
+// A project subscription in the shape project_subscriptions stores. Null when it is not one, or
+// when its item is not at a known price (fail closed: no row, so it counts for nothing).
+export function projectSubFromStripe(s: StripeSubscription): (Omit<ProjectSub, "projectId"> & { projectId: string }) | null {
+  if (!s.projectId || !s.tier || !s.supabaseRef || !/^[a-z0-9]{20}$/.test(s.supabaseRef)) return null;
+  return {
+    subscriptionId: s.id, projectId: s.projectId, supabaseRef: s.supabaseRef, tier: s.tier, status: s.status,
+    trialEnd: s.trialEnd, currentPeriodEnd: s.currentPeriodEnd, cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+  };
+}
+
+export interface InvoiceSummary {
+  id: string;
+  number: string | null;
+  created: Date | null;
+  totalCents: number;
+  currency: string;
+  status: string;
+  hostedUrl: string | null;
+}
+
+// An invoice, for the project's Plan & billing page. Only https links from Stripe are kept.
+export function invoiceFromStripe(i: Obj): InvoiceSummary {
+  const url = str(i.hosted_invoice_url);
+  return {
+    id: str(i.id) ?? "", number: str(i.number), created: date(i.created),
+    totalCents: typeof i.total === "number" ? i.total : 0, currency: str(i.currency) ?? "usd",
+    status: str(i.status) ?? "unknown", hostedUrl: url && url.startsWith("https://") ? url : null,
   };
 }
 
@@ -120,8 +167,10 @@ export function termsText(trial = true): string {
     : "No free trial: this workspace or its owner already had one, so the first charge is today. ";
   const end = trial ? "Cancel any time from Billing; cancel before the trial ends and you pay nothing." : "Cancel any time from Billing.";
   return `${start}We place a $1 hold on your card to confirm it with your bank, and release it at once. ` +
-    `${trial ? "After the trial, each" : "Each"} watched project costs ${PRICE_LABEL.starter} per month, or ${PRICE_LABEL.pro} per month if it sent more than ` +
-    `${millions(PRO_FROM_REQUESTS)} requests in the last ${USAGE_WINDOW_DAYS} days (you pay for at least one project). ` +
+    `Each watched project has its own monthly subscription: ${PRICE_LABEL.starter} per month, or ${PRICE_LABEL.pro} per month if it sent more than ` +
+    `${millions(PRO_FROM_REQUESTS)} requests in the last ${USAGE_WINDOW_DAYS} days. ` +
+    `${trial ? "Projects you add during the trial are free until it ends; a project added after it" : "A project"} is billed from the day you add it, ` +
+    "and removing a project stops its charges at the end of its paid month. " +
     `A project's price follows its traffic and changes at the next monthly charge. Above ${millions(ENTERPRISE_FROM_REQUESTS)} requests ` +
     `a project stays at ${PRICE_LABEL.pro} and we contact you about Enterprise. ` +
     end;

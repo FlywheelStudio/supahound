@@ -1,7 +1,12 @@
 import type { Pool } from "pg";
 import type { StripeGateway } from "../billing/flow.js";
 import { accessFor } from "../billing/policy.js";
-import { getBilling, isPaying, saveSubscription, type SubscriptionSnapshot } from "../db/billing.js";
+import { isLive, type ProjectSub } from "../billing/projects.js";
+import { projectSubFromStripe, type StripeSubscription } from "../billing/stripeMap.js";
+import {
+  getBilling, isPaying, listProjectSubscriptions, refreshStanding, saveProjectSubscription, saveSubscription, watchedProjects,
+  type SubscriptionSnapshot,
+} from "../db/billing.js";
 import { deferPurge, getClosure, purgeHistory, recordClosure, reopenWorkspace, type ReopenResult } from "../db/closure.js";
 import { deferConnectionDeletes, deleteExpiredConnections, markDisconnected, type Disconnected } from "../db/connections.js";
 import { appendAudit } from "../db/repo.js";
@@ -43,9 +48,30 @@ function paidUntil(s: Pick<SubscriptionSnapshot, "status" | "currentPeriodEnd" |
   return s.currentPeriodEnd ?? s.trialEnd;
 }
 
+// The end of the latest period a closing per-project workspace has paid (or trials) for (decision
+// 041): every project subscription cancels at its own period end, and the workspace works until
+// the last one ends.
+function projectsPaidUntil(subs: readonly Pick<ProjectSub, "status" | "currentPeriodEnd" | "trialEnd">[]): Date | null {
+  let latest: Date | null = null;
+  for (const s of subs) {
+    const end = paidUntil(s);
+    if (end && (!latest || end > latest)) latest = end;
+  }
+  return latest;
+}
+
+async function saveProjectSnapshots(tx: TenantTx, subs: readonly StripeSubscription[]): Promise<void> {
+  for (const s of subs) {
+    const row = projectSubFromStripe(s);
+    if (row) await saveProjectSubscription(tx, row, row.projectId);
+  }
+  await refreshStanding(tx);
+}
+
 // The workspace owner closes the workspace after typing its name. Stripe cancels the subscription
-// at the end of its period first; if that fails, nothing is closed and the owner can try again.
-// The workspace works until that date; then members see the closed page.
+// at the end of its period first (in the per-project model, every project subscription); if that
+// fails, nothing is closed and the owner can try again. The workspace works until that date; then
+// members see the closed page.
 export async function closeWorkspace(deps: CloseDeps, input: { user: UserId; tenant: TenantId; typedName: string }): Promise<CloseResult> {
   const { user, tenant } = input;
   const pre = await withTenantForUser(deps.pool, user, tenant, async (tx, role) => {
@@ -53,22 +79,40 @@ export async function closeWorkspace(deps: CloseDeps, input: { user: UserId; ten
     if (await getClosure(tx)) return { stop: "already_closed" as const };
     if (!confirms(input.typedName, await workspaceName(tx))) return { stop: "mismatch" as const };
     const b = await getBilling(tx);
+    if (b.model === "project") {
+      const toCancel = (await listProjectSubscriptions(tx)).filter((s) => isLive(s.status) && !s.cancelAtPeriodEnd).map((s) => s.subscriptionId);
+      return { stop: null, subscription: null, projectSubs: toCancel };
+    }
     const live = b.subscriptionId && !ENDED.has(b.status) && !b.cancelAtPeriodEnd;
-    return { stop: null, subscription: live ? b.subscriptionId : null };
+    return { stop: null, subscription: live ? b.subscriptionId : null, projectSubs: [] as string[] };
   });
   if (pre.stop) return pre.stop;
 
   let snapshot: SubscriptionSnapshot | null = null;
   if ("subscription" in pre && pre.subscription && deps.stripe) snapshot = await deps.stripe.setCancelAtPeriodEnd(pre.subscription, true);
+  const projectSnapshots: StripeSubscription[] = [];
+  if ("projectSubs" in pre && deps.stripe) {
+    for (const id of pre.projectSubs) projectSnapshots.push(await deps.stripe.setCancelAtPeriodEnd(id, true));
+  }
 
   return withTenantForUser(deps.pool, user, tenant, async (tx, role) => {
     if (role !== "owner") return "role";
     if (await getClosure(tx)) return "already_closed";
     // Save Stripe's answer now rather than wait for the webhook.
     if (snapshot) await saveSubscription(tx, snapshot, null);
+    if (projectSnapshots.length > 0) await saveProjectSnapshots(tx, projectSnapshots);
     const now = deps.now();
     const b = await getBilling(tx);
-    await recordClosure(tx, user, now, (b.exempt ? null : paidUntil(b)) ?? now);
+    let until: Date | null;
+    if (b.model === "project") {
+      const subs = (await listProjectSubscriptions(tx)).filter((s) => isLive(s.status));
+      const trial = b.trialEnd && b.trialEnd > now ? b.trialEnd : null;
+      const paid = projectsPaidUntil(subs);
+      until = paid && trial ? (paid > trial ? paid : trial) : paid ?? trial;
+    } else {
+      until = paidUntil(b);
+    }
+    await recordClosure(tx, user, now, (b.exempt ? null : until) ?? now);
     return "closed";
   });
 }
@@ -84,14 +128,28 @@ export async function reopenClosedWorkspace(deps: CloseDeps, input: { user: User
     if (!c) return { stop: "not_closed" as const };
     if (c.purgedAt) return { stop: "too_late" as const };
     const b = await getBilling(tx);
-    return { stop: null, resume: b.subscriptionId && !ENDED.has(b.status) && b.cancelAtPeriodEnd ? b.subscriptionId : null };
+    if (b.model === "project") {
+      // Resume the subscriptions of projects still watched; a removed or paused project's
+      // subscription keeps running out its period.
+      const watched = new Set((await watchedProjects(tx)).map((p) => p.id));
+      const resume = (await listProjectSubscriptions(tx))
+        .filter((s) => s.projectId && watched.has(s.projectId) && isLive(s.status) && s.cancelAtPeriodEnd)
+        .map((s) => s.subscriptionId);
+      return { stop: null, resume: null, projectSubs: resume };
+    }
+    return { stop: null, resume: b.subscriptionId && !ENDED.has(b.status) && b.cancelAtPeriodEnd ? b.subscriptionId : null, projectSubs: [] as string[] };
   });
   if (pre.stop) return pre.stop;
   let snapshot: SubscriptionSnapshot | null = null;
   if ("resume" in pre && pre.resume && deps.stripe) snapshot = await deps.stripe.setCancelAtPeriodEnd(pre.resume, false);
+  const projectSnapshots: StripeSubscription[] = [];
+  if ("projectSubs" in pre && deps.stripe) {
+    for (const id of pre.projectSubs) projectSnapshots.push(await deps.stripe.setCancelAtPeriodEnd(id, false));
+  }
   return withTenantForUser(deps.pool, input.user, input.tenant, async (tx, role) => {
     if (role !== "owner") return "role";
     if (snapshot) await saveSubscription(tx, snapshot, null);
+    if (projectSnapshots.length > 0) await saveProjectSnapshots(tx, projectSnapshots);
     return reopenWorkspace(tx);
   });
 }
