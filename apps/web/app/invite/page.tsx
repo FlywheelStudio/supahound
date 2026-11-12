@@ -1,5 +1,5 @@
 import { previewInvite } from "@supahound/core/db/people";
-import Link from "next/link";
+import Link from "../../components/NavLink";
 import { withPool } from "../../lib/db";
 import { ACCEPT_ERRORS, invitePagePath, ROLE_HELP, ROLE_LABEL } from "../../lib/people";
 import { currentUser } from "../../lib/supabase";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "../../../../../../components/NavLink";
 import { Shell } from "../../../../../../components/Shell";
 import { mode } from "../../../../../../lib/billing";
 import { utc, workspacePath } from "../../../../../../lib/nav";

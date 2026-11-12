@@ -10,6 +10,7 @@
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
 | [features/project-people.md](features/project-people.md) | People and roles per project (#24): Owner/Admin/Editor/Viewer, RLS by project, email invites, the role matrix, tests |
+| [features/web-latency.md](features/web-latency.md) | Web latency: Worker placed next to Postgres, one round trip to open a transaction, pending bar on links, no loading.tsx |
 | [features/incident-history.md](features/incident-history.md) | Incident history (#44): 30-day list per project with keyset pages, incident detail, 404 rules, tests |
 | [features/project-navigation.md](features/project-navigation.md) | Project navigation (#98): project dropdown, project dashboard and settings, the URL holds the project |
 | [features/incident-alert-email.md](features/incident-alert-email.md) | Incident alert email (#16): threshold per project, the incident row as outbox, tests; recipients per project since #24 |
@@ -58,3 +59,4 @@
 | [decisions/034-scan-domains-per-project.md](decisions/034-scan-domains-per-project.md) | A verified scan domain belongs to one project; the project's Security scan tab lists them (not built, #100) |
 | [decisions/036-project-roles-and-invites.md](decisions/036-project-roles-and-invites.md) | Project roles: workspace owners/admins implicit on every project, RLS by project, the role matrix, single-use email-bound invites, alerts to the project's people (builds 033, amends 030) |
 | [decisions/035-incident-history-window.md](decisions/035-incident-history-window.md) | Incident history: last seen in 30 days or still open; keyset pages; actor alias; the suggested fix is the explainer's next steps, no generated SQL |
+| [decisions/039-web-latency.md](decisions/039-web-latency.md) | Web latency: placement region next to Postgres, `begin()` in one round trip, asymmetric JWT keys, why not loading.tsx |

@@ -5,7 +5,7 @@ import { isPickable, listSupabaseProjects, ManagementApiError, type SupabaseProj
 import { OAuthError } from "@supahound/core/supabase/oauth";
 import { tenantId as parseTenantId, type ConnectionId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
-import Link from "next/link";
+import Link from "../../../../components/NavLink";
 import { notFound } from "next/navigation";
 import { withPool } from "../../../../lib/db";
 import { mode, paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";

@@ -1,6 +1,6 @@
 import { needsEnterprise, PRICE_LABEL } from "@supahound/core/billing/policy";
 import { listOpenIncidents } from "@supahound/core/db/repo";
-import Link from "next/link";
+import Link from "../../../../../components/NavLink";
 import { Notice, SeverityBadge, Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
 import { crossTenantNote } from "../../../../../lib/coverage";
