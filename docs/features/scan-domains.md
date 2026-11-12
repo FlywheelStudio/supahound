@@ -31,7 +31,7 @@ says how to attach one. Starting a scan from the app is #51; until then, scans c
 
 ## Data model and RLS
 
-Migration `supabase/migrations/20261112030000_scan_domains_per_project.sql` (additive, no DROP):
+Migration `supabase/migrations/20261112040000_scan_domains_per_project.sql` (additive, no DROP):
 
 | Object | What |
 | --- | --- |
@@ -62,7 +62,7 @@ None. The scan funnel writes the domains and scans; this feature only reads them
   scan, detach rules, project removal, no UPDATE grant. `isolation.test.ts` covers the new table.
 - Web unit: `apps/web/test/scanDomains.test.ts` (12). Role rule, outcomes, malformed IDs, notices,
   tab text, the evidence allowlist with a planted secret.
-- UAT: UAT-W34 to UAT-W36 (`apps/web/e2e/specs/scanDomains.uat.spec.ts`), see `docs/TESTING.md`.
+- UAT: UAT-W38 to UAT-W40 (`apps/web/e2e/specs/scanDomains.uat.spec.ts`), see `docs/TESTING.md`.
 - Mutation checks: `docs/TESTING.md`, rows marked #100.
 
 ## Gotchas
@@ -76,7 +76,7 @@ None. The scan funnel writes the domains and scans; this feature only reads them
 - **`ON CONFLICT DO NOTHING`, not a plain insert.** A unique violation would tell a project Admin
   that a domain is linked to a project they cannot see. Tested ("links a domain to one project at most").
 - **Evidence is shown through an allowlist only.** A future writer could store anything in the
-  JSON. Tested with a planted secret in unit tests and in UAT-W34.
+  JSON. Tested with a planted secret in unit tests and in UAT-W38.
 - **The funnel (#51) must write as a workspace Owner or Admin, or with no user.** A member's
   `INSERT ... RETURNING` on `scan_domains` would fail the SELECT policy.
 - **No audit row on attach or detach** (decision 040, item 9).

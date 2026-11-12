@@ -144,9 +144,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W28 | An invite is bound to its address; a resend kills the old link; an expired or canceled invite is refused; a non-member gets a 404 |
 | UAT-W29 | The first poll after a pick shows posture findings on the overview, the dashboard and the Posture tab, with fix SQL; Advisor duplicates show once; no Advisor free text; a refused project reads "unable to assess" (`posture.uat.spec.ts`) |
 | UAT-W30 | Scan now queues a scan the next poll runs within the 24 hours; a viewer gets no button and a replayed owner form is refused |
-| UAT-W34 | An owner attaches a verified domain (an unverified one is not offered) and sees the newest finished scan's findings, most severe first, with the fix and allowlisted evidence; a planted secret never reaches the page; the domain belongs to one project; detaching hides the findings (`scanDomains.uat.spec.ts`) |
-| UAT-W35 | A viewer sees the findings and the attached domain but no Attach or Detach, never sees an unattached domain, and replayed owner forms are refused |
-| UAT-W36 | Another workspace's project is a 404 on the Security scan tab and its settings; my own project shows nothing of its domain |
+| UAT-W38 | An owner attaches a verified domain (an unverified one is not offered) and sees the newest finished scan's findings, most severe first, with the fix and allowlisted evidence; a planted secret never reaches the page; the domain belongs to one project; detaching hides the findings (`scanDomains.uat.spec.ts`) |
+| UAT-W39 | A viewer sees the findings and the attached domain but no Attach or Detach, never sees an unattached domain, and replayed owner forms are refused |
+| UAT-W40 | Another workspace's project is a 404 on the Security scan tab and its settings; my own project shows nothing of its domain |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -274,8 +274,8 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Scan data follows the link (#100) | `scan_link_access` passes every row | 4 Postgres tests fail |
 | The tab shows the newest finished scan (#100) | The lateral join picks the oldest | 1 Postgres test fails |
 | Attach needs Owner or Admin (#100) | `canLinkDomains` uses `edit_settings` | 1 web unit test fails |
-| The server checks the role before attach and detach (#100) | Both actions skip `canLinkDomains` (RLS still refuses) | UAT-W35 fails (`missing`, not the role notice) |
-| Evidence is an allowlist (#100) | `evidenceItems` also shows unknown keys | 2 web unit tests fail; UAT-W34 fails (the planted secret shows) |
+| The server checks the role before attach and detach (#100) | Both actions skip `canLinkDomains` (RLS still refuses) | UAT-W39 fails (`missing`, not the role notice) |
+| Evidence is an allowlist (#100) | `evidenceItems` also shows unknown keys | 2 web unit tests fail; UAT-W38 fails (the planted secret shows) |
 | At most the last four characters (#100) | `last4` shape check removed | 1 web unit test fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 

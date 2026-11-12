@@ -57,7 +57,7 @@ async function seedScannedDomain(tenant: string, apex: string, verified: boolean
 }
 
 test.describe("UAT: Security scan domains per project", () => {
-  test("UAT-W34 an owner attaches a verified domain and sees its latest scan's findings, with the fix; detaching hides them", async ({ page }) => {
+  test("UAT-W38 an owner attaches a verified domain and sees its latest scan's findings, with the fix; detaching hides them", async ({ page }) => {
     const { tenant, ids } = await workspaceWith(page, "w34", ["Shop", "Blog"]);
     await seedScannedDomain(tenant, "w34-shop.test", true);
     await seedScannedDomain(tenant, "w34-pending.test", false);
@@ -111,7 +111,7 @@ test.describe("UAT: Security scan domains per project", () => {
     await expect(page.getByRole("main")).toContainText("No domain is linked to Shop.");
   });
 
-  test("UAT-W35 a viewer sees the findings but cannot attach or detach, even replaying the owner's form", async ({ page, browser }) => {
+  test("UAT-W39 a viewer sees the findings but cannot attach or detach, even replaying the owner's form", async ({ page, browser }) => {
     const { tenant, ids } = await workspaceWith(page, "w35", ["Shop"]);
     const domain = await seedScannedDomain(tenant, "w35-shop.test", true);
     const free = await seedScannedDomain(tenant, "w35-free.test", true);
@@ -153,7 +153,7 @@ test.describe("UAT: Security scan domains per project", () => {
     expect(links.map((l) => l.domain_id)).toEqual([domain]);
   });
 
-  test("UAT-W36 another workspace's project is a 404 on the Security scan tab and its settings", async ({ page, browser }) => {
+  test("UAT-W40 another workspace's project is a 404 on the Security scan tab and its settings", async ({ page, browser }) => {
     const a = await workspaceWith(page, "w36-a", ["Alpha"]);
     const other = await browser.newPage();
     const b = await workspaceWith(other, "w36-b", ["Bravo"]);

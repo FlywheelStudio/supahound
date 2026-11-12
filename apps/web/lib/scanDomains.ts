@@ -7,7 +7,7 @@ import { can, parseUuid } from "./people";
 // Scan domains per project and the Security scan tab (issue #100, decision 040) as pure
 // functions, so every branch is testable. The server actions check the role in the same
 // transaction as the write; RLS and a trigger refuse the same writes again in the database
-// (migration 20261112030000_scan_domains_per_project.sql).
+// (migration 20261112040000_scan_domains_per_project.sql).
 
 // Owners and admins attach and detach domains.
 export const canLinkDomains = (role: ProjectRole | null): boolean => can(role, "link_domains");
