@@ -20,7 +20,7 @@
 -- other workspaces they own, so a second free trial can be refused per owner.
 --
 -- Production safety: additive only. A new table, new nullable columns, a new constraint that every
--- existing row meets, a new role, new policies and grants. No DROP, no data change, no index on a
+-- existing row meets, a new role, new policies and grants. Nothing is removed, no data change, no index on a
 -- large table. Safe to run twice: IF NOT EXISTS, and DO blocks that check the catalog first.
 
 BEGIN;
