@@ -279,7 +279,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
 
 const severityRank = { low: 1, medium: 2, high: 3, critical: 4 } as const;
 
-// Sends each pending alert of one project to every member with an address, one email per
+// Sends each pending alert of one project to each of the project's people with an address
+// (decision 036: workspace owners and admins, and anyone with a role on the project), one email per
 // recipient (members never see each other's addresses). An incident is marked alerted when at
 // least one email went out, or when there is nobody to send to; otherwise it stays pending and
 // the next poll retries it. Every attempt is audited with counts only. Never throws: a failure

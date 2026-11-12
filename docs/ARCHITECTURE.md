@@ -104,7 +104,9 @@ Decision 004. Six layers, each tested:
 | Scheduler role reads IDs only, through column grants | migrations, `poller/scheduler.ts` | `poller.test.ts` |
 
 The web app adds a seventh: membership is checked in the same transaction that reads the data. A
-non-member gets the same 404 as a missing workspace (E2E UAT-W7).
+non-member gets the same 404 as a missing workspace (E2E UAT-W7). An eighth works inside the tenant
+(decision 036): restrictive RLS hides a project's rows from a signed-in user without a role on that
+project, and refuses settings and people writes the role does not allow (`people.test.ts`, UAT-W26).
 
 ## Security of the monitor
 
@@ -128,6 +130,8 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | --- | --- |
 | `tenants` | One Supahound account (an agency or a builder) |
 | `memberships` | Supabase Auth user → tenant, with role owner / admin / member |
+| `project_members` | A workspace member's role on one project: owner / admin / editor / viewer (decision 036) |
+| `project_invites` | An email invite to one project: token hash, role, expiry, accepted or canceled |
 | `connections` | One Supabase OAuth grant; sealed token |
 | `projects` | One watched Supabase project; ownership map and when it last loaded; paused flag |
 | `poll_runs` | One poll: window, status, error code, detectors it could not check |

@@ -284,6 +284,8 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
       const first = await invite("again@new.test", "viewer");
       const second = await invite("again@new.test", "editor");
       expect(second.result).toBe("renewed");
+      expect(await as(u.admin, A, (tx) => people.openInviteFor(tx, p1, "AGAIN@new.test"))).toMatchObject({ email: "again@new.test", role: "editor" });
+      expect(await as(u.admin, A, (tx) => people.openInviteFor(tx, p2, "again@new.test"))).toBeNull();
       expect(await accept(first.token, user(), "again@new.test")).toEqual({ status: "invalid" });
       const [row] = (await db.admin.query("SELECT id FROM supahound.project_invites WHERE email = 'again@new.test' AND accepted_at IS NULL")).rows;
       // A resend within a minute is refused; after it, a new token replaces the old one.

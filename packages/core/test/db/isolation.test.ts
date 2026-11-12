@@ -127,6 +127,21 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     }
   });
 
+  it("puts the project_access policy on every table with project data, including ones added later (decision 036)", async () => {
+    // project_members and project_invites have their own per-role policies; a policy on
+    // project_members that read it would recurse.
+    const OWN_RULES = ["project_invites", "project_members"];
+    const res = await db.admin.query(`
+      SELECT c.relname,
+             EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'project_access' AND NOT p.polpermissive) AS covered
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'supahound' AND c.relkind = 'r'
+        AND (c.relname = 'projects' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'project_id' AND NOT a.attisdropped))`);
+    const tables = res.rows.map((r) => r.relname).sort();
+    expect(tables).toEqual(expect.arrayContaining(["projects", "incidents", "findings", ...OWN_RULES]));
+    for (const r of res.rows.filter((x) => !OWN_RULES.includes(x.relname))) expect([r.relname, r.covered]).toEqual([r.relname, true]);
+  });
+
   it("shows each tenant only its own rows in every table", async () => {
     for (const me of ["a", "b"] as const) {
       const other = seeded[me === "a" ? "b" : "a"];

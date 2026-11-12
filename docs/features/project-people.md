@@ -84,9 +84,10 @@ None new. The invite email uses the web Worker's Cloudflare Email binding and `E
   replayed owner form refused; an admin cannot invite an Owner), UAT-W28 (wrong address, resend
   kills the old link, expiry, cancel; a non-member 404). The spec reads the real invite email from
   the wrangler log (`e2e/support/mail.ts`).
-- Mutation checks (14, all red, then restored): docs/TESTING.md.
+- `isolation.test.ts` also checks that every table with a `project_id` column has `project_access`.
+- Mutation checks (15, all red, then restored): docs/TESTING.md.
 - Old code on the new schema (the migration alone, before any app change): core 553 of 556 and
-  E2E 47 of 50 green. The six reds were the isolation test's table list and fixtures that add a
+  E2E 47 of 50 green, on the first draft and again on the final migration. The six reds were the isolation test's table list and fixtures that add a
   workspace `member` after the migration (`users.test.ts` 2, UAT-W13, W18, W22). The old code
   writes no such row in production: only `createWorkspace` writes memberships, always `owner`.
 
@@ -104,3 +105,5 @@ None new. The invite email uses the web Worker's Cloudflare Email binding and `E
 - **No policy on `project_members` reads it.** A policy that reads its own table recurses. The
   write policies call `project_role()`, a function, which Postgres does not inline.
 - **Playwright:** the invite form's labels are "Email" and "Role"; match with `exact: true`.
+- **Re-inviting an address** renews its open invite, so the actor must be allowed to grant the
+  open invite's role too (`openInviteFor`); otherwise RLS would refuse the update with a 500.

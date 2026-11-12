@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 588 core (unit + Postgres + detection UAT), 127 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 160, within the 588 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 589 core (unit + Postgres + detection UAT), 127 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 161, within the 589 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 588 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 589 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 42 |
 
-Totals on `feature/project-people` (2026-11-12): core 588, web 127, poller 12, E2E 53.
+Totals on `feature/project-people` (2026-11-12): core 589, web 127, poller 12, E2E 53.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -221,6 +221,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Stored explanation text is cleaned (#44) | `explanationOf` skips `cleanText` | 2 unit tests fail |
 | The detail hides the raw actor (#44) | The page prints `actor` next to the alias | UAT-W24 fails |
 | Project rows hidden without a role (#24) | `project_access` policies pass every row | 5 Postgres tests fail; UAT-W26 fails (the other project shows) |
+| Every project table gets `project_access` (#24) | `project_usage` left out of the policy loop | `isolation.test.ts` catalog check fails |
 | Settings writes need Editor (#24) | `project_settings` policy passes every role | 1 Postgres test fails |
 | Only an Owner grants Owner (#24) | `people_*` policies drop `role <> 'owner'` | 3 Postgres tests fail |
 | `project_role` stays in the tenant (#24) | The function drops its join on `projects` | 3 Postgres tests fail (Owner on another tenant's project ID) |

@@ -136,6 +136,17 @@ export interface OpenInvite {
   role: ProjectRole;
 }
 
+// The open invite to this address on the project, if any. A second invite renews it, so the
+// actor must be allowed to grant ITS role too (an admin cannot rewrite a pending Owner invite).
+export async function openInviteFor(tx: TenantTx, project: ProjectId, email: string): Promise<OpenInvite | null> {
+  const [r] = await tx.query<OpenInvite>(
+    `SELECT id, email, role FROM supahound.project_invites
+     WHERE tenant_id = $1 AND project_id = $2 AND email = $3 AND accepted_at IS NULL AND canceled_at IS NULL`,
+    [tx.tenantId, project, normalizeEmail(email)],
+  );
+  return r ?? null;
+}
+
 export async function getOpenInvite(tx: TenantTx, project: ProjectId, inviteId: string): Promise<OpenInvite | null> {
   const [r] = await tx.query<OpenInvite>(
     `SELECT id, email, role FROM supahound.project_invites

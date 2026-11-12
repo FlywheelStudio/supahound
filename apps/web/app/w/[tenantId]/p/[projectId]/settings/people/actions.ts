@@ -1,7 +1,7 @@
 "use server";
 
 import {
-  cancelInvite, createInvite, getOpenInvite, INVITE_TTL_DAYS, inviteTokenHash, listPeople, newInviteToken, removePerson,
+  cancelInvite, createInvite, getOpenInvite, INVITE_TTL_DAYS, inviteTokenHash, listPeople, newInviteToken, openInviteFor, removePerson,
   renewInvite, setPersonRole, type ProjectRole,
 } from "@supahound/core/db/people";
 import { getProject } from "@supahound/core/db/repo";
@@ -43,6 +43,8 @@ export async function inviteAction(formData: FormData): Promise<void> {
       save: (email, role, token) =>
         paidProject(pool, user.id, tenant, project, async (tx, actor) => {
           if (!canInviteAs(actor, role)) return { actor, result: null };
+          const pending = await openInviteFor(tx, project, email);
+          if (pending && !canInviteAs(actor, pending.role)) return { actor, result: null };
           projectName = (await getProject(tx, project))?.name ?? "";
           invitedRole = role;
           const result = await createInvite(tx, { project, email, role, invitedBy: user.id, tokenHash: inviteTokenHash(token), now: new Date() });

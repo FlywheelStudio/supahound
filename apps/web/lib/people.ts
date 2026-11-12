@@ -125,7 +125,8 @@ export interface InviteDeps {
   // A new secret token (core newInviteToken).
   token: () => string;
   // In one paid, project-scoped transaction: the actor's role; and, only if the actor may grant
-  // `role`, the stored invite (core createInvite with the token's hash). Must not write otherwise.
+  // `role` and the role of any open invite to that address, the stored invite (core createInvite
+  // with the token's hash). Returns result null and writes nothing otherwise.
   save: (email: string, role: ProjectRole, token: string) => Promise<{ actor: ProjectRole | null; result: "created" | "renewed" | "member" | "invalid" | null }>;
   // After the transaction commits: the email with the accept link.
   send: (email: string, token: string) => Promise<void>;

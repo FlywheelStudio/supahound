@@ -4,11 +4,9 @@ Issue #16. Decisions 014 and 030.
 
 ## What it does
 
-Since #24 (decision 036) the recipients are the project's people: workspace owners and admins,
-and everyone with a role on the project.
-
-When an incident opens or escalates, every member of the workspace gets an HTML email (with a
-plain-text part). The email shows:
+When an incident opens or escalates, the project's people get an HTML email (with a
+plain-text part). The project's people are the workspace owners and admins, and everyone with a
+role on the project (decision 036, since #24). The email shows:
 
 - the severity, as a colored badge, with one line on what it means;
 - what happened, the likely impact and the suggested remediation (from the ZDR explainer, or its
