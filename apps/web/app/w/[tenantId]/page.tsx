@@ -1,5 +1,6 @@
 import { needsEnterprise, PRICE_LABEL, seatsFor } from "@supahound/core/billing/policy";
 import { getBilling, projectTiers } from "@supahound/core/db/billing";
+import { postureSummaries } from "@supahound/core/db/posture";
 import { countConnections, listOpenIncidents, listProjects, recordMemberEmail } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
@@ -9,6 +10,7 @@ import { Checklist } from "../../../components/Checklist";
 import { Notice, SeverityBadge, Shell } from "../../../components/Shell";
 import { incidentPath, projectPath } from "../../../lib/nav";
 import { crossTenantNote } from "../../../lib/coverage";
+import { postureLine } from "../../../lib/posture";
 import { withPool } from "../../../lib/db";
 import { mode, paidTenant, syncSeatsAfterChange, toBillingIfUnpaid } from "../../../lib/billing";
 import { currentStep, onboardingSteps } from "../../../lib/onboarding";
@@ -50,6 +52,7 @@ export default async function Workspace({
       billing: await getBilling(tx),
       tiers: await projectTiers(tx),
       projects: await listProjects(tx),
+      posture: await postureSummaries(tx),
       incidents: await listOpenIncidents(tx, 20),
       connections: await countConnections(tx),
     })).then(async (d) => {
@@ -157,6 +160,7 @@ export default async function Workspace({
           <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
             {data.projects.map((p) => {
               const note = crossTenantNote(p.crossTenant);
+              const posture = postureLine(data.posture.get(p.id));
               return (
                 <li key={p.id} className="px-4 py-3">
                   <div className="flex justify-between">
@@ -172,6 +176,7 @@ export default async function Workspace({
                       {" · "}{p.openIncidents} open
                     </span>
                   </div>
+                  <p className={`mt-1 text-sm ${posture.tone === "warn" ? "text-amber-800" : "text-slate-600"}`}>{posture.text}</p>
                   {note && (
                     <p className={`mt-1 text-sm ${note.tone === "warn" ? "text-amber-800" : "text-slate-600"}`}>{note.text}</p>
                   )}
