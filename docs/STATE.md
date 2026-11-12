@@ -20,7 +20,7 @@ This file tracks only what is in progress and what is done.
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
-| Web latency: Worker placed next to Postgres, one round trip to open a transaction, pending bar on links | issue pending | 2026-11-12, into `develop` | [features/web-latency.md](features/web-latency.md), decision 039 |
+| Web latency: Worker placed next to Postgres, one round trip to open a transaction, pending bar on links | #115 | 2026-11-12, into `develop` | [features/web-latency.md](features/web-latency.md), decision 039 |
 | People and roles per project: Owner/Admin/Editor/Viewer, RLS by project, email invites (7 days, single use, bound to the address) | #24 | 2026-11-12, PR #105 into `develop`; waits for the production migration (Erik) before merge | [features/project-people.md](features/project-people.md), decision 036 |
 | Incident history: 30-day list (open and resolved, keyset pages) and incident detail per project | #44 | 2026-11-12, into `develop` | [features/incident-history.md](features/incident-history.md), decision 035 |
 | Project navigation: project dropdown, project dashboard, project settings (notifications with SMS Coming soon, plan) | #98 | 2026-11-11, PR #101 into `develop` | [features/project-navigation.md](features/project-navigation.md), decision 031 |
