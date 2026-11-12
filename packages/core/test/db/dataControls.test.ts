@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { startCheckout, type FlowDeps, type StripeGateway } from "../../src/billing/flow.js";
 import { saveSubscription, withPaidTenantForUser, type SubscriptionSnapshot } from "../../src/db/billing.js";
-import { getClosure, keptRecord, recordClosure, WorkspaceClosedError } from "../../src/db/closure.js";
+import { getClosure, keptRecord, purgeTenant, recordClosure, WorkspaceClosedError } from "../../src/db/closure.js";
 import * as repo from "../../src/db/repo.js";
 import { applyRetention } from "../../src/db/retention.js";
 import { withTenant } from "../../src/db/tenant.js";
@@ -323,7 +323,10 @@ describe.skipIf(pgInfo === null)("purging a closed workspace (decision 037)", ()
     // The seed fills every table, so the purge is checked against real rows in each.
     for (const [table, n] of Object.entries(aBefore)) expect([table, n > 0]).toEqual([table, true]);
 
-    // Not before the date: until then a closed workspace gets retention like any other.
+    // Not before the date, even when called directly: the purge checks the date itself.
+    expect(await withTenant(db.app, a.tenant, (tx) => purgeTenant(tx, before(2)))).toBe(false);
+    expect(await rowCounts(db, a.tenant)).toEqual(aBefore);
+    // Until then a closed workspace gets retention like any other.
     expect(await runDataJob(db.app, a.tenant, before(2))).toMatchObject({ kind: "retention", retention: { incidents: 0, findings: 0 } });
     expect(await rowCounts(db, a.tenant)).toEqual(aBefore);
 

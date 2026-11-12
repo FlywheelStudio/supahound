@@ -107,6 +107,10 @@ The web app adds a seventh: membership is checked in the same transaction that r
 non-member gets the same 404 as a missing workspace (E2E UAT-W7). An eighth works inside the tenant
 (decision 036): restrictive RLS hides a project's rows from a signed-in user without a role on that
 project, and refuses settings and people writes the role does not allow (`people.test.ts`, UAT-W26).
+Data controls (decision 037) add restrictive policies too: only a workspace owner closes or reopens,
+only owners and admins delete a connection, and no signed-in request deletes a tenant
+(`dataControls.test.ts`). A purge is checked against every tenant table in the catalog: the other
+tenant's row counts stay the same.
 
 ## Security of the monitor
 
@@ -140,6 +144,13 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `service_role_networks` | Learned server ASNs per project (decision 003) |
 | `oauth_states` | Hashed OAuth state + PKCE verifier, 10-minute TTL, single use |
 | `audit_log` | Every query and model call, append-only |
+| `account_closures` | A closed workspace: dates, then the billing and consent record kept 7 years after the purge. No foreign key to `tenants`, so it outlives the tenant (decision 037) |
+
+Data controls (decision 037): once a day at 00:40 UTC the poller enqueues a `data` message per
+tenant. The job resolves incidents idle for 30 days, deletes incidents, findings and poll runs past
+the 30-day window, and purges a workspace 30 days after its owner closed it (deleting the `tenants`
+row cascades to every other row of the tenant). `supahound_notifier` is a third NOLOGIN role: it
+reads owners' addresses across tenants for the subprocessor notice, and nothing else.
 
 ## Decisions
 
