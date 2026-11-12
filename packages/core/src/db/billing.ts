@@ -4,6 +4,7 @@ import {
   type Access, type BillingStatus, type CardRejection, type Seats, type Tier,
 } from "../billing/policy.js";
 import type { ProjectId, TenantId, UserId } from "../tenancy/scope.js";
+import { getClosure, WorkspaceClosedError } from "./closure.js";
 import type { TenantTx } from "./tenant.js";
 import { withTenantForUser, type Role } from "./user.js";
 
@@ -222,6 +223,8 @@ export async function refreshProjectTiers(tx: TenantTx, today: string): Promise<
 // The gate (decision 028, point 7). The only tenant entry point for signed-in pages and actions
 // other than the billing routes. Membership and billing are both checked inside the transaction
 // that runs fn; a tenant without a validated card gets PaymentRequiredError before fn runs.
+// A closed workspace (decision 037) gets WorkspaceClosedError first, in every billing mode: its
+// canceled subscription must not send it to the billing page.
 export async function withPaidTenantForUser<T>(
   pool: Pool,
   mode: BillingMode,
@@ -230,6 +233,7 @@ export async function withPaidTenantForUser<T>(
   fn: (tx: TenantTx, role: Role, access: Access) => Promise<T>,
 ): Promise<T> {
   return withTenantForUser(pool, user, tenant, async (tx, role) => {
+    if (await getClosure(tx)) throw new WorkspaceClosedError(tenant);
     if (mode === "off") return fn(tx, role, "full");
     const access = accessForAccount(await getBilling(tx));
     if (access === "blocked") throw new PaymentRequiredError(tenant);

@@ -116,3 +116,20 @@ export function parseCredentials(stored: string): Credentials {
   }
   return { accessToken: stored, refreshToken: null, expiresAt: null };
 }
+
+// Ends the grant at Supabase (disconnect, decision 037): POST /v1/oauth/revoke with the app's
+// credentials and the refresh token. Supabase marks this endpoint Beta, so the caller treats it as
+// best effort: false on any failure, never a throw. The local token is deleted either way.
+export async function revokeGrant(client: OAuthClient, refreshToken: string, baseUrl = "https://api.supabase.com"): Promise<boolean> {
+  try {
+    const res = await (client.fetch ?? fetch)(new URL("/v1/oauth/revoke", baseUrl).toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ client_id: client.clientId, client_secret: client.clientSecret, refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

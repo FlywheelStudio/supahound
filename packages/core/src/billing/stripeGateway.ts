@@ -118,6 +118,18 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
       });
     },
 
+    async cancelSubscription(id) {
+      try {
+        const s = await stripe.subscriptions.cancel(id, { prorate: false, invoice_now: false });
+        return subscriptionFromStripe(asObj(s), prices);
+      } catch (err) {
+        // Already canceled (a retry): read it back. Anything else is a real failure.
+        const current = await stripe.subscriptions.retrieve(id).catch(() => null);
+        if (current && current.status === "canceled") return subscriptionFromStripe(asObj(current), prices);
+        throw err;
+      }
+    },
+
     async portalUrl(customerId, returnUrl) {
       return (await stripe.billingPortal.sessions.create({
         customer: customerId,

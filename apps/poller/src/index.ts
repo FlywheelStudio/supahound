@@ -2,7 +2,9 @@ import { applyUsageTiers } from "@supahound/core/billing/flow";
 import { stripeGateway } from "@supahound/core/billing/stripeGateway";
 import { countDailyUsage } from "@supahound/core/billing/usage";
 import { billingMode } from "@supahound/core/db/billing";
-import { billedTenants, dueProjects } from "@supahound/core/db/repo";
+import { KEEP_RECORDS_YEARS } from "@supahound/core/db/closure";
+import { billedTenants, dataJobTenants, dueProjects } from "@supahound/core/db/repo";
+import { runDataJob } from "@supahound/core/datacontrols/flow";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
@@ -17,8 +19,9 @@ import pg from "pg";
 //
 // Pools are created per invocation: Workers may not share I/O objects across requests.
 
-// A poll of one project, or (once a day, billing on) the usage count of one tenant (decision 028).
-export type PollMessage = { tenantId: string; projectId: string } | { kind: "usage"; tenantId: string };
+// A poll of one project; once a day with billing on, the usage count of one tenant (decision 028);
+// once a day, the data job of one tenant: retention, purge, expired records (decision 037).
+export type PollMessage = { tenantId: string; projectId: string } | { kind: "usage" | "data"; tenantId: string };
 
 // The daily usage count runs at 00:20 UTC, after Supabase has the previous day's logs.
 export const USAGE_CRON = { hour: 0, minute: 20 };
@@ -28,16 +31,28 @@ export function isUsageMinute(scheduledTime: number): boolean {
   return t.getUTCHours() === USAGE_CRON.hour && t.getUTCMinutes() === USAGE_CRON.minute;
 }
 
-export function parseUsageMessage(body: unknown): TenantId | null {
+// The daily data job runs at 00:40 UTC, after the usage count. The cron already fires every
+// minute, so no new trigger is needed.
+export const DATA_CRON = { hour: 0, minute: 40 };
+
+export function isDataMinute(scheduledTime: number): boolean {
+  const t = new Date(scheduledTime);
+  return t.getUTCHours() === DATA_CRON.hour && t.getUTCMinutes() === DATA_CRON.minute;
+}
+
+function parseTenantMessage(body: unknown, want: "usage" | "data"): TenantId | null {
   if (!body || typeof body !== "object") return null;
   const { kind, tenantId } = body as Record<string, unknown>;
-  if (kind !== "usage" || typeof tenantId !== "string") return null;
+  if (kind !== want || typeof tenantId !== "string") return null;
   try {
     return parseTenantId(tenantId);
   } catch {
     return null;
   }
 }
+
+export const parseUsageMessage = (body: unknown) => parseTenantMessage(body, "usage");
+export const parseDataMessage = (body: unknown) => parseTenantMessage(body, "data");
 
 const QUEUE_SEND_LIMIT = 100;
 
@@ -61,9 +76,9 @@ export interface PollQueue {
   sendBatch(messages: Iterable<MessageSendRequest<PollMessage>>): Promise<unknown>;
 }
 
-export async function enqueueUsage(tenants: TenantId[], queue: PollQueue): Promise<number> {
+export async function enqueueUsage(tenants: TenantId[], queue: PollQueue, kind: "usage" | "data" = "usage"): Promise<number> {
   for (let i = 0; i < tenants.length; i += QUEUE_SEND_LIMIT) {
-    await queue.sendBatch(tenants.slice(i, i + QUEUE_SEND_LIMIT).map((t) => ({ body: { kind: "usage" as const, tenantId: t } })));
+    await queue.sendBatch(tenants.slice(i, i + QUEUE_SEND_LIMIT).map((t) => ({ body: { kind, tenantId: t } })));
   }
   return tenants.length;
 }
@@ -86,8 +101,21 @@ export async function handleMessages(
   messages: readonly QueueMessageLike[],
   poll: (scope: ProjectScope) => Promise<PollOutcome>,
   usage?: (tenant: TenantId) => Promise<void>,
+  data?: (tenant: TenantId) => Promise<void>,
 ): Promise<void> {
   for (const msg of messages) {
+    const dataTenant = parseDataMessage(msg.body);
+    if (dataTenant) {
+      try {
+        if (data) await data(dataTenant);
+        log("data_job_done", { tenant_id: dataTenant });
+        msg.ack();
+      } catch {
+        log("data_job_crashed", { tenant_id: dataTenant });
+        msg.retry();
+      }
+      continue;
+    }
     const tenant = parseUsageMessage(msg.body);
     if (tenant) {
       try {
@@ -126,6 +154,11 @@ export default {
       log("polls_enqueued", { count });
       if (billing === "stripe" && isUsageMinute(_controller.scheduledTime)) {
         log("usage_enqueued", { count: await enqueueUsage(await billedTenants(scheduler), env.POLL_QUEUE) });
+      }
+      // Every billing mode: retention and purges are privacy promises, not billing.
+      if (isDataMinute(_controller.scheduledTime)) {
+        const tenants = await dataJobTenants(scheduler, new Date(_controller.scheduledTime), KEEP_RECORDS_YEARS);
+        log("data_jobs_enqueued", { count: await enqueueUsage(tenants, env.POLL_QUEUE, "data") });
       }
     } finally {
       await scheduler.end();
@@ -167,7 +200,12 @@ export default {
       await applyUsageTiers({ pool: app, stripe, appUrl: env.APP_URL, now: () => new Date() }, tenant, counted.day);
     };
     try {
-      await handleMessages(batch.messages, (scope) => pollProject(scope, deps), usage);
+      // Counts only in the log: never row contents.
+      const data = async (tenant: TenantId) => {
+        const outcome = await runDataJob(app, tenant, new Date());
+        log("data_job", { tenant_id: tenant, kind: outcome.kind, ...(outcome.kind === "retention" ? outcome.retention : {}) });
+      };
+      await handleMessages(batch.messages, (scope) => pollProject(scope, deps), usage, data);
     } finally {
       await app.end();
     }

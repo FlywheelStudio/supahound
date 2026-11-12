@@ -320,7 +320,8 @@ export async function appendAudit(
 // tenant transaction.
 //
 // billing "stripe" skips tenants whose subscription may not be polled (decision 028), unless the
-// workspace is exempt (decision 029); "off" is for self-hosting without billing. The scheduler
+// workspace is exempt (decision 029); "off" is for self-hosting without billing. A closed
+// workspace (decision 037) is skipped in both modes; its projects are also paused. The scheduler
 // reads billing_accounts (tenant_id, status, exempt_at) only. A membership trigger clears
 // exempt_at when the owners change, so the scheduler needs no access to memberships.
 export async function dueProjects(
@@ -333,11 +334,13 @@ export async function dueProjects(
     billing === "off"
       ? `SELECT p.tenant_id, p.id FROM supahound.projects p
          WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+           AND NOT EXISTS (SELECT 1 FROM supahound.account_closures c WHERE c.tenant_id = p.tenant_id)
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`
       : `SELECT p.tenant_id, p.id FROM supahound.projects p
          JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND (b.status = ANY($3::text[]) OR b.exempt_at IS NOT NULL)
          WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+           AND NOT EXISTS (SELECT 1 FROM supahound.account_closures c WHERE c.tenant_id = p.tenant_id)
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`,
     billing === "off" ? [olderThanSeconds, limit] : [olderThanSeconds, limit, POLLABLE_STATUSES],
@@ -351,6 +354,23 @@ export async function billedTenants(schedulerPool: Pool): Promise<TenantId[]> {
   const res = await schedulerPool.query<{ tenant_id: string }>(
     "SELECT tenant_id FROM supahound.billing_accounts WHERE status = ANY($1::text[]) ORDER BY tenant_id",
     [POLLABLE_STATUSES],
+  );
+  return res.rows.map((r) => tenantId(r.tenant_id));
+}
+
+// The tenants the daily data job visits (decision 037): every tenant with a watched project
+// (incident retention), closed workspaces whose purge is due, and kept records past their
+// years. Scheduler role: reads project tenant IDs and account_closures (tenant_id, purge_after,
+// purged_at) only. Billing does not filter it: an unpaid workspace still holds incidents.
+export async function dataJobTenants(schedulerPool: Pool, now: Date, keepYears: number): Promise<TenantId[]> {
+  const res = await schedulerPool.query<{ tenant_id: string }>(
+    `SELECT tenant_id FROM supahound.projects
+     UNION
+     SELECT tenant_id FROM supahound.account_closures
+      WHERE (purged_at IS NULL AND purge_after <= $1)
+         OR purged_at < $1::timestamptz - make_interval(years => $2)
+     ORDER BY 1`,
+    [now, keepYears],
   );
   return res.rows.map((r) => tenantId(r.tenant_id));
 }
@@ -567,6 +587,19 @@ export async function watchProjects(
 export async function removeProject(tx: TenantTx, id: ProjectId): Promise<boolean> {
   const rows = await tx.query("DELETE FROM supahound.projects WHERE tenant_id = $1 AND id = $2 RETURNING id", [tx.tenantId, id]);
   return rows.length === 1;
+}
+
+// Workspace settings (decision 037): each connection with the number of projects watched
+// through it, which a disconnect removes. RLS hides projects a signed-in user has no role on, so
+// call it for workspace owners and admins, who see every project.
+export async function listConnectionsWithProjects(tx: TenantTx): Promise<(ConnectionSummary & { projects: number })[]> {
+  const rows = await tx.query<{ id: string; label: string; created_at: Date; projects: number }>(
+    `SELECT c.id, c.label, c.created_at,
+            (SELECT count(*)::int FROM supahound.projects p WHERE p.tenant_id = c.tenant_id AND p.connection_id = c.id) AS projects
+     FROM supahound.connections c WHERE c.tenant_id = $1 ORDER BY c.created_at, c.id`,
+    [tx.tenantId],
+  );
+  return rows.map((r) => ({ id: connectionId(r.id), label: r.label, createdAt: r.created_at, projects: r.projects }));
 }
 
 export async function countConnections(tx: TenantTx): Promise<number> {

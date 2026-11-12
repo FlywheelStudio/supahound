@@ -91,6 +91,12 @@ class FakeStripe implements StripeGateway {
   async portalUrl() {
     return "https://billing.stripe.test/portal";
   }
+  async cancelSubscription(id: string) {
+    const s = this.subscriptions.get(id);
+    if (!s) throw new Error("no such subscription");
+    s.status = "canceled";
+    return { ...s };
+  }
 }
 
 describe.skipIf(pgInfo === null)("billing with a validated card", () => {

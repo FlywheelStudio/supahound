@@ -3,6 +3,7 @@ import {
   acceptBillingTerms, claimStripeEvent, getBilling, isStripeEventProcessed, projectTiers, recordCardRejected,
   refreshProjectTiers, saveSeats, saveSubscription, setStripeCustomer, type SubscriptionSnapshot,
 } from "../db/billing.js";
+import { getClosure } from "../db/closure.js";
 import { withTenant } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
 import { tenantId as parseTenantId, type TenantId, type UserId } from "../tenancy/scope.js";
@@ -37,6 +38,9 @@ export interface StripeGateway {
   // a project changes tier from its usage, which takes effect at the next renewal (decision 028).
   setSeats(subscriptionId: string, seats: Seats, prorate: boolean): Promise<void>;
   portalUrl(customerId: string, returnUrl: string): Promise<string>;
+  // Cancels at once, with no proration and no refund (closing a workspace, decision 037).
+  // Canceling a subscription that is already canceled returns it unchanged.
+  cancelSubscription(subscriptionId: string): Promise<SubscriptionSnapshot>;
 }
 
 export interface FlowDeps {
@@ -65,6 +69,8 @@ export async function startCheckout(
 ): Promise<string> {
   const { tenant } = input;
   const state: { next: string } | { customerId: string | null } = await withTenantForUser(deps.pool, input.user, tenant, async (tx, role) => {
+    // A closed workspace never starts a checkout, even from a replayed form (decision 037).
+    if (await getClosure(tx)) return { next: `/w/${tenant}/closed` };
     if (role === "member") return { next: billingPath(tenant, "role") };
     const billing = await getBilling(tx);
     if (accessForAccount(billing) !== "blocked") return { next: `/w/${tenant}` };
@@ -102,9 +108,14 @@ export async function completeVerification(
   if (!tenant || (expectedTenant && tenant !== expectedTenant) || !s.customerId) return { tenant, result: "ignored" };
   if (s.status !== "complete" || !s.hold) return { tenant, result: "pending" };
 
-  const billing = await withTenant(deps.pool, tenant, (tx) => getBilling(tx));
+  const { billing, closed } = await withTenant(deps.pool, tenant, async (tx) => ({ billing: await getBilling(tx), closed: (await getClosure(tx)) !== null }));
   // The session must belong to the customer this tenant created. Metadata alone is not enough.
   if (billing.customerId !== s.customerId) return { tenant, result: "ignored" };
+  // A checkout begun before the workspace closed (decision 037): release the hold, start nothing.
+  if (closed) {
+    if (s.hold.releasable) await deps.stripe.releaseHold(s.hold.paymentIntentId);
+    return { tenant, result: "ignored" };
+  }
 
   const verdict = checkCard(s.hold);
   if (s.hold.releasable) await deps.stripe.releaseHold(s.hold.paymentIntentId);
