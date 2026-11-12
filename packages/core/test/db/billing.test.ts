@@ -285,6 +285,22 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       expect((await withTenant(db.app, t, getBilling)).status).toBe("active");
     });
 
+    it("gives one trial even when two checkouts start before either finishes (decision 037)", async () => {
+      const t = await workspace("Two tabs");
+      const first = await checkout(t);
+      const second = await checkout(t);
+      expect([stripe.sessions.get(first)!.trialAllowed, stripe.sessions.get(second)!.trialAllowed]).toEqual([true, true]);
+      stripe.pay(first, GOOD);
+      await completeVerification(deps, first, t);
+      expect(stripe.creates.at(-1)!.trial).toBe(true);
+      // The first subscription ends; the second tab's checkout still says "trial", the workspace does not.
+      stripe.subscriptions.get(await subOf(t))!.status = "canceled";
+      await refreshSubscription(deps, await subOf(t));
+      stripe.pay(second, GOOD);
+      expect((await completeVerification(deps, second, t)).result).toBe("subscribed");
+      expect(stripe.creates.at(-1)!.trial).toBe(false);
+    });
+
     it("refuses a trial to a user who owns another workspace that had one, but not to a new owner (decision 037)", async () => {
       const repeat = verifiedUserId(randomUUID());
       const first = await createWorkspace(db.app, repeat, "First owned");

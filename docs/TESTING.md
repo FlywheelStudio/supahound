@@ -271,5 +271,39 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | The server checks the role before Scan now (#11) | `scanNowAction` skips `canScan` | UAT-W30 fails (no role notice) |
 | The Posture tab shows the fix SQL (#11) | The page hides the SQL | UAT-W29 fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
+| Nothing is deleted while a workspace pays (#43) | `payingAccount` always false (the paying check removed) | 10 Postgres tests fail (retention, purge, disconnect, for active, past_due and exempt) |
+| Open incidents are resolved before delete (#43) | The resolve step matches nothing | 18 Postgres tests fail |
+| The retention window is 30 days (#43) | `RETENTION_DAYS` set to 3650 | 5 Postgres tests fail |
+| Old findings go even with a live incident (#43) | Findings delete keeps rows with an incident | 1 Postgres test fails |
+| The latest good poll run stays (#43) | Retention drops the latest-ok exclusion | 1 Postgres test fails |
+| The purge deletes the history (#43) | `purgeHistory` keeps the connections | 1 Postgres test fails |
+| The purge waits for its date (#43) | `purgeHistory` ignores `purge_after` | 4 Postgres tests fail |
+| A closing workspace works until its period ends (#43) | The gate closes it at once; separately, never | 1 Postgres test fails each |
+| Closed workspaces reach the closed page (#43) | `toBillingIfUnpaid` drops the closed redirect | UAT-W34 and UAT-W37 fail |
+| Only owners and admins change or delete a connection (#43) | `connection_write`; separately `connection_remove`, passes every role | 1 Postgres test fails each |
+| Only an owner writes a closure (#43) | `closure_insert` passes every role | 1 Postgres test fails |
+| The workspace record is never deleted (#43) | `tenant_keep` passes every row; separately, `closure_delete` drops `purged_at IS NULL` | 1 Postgres test fails each |
+| The scheduler skips closed workspaces (#43) | `dueProjects` drops its closure check | `isolation.test.ts` fails |
+| The notifier reads owners only (#43) | `notifier_read` passes every row | `isolation.test.ts` fails |
+| Close cancels at the period end (#43) | Core skips the Stripe call; separately, the web action passes no gateway | 3 Postgres tests fail; UAT-W34 fails |
+| Keeping it open undoes the cancel (#43) | Reopen skips the Stripe call | 1 Postgres test fails |
+| A closed workspace starts no checkout (#43) | `startCheckout` skips the closure check; separately, `completeVerification` does | 1 Postgres test fails each |
+| One free trial per workspace (#43) | `completeVerification` trusts the session alone | 1 Postgres test fails (two checkouts at once) |
+| No trial for an owner who had one (#43) | `trialAvailable` skips the owner check | 1 Postgres test fails |
+| Closing ends a staff exemption (#43) | `recordClosure` keeps it | 1 Postgres test fails |
+| Disconnect revokes at Supabase (#43) | Core never revokes | 2 Postgres tests fail |
+| Disconnect emails the project's people (#43) | The web action sends no email | UAT-W31 fails |
+| Disconnect and close check the role (#43) | Core drops the member check (disconnect) or the owner check (close) | 1 and 2 Postgres tests fail |
+| Disconnected history waits 30 days (#43) | `deleteExpiredConnections` ignores `delete_after` | 10 Postgres tests fail |
+| Reconnecting keeps the history (#43) | `storeConnection` never matches | 1 Postgres test fails |
+| Paused projects are not billed (#43) | `billedTiers` counts paused projects | 1 Postgres test fails |
+| Only `invalid_grant` is a revocation (#43) | Any 401 counts | 3 Postgres tests fail (500, `invalid_client`, a 401 without a code) |
+| A revocation emails once (#43) | `markDisconnected` matches an already disconnected connection | 1 Postgres test fails |
+| A notice comes 30 days ahead (#43) | The period check set to 0 days | 2 unit tests fail |
+| The notice CLI only counts by default (#43) | The dry-run branch removed | 1 unit test fails |
+| Each owner gets one notice (#43) | Recipients not deduplicated; separately, the journal ignored | 1 Postgres test; 2 unit tests fail |
+| Forms return only to known pages (#43) | `parseBack` returns its input | 1 web unit test fails |
+| `data` messages reach the data job (#43) | The consumer never parses them | 1 workerd test fails |
+| The production migration keeps the old code working (#43) | — (a check, not a mutation): `develop` @ c366a6d's unchanged suites on the new schema | Core 662 of 663 (the 1 is the table-list check), web 137, poller 12, E2E 55 of 55 |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

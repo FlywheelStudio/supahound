@@ -230,8 +230,9 @@ export async function runDataJob(pool: Pool, tenant: TenantId, now: Date): Promi
     const paying = await isPaying(tx);
     const closure = await getClosure(tx);
     if (closure?.purgedAt) return { paying, purged: false, retention: null, connectionsDeleted: 0 };
+    // purgeHistory checks purge_after itself, in the UPDATE that claims the purge.
     if (closure && paying) await deferPurge(tx, now);
-    else if (closure && closure.purgeAfter <= now && (await purgeHistory(tx, now))) {
+    else if (closure && (await purgeHistory(tx, now))) {
       return { paying, purged: true, retention: null, connectionsDeleted: 0 };
     }
     let connectionsDeleted = 0;
