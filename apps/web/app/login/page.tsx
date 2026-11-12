@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { redirect } from "next/navigation";
 import { mode } from "../../lib/billing";
-import { brandFrom } from "../../lib/brand";
+import { brandFrom, PRODUCT_NAME } from "../../lib/brand";
 import { safeNext } from "../../lib/security";
 import { currentUser } from "../../lib/supabase";
 import { authCopy } from "../../lib/signup";
@@ -22,6 +22,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
+      <p className="flex items-center gap-2 font-semibold"><img src="/favicon.svg" alt="" width={28} height={28} className="h-7 w-7" />{PRODUCT_NAME}</p>
       <h1 className="text-2xl font-semibold">{copy.heading}</h1>
       {copy.plan && <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">{copy.plan}</p>}
       {params.sent ? (

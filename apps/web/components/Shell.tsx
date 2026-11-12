@@ -131,7 +131,7 @@ export function Shell(props: ShellProps) {
   return (
     <div className="min-h-screen md:flex">
       <aside className="border-b border-slate-200 bg-slate-50 p-4 md:sticky md:top-0 md:h-screen md:w-64 md:shrink-0 md:overflow-y-auto md:border-b-0 md:border-r">
-        <p className="mb-3 px-2 text-sm font-semibold">{PRODUCT_NAME}</p>
+        <p className="mb-3 flex items-center gap-2 px-2 text-sm font-semibold"><img src="/favicon.svg" alt="" width={20} height={20} className="h-5 w-5" />{PRODUCT_NAME}</p>
         <ProjectSwitcher {...props} />
         <nav aria-label="Main">
           {groups.map((g) => <Group key={g.label ?? "project"} group={g} />)}
