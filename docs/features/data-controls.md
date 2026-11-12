@@ -1,150 +1,153 @@
 # Data controls
 
-Issue #43. Decision 037. Builds on decisions 004, 022, 028, 035 and 036.
+Issue #43. Decision 037 (with Erik's answers of 2026-11-12). Builds on decisions 022, 028, 029, 030,
+035 and 036.
 
 ## What it does
 
 | Control | Who | Where |
 | --- | --- | --- |
-| Incident retention: 30 days after an incident's last activity | Automatic, daily | Poller data job |
-| Disconnect a Supabase organization | Workspace owner or admin | Workspace settings, or the closed page |
-| Close the workspace; deleted 30 days later | Workspace owner | Workspace settings |
-| Reopen a closed workspace before the purge | Workspace owner | `/w/<tenant>/closed` |
+| Retention: 30 days after an incident's last activity; nothing while the workspace pays | Automatic, daily | Poller data job |
+| Disconnect a Supabase organization; everyone on its projects gets an email; history kept 30 days | Workspace owner or admin | Workspace settings, or the closed page |
+| A grant revoked at Supabase: polling stops, one email, history kept 30 days | Automatic | Poller |
+| Reconnect the same organization within 30 days: history back | Workspace owner or admin | Workspace settings → Reconnect Supabase |
+| Close the workspace: Stripe cancels at the period end; logs and history go 30 days after it stops paying; the record stays | Workspace owner | Workspace settings |
+| Keep a closing workspace open, or reopen a closed one before the purge | Workspace owner | Settings, or `/w/<tenant>/closed` |
+| One free trial per workspace and per owner | Automatic | Billing page and Checkout |
 | Email every owner before a new subprocessor | Operator | `pnpm subprocessor-notice` |
 
-The workspace sidebar has a new **Settings** item (`/w/<tenant>/settings`): Supabase connections,
-"How long Supahound keeps data", and "Close workspace".
+The workspace sidebar has a **Settings** item (`/w/<tenant>/settings`).
 
 ## How it works
 
-### Retention (`packages/core/src/db/retention.ts`)
+### "Paying" (`billing/policy.ts` `payingAccount`, `db/billing.ts` `isPaying`)
 
-`applyRetention(tx, now)` runs in one tenant transaction, in this order:
+Stripe status `active` or `past_due`, or a staff exemption. Every deletion path asks it inside the
+transaction that would delete: retention, the purge, the delete after a disconnect.
 
-1. Resolve open incidents last seen more than 30 days ago.
-2. Delete resolved incidents last seen more than 30 days ago.
-3. Delete findings created more than 30 days ago.
-4. Delete poll runs started more than 30 days ago, except each project's latest run, its latest
-   `ok` run (the next poll window starts at its end) and runs that findings still point at.
-5. Delete expired OAuth states.
+### The daily data job (`datacontrols/flow.ts` `runDataJob`, `apps/poller/src/index.ts`)
 
-An open incident is never deleted directly: step 1 resolves it first, and its UPDATE re-checks
-`last_seen_at` after any committed poll save. A poll that loaded the incident before the job and
-saves after it fails once on the findings foreign key; the queue retry opens a new incident. Not touched: `audit_log` (append-only for the app; its retention
-needs its own decision), `project_usage`, `service_role_networks`.
+At 00:40 UTC (`DATA_CRON`) the cron lists tenants with `dataJobTenants` (scheduler role: every tenant
+with a project, and closed workspaces whose purge date has come) and enqueues `{ kind: "data" }` per
+tenant. In one `withTenant` transaction per tenant:
 
-### The daily data job (`packages/core/src/datacontrols/flow.ts`, `apps/poller/src/index.ts`)
+1. `paying = isPaying(tx)`.
+2. Closed workspace: paying → `deferPurge` (purge_after ≥ today + 30); not paying and due →
+   `purgeHistory` and stop.
+3. Disconnected connections: paying → `deferConnectionDeletes`; not paying →
+   `deleteExpiredConnections` (cascade to projects and history).
+4. `applyRetention(tx, now, { deleteHistory: !paying })`.
 
-- At 00:40 UTC (`DATA_CRON`) the cron, which already runs every minute, lists tenants with
-  `dataJobTenants` (scheduler role): every tenant with a project, closed workspaces due for purge,
-  and kept records older than 7 years. It enqueues one `{ kind: "data", tenantId }` per tenant.
-- The consumer runs `runDataJob(app, tenant, now)` in one `withTenant` transaction: expire a kept
-  record, or purge a closed workspace that is due, or run retention. It logs counts only.
-- The poller before this change acks a `data` message as invalid (it has no `projectId`), so a mixed
-  deploy polls nothing by mistake.
+The consumer before this change acks a `data` message as invalid (no `projectId`).
 
-### Closing and the purge (`db/closure.ts`, `datacontrols/flow.ts`)
+### Retention (`db/retention.ts`)
 
-- `closeWorkspace` (owner only, typed name): reads the subscription; outside any transaction cancels
-  it in Stripe (`StripeGateway.cancelSubscription`: at once, `prorate: false`, `invoice_now: false`);
-  then in a new transaction saves Stripe's answer and calls `recordClosure`, which inserts the
-  `account_closures` row (`purge_after` = closed + 30 days), pauses every project and cancels open
-  invites. A Stripe failure closes nothing.
-- The gate (`withPaidTenantForUser`) throws `WorkspaceClosedError` before the billing check, in both
-  billing modes; `toBillingIfUnpaid` sends it to `/w/<tenant>/closed`. `startCheckout` returns the
-  closed page, and `completeVerification` releases the hold and starts no trial for a closed
-  workspace. The billing page redirects to the closed page. Invite acceptance gets "canceled".
-- `dueProjects` skips any tenant with a closure row; its projects are paused as well.
-- `reopenWorkspace` (owner, before `purge_after`): deletes the closure row and unpauses every
-  project. The canceled subscription means a paying workspace adds a card again.
-- `purgeTenant` (data job, after `purge_after`): copies `stripe_customer_id`, `subscription_id`,
-  `terms_version`, `terms_accepted_at`, `card_verified_at` and the scan consents onto the closure row,
-  sets `purged_at`, then deletes the `tenants` row. Every other row of the tenant goes through
-  `ON DELETE CASCADE`. `expireKeptRecords` deletes the closure row 7 years after the purge.
+Resolve open incidents idle 30 days; then, only when `deleteHistory`: delete resolved incidents last
+seen more than 30 days ago, findings older than 30 days, poll runs older than 30 days except the
+latest and latest `ok` run per project and runs findings point at. Always: delete expired OAuth
+states.
 
-### Disconnect (`datacontrols/flow.ts`, `supabase/oauth.ts`)
+### Closing (`db/closure.ts`, `datacontrols/flow.ts`)
 
-`disconnectConnection` (owner or admin, typed connection name): opens the sealed credentials to get
-the refresh token; outside any transaction calls `revokeGrant` (`POST /v1/oauth/revoke`, Beta at
-Supabase, best effort); then deletes the `connections` row. The projects watched through it go with
-their incidents, findings and poll runs; audit rows stay with a null project (decision 022). The web
-action then syncs seats. The page says whether Supabase confirmed the revocation.
+- `closeWorkspace` (owner, typed name): Stripe `setCancelAtPeriodEnd(id, true)` first; then
+  `recordClosure(tx, user, now, accessEndsAt)`: the closure row (`access_ends_at` = period or trial
+  end, or now; `purge_after` = that + 30 days), open invites canceled, staff exemption ended.
+- The gate throws `WorkspaceClosedError` only once `access_ends_at` has passed (`isClosedNow`); until
+  then a banner on the overview and the settings page say when it closes. `dueProjects` skips the
+  workspace from then on.
+- `reopenClosedWorkspace` (owner, before the purge): resumes a pending Stripe cancel
+  (`setCancelAtPeriodEnd(id, false)`), deletes the closure row.
+- `purgeHistory` (data job, not paying): sets `purged_at`, then deletes connections (and through them
+  projects with incidents, findings, poll runs, networks, usage, roles, invites, posture scans),
+  remaining projects, OAuth states and scans. It keeps tenants, memberships, billing accounts, Stripe
+  events, audit log, scan domains and authorizations, and the closure row.
 
-### Subprocessor notice (`packages/core/src/notices/subprocessor.ts`, `cli.ts`)
+### Disconnect and revocation (`db/connections.ts`, `datacontrols/flow.ts`, `datacontrols/email.ts`)
+
+- `markDisconnected(tx, connection, now, reason, by)`: conditional UPDATE (only on a live
+  connection) that empties `sealed_token`, sets `disconnected_at`, `disconnect_reason`,
+  `delete_after` (+30 days), pauses the connection's projects, and returns the project names and
+  `connectionRecipients`. A second call returns null, so nothing is sent twice.
+- `disconnectConnection` (owner or admin, typed name): reads the refresh token, calls `revoke`
+  (best effort) outside any transaction, then `markDisconnected` with reason `user`; a connection
+  with no project is deleted at once. The web action sends `sendDisconnectEmails` through the
+  Workers email binding and syncs seats (paused projects are not billed).
+- Revocation: in `pollProject`, a token error for which `isRevokedGrant` is true finishes the run as
+  `grant_revoked`, calls `markRevoked` (reason `revoked`) and, for the first worker only, sends the
+  email through the alert path (`deps.alerts`). Counts go to the audit log (`alert_email`, kind
+  `disconnected` or `access_revoked`).
+- `storeConnection` (OAuth callback): when the new grant lists a project ref that a disconnected
+  connection still watches, the token goes into that connection, its projects resume, and the
+  workspace shows "Supabase reconnected". Otherwise a new connection.
+- `listConnections` and `countConnections` return live connections only, so no page or picker reads
+  an emptied token.
+
+### One free trial (`db/billing.ts` `trialAvailable`, `billing/flow.ts`)
+
+`startCheckout` computes `trialAvailable(tx, user)`: false when this workspace has a validated card or
+a trial end, or when the user owns another workspace that had one (read through
+`owner_trial_history`). The Checkout Session carries `metadata.trial`; `completeVerification` creates
+the subscription with a trial only when the session allows it and the workspace check still passes.
+The billing page and Checkout's text (`termsText(trial)`) say when there is no trial.
+
+### Subprocessor notice (`notices/subprocessor.ts`, `cli.ts`)
 
 ```bash
 pnpm subprocessor-notice --name Twilio --purpose "SMS alerts" --location "United States" \
   --effective 2027-03-01 --contact hello@example.com [--policy-url https://…]
-# dry run (default): "N recipients", owners with no address; nothing sent, no address printed
-# --test-to me@example.com         one copy to one address
-# --send --journal notice.journal  every owner, once; re-run resumes from the journal
+# default: counts only; --test-to me@example.com: one copy; --send --journal notice.journal: every owner, once
 ```
-
-- `noticeProblems`: every field set, effective date at least 30 days away, https policy URL.
-- `noticeRecipients(notifier)`: owner addresses, lower-cased, deduplicated across workspaces.
-- `cloudflareSender`: the Cloudflare Email Sending REST API, one email per address, reply-to the
-  contact. Errors carry status and error codes only.
-- The journal holds `sha256(notice key + address)` per sent address, never the address.
 
 ## Data model and RLS
 
-Migration `20261112030000_data_controls.sql` (additive):
+Migration `20261112030000_data_controls.sql` (additive, no DROP):
 
 | Object | Rule |
 | --- | --- |
-| `account_closures` (PK `tenant_id`, no FK) | `tenant_isolation`; restrictive `closure_insert` (no user, or workspace owner), `closure_update` (no user), `closure_delete` (no user or owner, AND before the purge or 7 years after it). Scheduler reads `tenant_id, purge_after, purged_at` |
-| `connections` | Restrictive `connection_remove`: a signed-in user deletes only as workspace owner or admin |
-| `tenants` | Restrictive `tenant_purge`: no signed-in user deletes a tenant |
-| `supahound_notifier` (NOLOGIN) | `SELECT (tenant_id, role, email)` on `memberships`, policy `role = 'owner'`; nothing else |
+| `account_closures` (PK and FK `tenant_id`) | `tenant_isolation`; restrictive `closure_insert` (no user, or workspace owner), `closure_update` (no user), `closure_delete` (workspace owner, before the purge). Scheduler reads `tenant_id, access_ends_at, purge_after, purged_at` |
+| `connections` | New nullable `disconnected_at`, `disconnected_by`, `disconnect_reason`, `delete_after`; check `connections_disconnect_shape` (all set together, and a disconnected token is empty); restrictive `connection_write` (UPDATE) and `connection_remove` (DELETE): no user, or workspace owner or admin |
+| `tenants` | Restrictive `tenant_keep`: no delete, ever |
+| `billing_accounts` | Permissive `owner_trial_history` (SELECT): a signed-in owner sees the billing rows of workspaces they own |
+| `supahound_notifier` (NOLOGIN) | `SELECT (tenant_id, role, email)` on `memberships`, policy `role = 'owner'` |
 
-`supabase/setup/notifier-user.sql` creates the login for the notifier (not a migration: it takes a
-password).
-
-### What the purge keeps
-
-| Kept | Why | For |
-| --- | --- | --- |
-| Closure dates and who closed | Proof of the closure and the deletion | 7 years |
-| Stripe customer and subscription IDs | Tax: the link to Stripe's invoices | 7 years |
-| Terms version and acceptance time, card check time | Legal: what the customer agreed to | 7 years |
-| Scan consents (domain, terms, email, IP, time) | Legal: proof a scan was allowed (none in production yet) | 7 years |
-
-Outside the database: Stripe keeps the customer and invoices; Supabase Auth keeps the person's
-sign-in identity (it may belong to other workspaces). Deleting either is a manual request to support.
+Policies are created in a DO block that checks `pg_policies`, so the file runs twice safely.
 
 ## External services
 
-- **Stripe:** `subscriptions.cancel` (`DELETE /v1/subscriptions/:id`) on close. The
-  `customer.subscription.deleted` webhook that follows only repeats the saved status.
-- **Supabase:** `POST /v1/oauth/revoke` on disconnect, with the OAuth app's client ID and secret.
-- **Cloudflare Email Sending REST API:** the notice only, from an operator's machine, with
-  `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_API_TOKEN` (`.env.example`). gitleaks' built-in
-  `cloudflare-api-key` rule catches a committed token.
-- **Poller:** no new trigger, var or secret.
+- **Stripe:** `subscriptions.update(id, { cancel_at_period_end })` on close and keep-open; a
+  subscription without `trial_period_days` when no trial is allowed; `metadata.trial` on the
+  Checkout Session.
+- **Supabase:** `POST /v1/oauth/revoke` on disconnect; `GET /v1/projects` at the OAuth callback (the
+  reconnect match); the token endpoint's `invalid_grant` is the revocation signal.
+- **Email:** the Workers `send_email` binding for disconnect (web) and revocation (poller) emails;
+  the Cloudflare Email Sending REST API for the operator's notice CLI.
+- No new trigger, var or secret on either Worker.
 
 ## Testing
 
 | Suite | Covers |
 | --- | --- |
-| `packages/core/test/db/dataControls.test.ts` (20, Postgres) | Retention cutoffs to the second, the open-incident rule, findings, poll runs kept, OAuth states, another tenant untouched; close roles, typed name, Stripe once, paused, invites canceled, scheduler skips, gate in both modes, replayed checkout, Stripe failure; reopen; RLS refusals; purge against every catalog table with the other tenant's counts unchanged, the kept record, 7-year expiry; disconnect roles, revoke, projects and audit rows, cross-tenant |
-| `isolation.test.ts` | `account_closures` in the table list; scheduler sees closure dates only and skips closed tenants; the notifier reads owner rows and three columns only |
-| `db/notices.test.ts` (2), `notices.test.ts` (13) | Recipients deduped, owners only; dry run prints counts only; notice period; HTML escaped; REST request shape and errors; journal; `--test-to`; `revokeGrant` |
-| `loginUsers.test.ts` | `notifier-user.sql`: short password refused, one login in one role, safe twice |
-| `billing.test.ts` | A checkout begun before closing starts no trial and releases the hold |
-| `apps/web/test/dataControls.test.ts` (6) | Roles, redirects, the return target, notices, days left |
-| `apps/poller/test/workerd.test.ts` (+3) | 00:40 UTC only; `data` messages routed, never polled; the old consumer ignores them |
-| `apps/web/e2e/specs/dataControls.uat.spec.ts` | UAT-W29 to UAT-W33 |
+| `packages/core/test/db/dataControls.test.ts` (Postgres) | Retention cutoffs and rules; no deletes for active, past_due and exempt workspaces, deletes for trialing ones; close at the period end (usable and polled until then, closed after), billing off and exempt close at once; Stripe failure; keep open and reopen; tenant row and purged closure never deleted; the purge against every catalog table (history gone, record kept, other tenant unchanged); no purge while paying, purge 30 days after; disconnect roles, empty token, polling stops, recipients, zero-project delete, 30-day delete, kept while paying, reconnect keeps history, cross-tenant; revocation on `invalid_grant` emails once, transient and misconfiguration errors do not count |
+| `isolation.test.ts` | New table in the list; scheduler reads closure dates only and skips closed workspaces; notifier reads owner rows and three columns only |
+| `billing.test.ts` | One trial per workspace; none for an owner who had one; a checkout begun before closing starts no trial |
+| `oauth.test.ts`, `billing/policy.test.ts` | `isRevokedGrant` classification; `payingAccount` |
+| `notices.test.ts`, `db/notices.test.ts`, `loginUsers.test.ts` | The notice CLI, recipients, `notifier-user.sql` |
+| `apps/web/test/dataControls.test.ts`, `connect.test.ts` | Roles, redirects, notices, connection state; the reconnected redirect |
+| `apps/poller/test/workerd.test.ts` | 00:40 UTC; `data` messages routed, never polled; the old consumer ignores them |
+| `apps/web/e2e/specs/dataControls.uat.spec.ts` | UAT-W31 to UAT-W37 |
 
 ## Gotchas
 
-- **Cascades bypass RLS.** The `connections` and `tenants` delete policies are the database guards
-  for what a disconnect or purge removes. `dataControls.test.ts` checks both refusals.
-- **Close calls Stripe before the database.** A save that fails after the cancel is safe: the retry
-  finds the subscription ended and closes without a second cancel.
-- **The settings and closed pages are not behind the paid gate.** ESLint allows `withTenantForUser`
-  there only (`webGuard.test.ts`). Every action checks the role inside its own transaction.
-- **No code pauses a project for another reason**, so reopen unpauses all. A future pause control
-  must remember which projects the closure paused.
-- **A reopened paying workspace gets a new 7-day trial** with the current billing flow.
-- **Revoke is best effort.** Supabase marks the endpoint Beta; the page tells the owner what to do
-  when it does not confirm.
+- **Cascades bypass RLS.** `connection_remove`, `connection_write` and `tenant_keep` are the database
+  guards for what a disconnect or purge reaches.
+- **Stripe before the database** on close and reopen. A failed Stripe call changes nothing.
+- **The settings and closed pages are not behind the paid gate** (ESLint allows `withTenantForUser`
+  there only), so a workspace that does not pay can still disconnect and close.
+- **Paying workspaces keep every poll run.** `poll_runs` grows by about 1,440 rows per project per
+  day while a workspace pays, and `audit_log` by as much for every workspace. Both need a roll-up or
+  retention decision later.
+- **The revocation email is sent once.** A failed send is counted in the audit log and not retried.
+- **A new sign-in email gets around the per-owner trial rule.** A card-fingerprint check needs data
+  across tenants.
+- **No code pauses a project except a disconnect.** A future pause control must not be undone by a
+  reconnect.

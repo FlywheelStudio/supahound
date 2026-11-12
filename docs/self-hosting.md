@@ -215,7 +215,9 @@ the projects to watch. The poller reads them on the next minute.
 
 The poller runs a data job once a day at 00:40 UTC, in every billing mode (decision 037). It keeps
 incidents, findings and poll runs for 30 days after their last activity, and deletes a closed
-workspace 30 days after it closed. Nothing to configure: the cron that polls every minute runs it.
+workspace's logs and history 30 days after it closed; the workspace record and audit log stay.
+With billing off no workspace counts as paying, so these rules always apply. Nothing to configure:
+the cron that polls every minute runs it.
 
 ## The scan funnel
 

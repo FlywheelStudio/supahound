@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { startCheckout, type FlowDeps, type StripeGateway } from "../../src/billing/flow.js";
-import { getBilling, isPaying, saveSubscription, withPaidTenantForUser, type SubscriptionSnapshot } from "../../src/db/billing.js";
+import { billedTiers, getBilling, isPaying, projectTiers, saveSubscription, withPaidTenantForUser, type SubscriptionSnapshot } from "../../src/db/billing.js";
 import { getClosure, purgeHistory, recordClosure, WorkspaceClosedError } from "../../src/db/closure.js";
 import { storeConnection } from "../../src/db/connections.js";
 import * as repo from "../../src/db/repo.js";
@@ -466,6 +466,8 @@ describe.skipIf(pgInfo === null)("disconnecting Supabase (decision 037)", () => 
     expect(await token(w)).toBe(0);
     expect(await due()).toBe(false);
     expect(await exists(db, "incidents", inc)).toBe(true);
+    // A paused project is kept but not watched, so it is not billed.
+    expect(billedTiers(await withTenant(db.app, w.tenant, projectTiers))).toEqual([]);
     // The token is gone from every read path.
     await expect(withTenant(db.app, w.tenant, (tx) => repo.openConnectionToken(tx, db.vault, w.connection))).rejects.toThrow();
     expect(await withTenant(db.app, w.tenant, repo.listConnections)).toEqual([]);

@@ -1,150 +1,162 @@
-# 037: Data controls: retention, closing a workspace, disconnect, subprocessor notice
+# 037: Data controls: nothing deleted while paying, close at the period end, disconnect, one trial
 
-Date: 2026-11-12 · Issue #43 · Builds on 004, 007, 022, 028, 029, 035 and 036
+Date: 2026-11-12 · Issue #43 · Builds on 004, 007, 022, 028, 029, 030, 035 and 036
 
 ## Context
 
-The privacy policy promises four things that the product did not do: delete old incidents,
-delete a closed account, let a customer disconnect Supabase, and tell customers before a new
-subprocessor starts. Erik approved the scope and asked for sensible calls, recorded here.
+The privacy policy promises that Supahound deletes old incidents and closed accounts, lets a
+customer disconnect Supabase, and tells customers before it adds a subprocessor. A first version
+of this record (same PR, not merged) deleted a closed workspace entirely and canceled Stripe at
+once. Erik answered on 2026-11-12:
+
+> "When a space is closed, remove the logs and history, but never the record or payment history.
+> Cancel stripe at the end of the billing period. No second free trials. Disconnecting should
+> delete the history as above but if it's disconnected outside of supahound send an alert email.
+> Send them notifications that it's disconnected. Store for 30 days then delete."
+>
+> "Unless they're still paying, then never delete data for a paid customer."
 
 ## Decision
 
-### 1. Retention (daily, tenant by tenant)
+### 1. "Paying" — one definition for every deletion
+
+A workspace **pays** when its Stripe status is `active` or `past_due`, or it has a staff exemption
+(decision 029). `billing/policy.ts` `payingAccount` is the only definition; `db/billing.ts`
+`isPaying` reads it inside the transaction that would delete.
+
+- Stripe keeps `active` until the end of a period that a closing owner canceled, so the paid time
+  after a close counts.
+- `past_due` counts: Stripe still retries the payment (the grace of decision 028).
+- An exemption counts, because keeping data is the reversible choice. Closing a workspace ends its
+  exemption (the owner said they are done).
+- A trial that never paid does not count. A self-hosted copy with billing off does not count.
+
+**While a workspace pays, Supahound deletes none of its data.** The daily job resolves idle
+incidents (that deletes nothing) and deletes expired OAuth states (PKCE verifiers, not customer
+data), and nothing else. Every pending delete (a purge, a disconnected connection's history) moves
+to 30 days after the day the job runs, so it happens 30 days after the last paid day.
+
+### 2. Retention (daily, tenant by tenant, workspaces that do not pay)
 
 The poller's cron enqueues one `data` message per tenant at 00:40 UTC (the cron already fires every
-minute). The queue consumer runs `runDataJob` inside `withTenant` for that tenant only. The window is
-the history window of decision 035: 30 days after an incident's last activity. In one transaction:
+minute). The consumer runs `runDataJob` in one `withTenant` transaction for that tenant only:
 
-1. An **open** incident last seen more than 30 days ago is **resolved**. The engine resolves an
-   incident only when its actor acts again, so a quiet actor leaves it open forever.
-2. A **resolved** incident last seen more than 30 days ago is **deleted**.
-3. A finding created more than 30 days ago is deleted. No page reads findings; the incident row
-   holds the counts the pages show.
-4. A poll run started more than 30 days ago is deleted, except the project's latest run, its latest
-   successful run (the next poll starts where that one ended) and a run that findings still point at.
-5. An expired OAuth state is deleted (it holds a PKCE verifier).
+1. Resolve open incidents last seen more than 30 days ago (the engine never resolves a quiet actor).
+2. Delete resolved incidents last seen more than 30 days ago.
+3. Delete findings created more than 30 days ago (no page reads findings).
+4. Delete poll runs started more than 30 days ago, except each project's latest run, its latest
+   `ok` run (the next window starts at its end) and runs that findings still point at.
+5. Delete expired OAuth states.
 
-So an open incident is never deleted by `last_seen_at` alone: it is resolved first, and the UPDATE
-re-checks `last_seen_at` after any committed poll save, so an incident the poller already updated
-stays open. A poll loads open incidents and saves in two transactions; one that loaded an idle
-incident before the job and saves after it fails once on the findings foreign key, the queue
-retries it, and the retry opens a new incident. Nothing is lost. The
-net rule for customers: "an incident is kept for 30 days after its last activity". The dashboard and
-the history agree at every step, because both read the same rows.
+An open incident is never deleted directly: step 1 resolves it first, and its UPDATE re-checks
+`last_seen_at` after any committed poll save. A poll that loaded the incident before the job and
+saves after it fails once on the findings foreign key; the queue retries it and opens a new incident.
 
-Not changed by retention:
+Not deleted: `audit_log` (append-only for the app; about 1,440 `logs_query` rows a day per project,
+so it needs its own decision with the audit log page, #20), `project_usage` (one small row per
+project per day) and `service_role_networks` (settings).
 
-- **`audit_log`.** One `logs_query` row per poll per project: about 1,440 rows a day, 525,000 a year
-  per project. It is append-only for the app (no DELETE grant), so a compromised app cannot erase
-  recent rows. A retention window needs a DELETE path that keeps that property, and the window
-  should match the audit log page (#20). Deferred to its own decision; the follow-up issue text is in
-  the PR for #43.
-- **`project_usage`** (one small row per project per day, no personal data) and
-  **`service_role_networks`** (detector settings, not history). Both go with the project.
+### 3. Closing a workspace
 
-### 2. Closing a workspace
+- **Who:** the workspace owner only, after typing the workspace name. RLS refuses a closure from
+  anyone else (`closure_insert`).
+- **Stripe:** the subscription gets `cancel_at_period_end` (no refund, nothing more charged). Stripe
+  is called first; if it fails, nothing is closed.
+- **Until the period ends** (`access_ends_at`, the period or trial end; the close time when nothing
+  is paid or billing is off), the workspace works and polls as before. A banner and the settings page
+  say when it closes; the owner can keep it open (the Stripe cancel is undone).
+- **After that**, every gated page sends members to `/w/<id>/closed`, the poller skips the
+  workspace, and the owner can reopen until the purge. Reopening after the subscription ended
+  sends the owner to Billing for a new card, with no trial.
+- **The purge** runs when the workspace does not pay and `purge_after` has come: 30 days after
+  `access_ends_at`, moved later while it pays. It deletes the **logs and history**: Supabase
+  connections (sealed tokens) and through them every project with its incidents, findings, poll
+  runs, service-key networks, usage, project roles, invites and posture scans; OAuth states; scans
+  with their findings and jobs.
+- **Never deleted — the record and payment history:** the `tenants` row (RLS `tenant_keep` refuses
+  every delete), memberships (so members can still open the closed page), `billing_accounts` and
+  `stripe_events`, `audit_log` (rows lose their project link, decision 022), scan domains and
+  authorizations (the consent record), and the `account_closures` row (only a reopen before the
+  purge deletes it). The first version's 7-year expiry is gone: these rows are kept.
+- Outside the database, Stripe keeps the customer and invoices, and Supabase Auth keeps the
+  person's sign-in identity (it may belong to other workspaces; the app holds no admin key). Both
+  are deleted only on request, by hand.
 
-- **Who:** the workspace owner only, after typing the workspace name (decision 022's rule). Admins
-  and members cannot. RLS refuses a closure written by anyone else (`closure_insert`).
-- **What happens at once:** Stripe cancels the subscription first, at once, with no proration and no
-  refund for the current period. Then one transaction saves Stripe's answer, inserts the
-  `account_closures` row, pauses every project and cancels open invites. If Stripe fails, nothing is
-  closed and the owner can try again. The scheduler skips paused projects (in this code and the code
-  before it) and also any tenant with a closure row.
-- **Getting back in:** for 30 days every gated page sends members to `/w/<id>/closed`. It shows the
-  dates. The owner can reopen; owners and admins can still disconnect Supabase there. Reopening
-  deletes the closure row and resumes every project (no code pauses a project for another reason).
-  Billing starts from the billing page again: the subscription was canceled, so a paying workspace
-  adds a card again, and the current flow then gives a new 7-day trial. A returning customer getting
-  a second trial is a known gap for the billing owner to decide.
-- **Not behind the paid gate:** the settings and closed pages use `withTenantForUser`, so a workspace
-  that does not pay can still disconnect and close. ESLint allows that in those routes only.
-- **The purge, 30 days later:** the data job copies the kept records onto the closure row, then
-  deletes the `tenants` row. Every other row of the tenant goes with it through the foreign keys:
-  connections (and so the sealed tokens), projects, incidents, findings, poll runs, audit log,
-  memberships, project roles, invites, OAuth states, scan rows, billing rows, Stripe event IDs, usage.
-  RLS allows the tenant delete only from a transaction with no signed-in user (`tenant_purge`).
+### 4. Disconnect in Supahound
 
-### 3. What the purge keeps, and why
+- **Who:** workspace owners and admins, after typing the connection's name. RLS refuses the update
+  and the delete for members (`connection_write`, `connection_remove`).
+- **At once:** the sealed token is emptied (zero bytes), the connection's projects pause, so polling
+  stops; Supahound asks Supabase to revoke the grant (`POST /v1/oauth/revoke`, Beta, best effort; the
+  page says whether Supabase confirmed it).
+- **Email:** every person with a role on the affected projects (decision 036's alert recipients:
+  workspace owners and admins, and the projects' people) gets one email: who disconnected, when,
+  which projects, and when the history is deleted (or that it is kept while the workspace pays).
+- **History:** kept 30 days (`delete_after`), longer while the workspace pays; then the data job
+  deletes the connection and, by cascade, its projects and their history. Audit rows stay. A
+  connection with no project has nothing to keep and goes at once. Paused projects are not billed.
+- **Reconnecting the same organization keeps the history.** Matching rule: at the OAuth callback,
+  Supahound lists the new grant's projects; a disconnected connection of this workspace that still
+  watches one of those project refs is the same organization (a Supabase project belongs to exactly
+  one organization). The new token goes into that connection, its projects resume, and several such
+  connections merge into the most recent one. The org ID was the other candidate, but connections
+  stored before this change do not hold it, and the project list needs no new scope. If the list
+  fails, a new connection is stored and nothing is taken back.
 
-One `account_closures` row per closed workspace, with no foreign key to `tenants`, so it outlives
-the tenant:
+### 5. A grant revoked outside Supahound
 
-| Field | Why |
-| --- | --- |
-| `tenant_id`, `closed_at`, `closed_by`, `purge_after`, `purged_at` | Proof of when and by whom the account closed and when its data was deleted |
-| `stripe_customer_id`, `subscription_id` | Tax: the link to the invoices Stripe keeps for this customer (refunds, chargebacks, audits) |
-| `terms_version`, `terms_accepted_at`, `card_verified_at` | Legal: which billing terms the customer accepted and when |
-| `scan_consents` | Legal: each security-scan authorization (domain, terms version, email, IP, time), the evidence that a scan was allowed. None exist in production yet |
+- **Signal:** the token endpoint answers a refresh with the OAuth error `invalid_grant` (RFC 6749
+  5.2), HTTP 400 or 401 (`supabase/oauth.ts` `isRevokedGrant`). Not a revocation: a 5xx, a timeout
+  or a network error (transient); `invalid_client` (our own client secret is wrong, which must never
+  cost a customer their tokens); a 401 without a code; a Management API 401 alone (an access token
+  can lapse while the grant lives; the next refresh decides, within the hour).
+- **Then:** the poller marks the connection exactly as a disconnect (reason `revoked`) in a
+  conditional UPDATE, so only the first worker succeeds and only it sends the email: "Supahound lost
+  access … reconnect within 30 days". The same 30-day keep (or keep while paying) follows. A failed
+  send is counted in the audit log and not retried.
 
-These rows are kept for **7 years** after the purge, then the data job deletes them. RLS allows that
-delete only after 7 years, or before the purge (reopen, owner only).
+### 6. One free trial
 
-Outside the database: Stripe keeps the customer and its invoices (Supahound does not delete them).
-The person's **Supabase Auth identity** (sign-in email in `auth.users`) stays, because it may belong to
-other workspaces and the web app holds no admin key to delete it. A person who wants it deleted
-emails support; that is a manual step for now.
+- **Per workspace:** a workspace that has had a validated card or a trial never gets another trial
+  (`card_verified_at` or `trial_end` set). A reopened workspace is included.
+- **Per owner:** none when the user adding the card owns another workspace that had one. The check
+  reads the user's other workspaces through a new read policy (`owner_trial_history`: a signed-in
+  owner sees the billing rows of workspaces they own). The decision travels in the Checkout Session
+  metadata (`trial`, set by our server) and the workspace check runs again when the subscription is
+  created. Without a trial, the subscription starts paid at once, and our page and Checkout say so.
+- **Not built:** a check on the card itself (Stripe's card fingerprint) needs data across tenants. A
+  person with a new sign-in email and a new card gets a trial.
 
-### 4. Disconnect
+### 7. Subprocessor notice
 
-- **Who:** workspace owners and admins (the people who connect Supabase), after typing the
-  connection's name. RLS refuses the delete for members (`connection_remove`). Foreign-key cascades
-  bypass RLS, so this policy is the database guard on the projects a disconnect removes.
-- **What happens:** the `connections` row is deleted, and with it the sealed token and the projects
-  watched through it, with their incidents, findings and poll runs. Audit rows stay (decision 022).
-  Seats sync after (fewer projects). Polling stops at once: the scheduler no longer sees the projects,
-  and a poll already running fails its claim or its token read.
-- **At Supabase:** before the delete, outside any transaction, Supahound calls
-  `POST /v1/oauth/revoke` with the app's credentials and the refresh token. Supabase marks that
-  endpoint Beta, so it is best effort: the page says whether Supabase confirmed it, and if not, tells
-  the owner to remove the Supahound app in the Supabase organization's OAuth Apps settings.
-
-### 5. Subprocessor notice
-
-`pnpm subprocessor-notice --name … --purpose … --location … --effective YYYY-MM-DD --contact …`
-(core CLI, run by an operator):
-
-- **Safe by default:** without `--send` it prints only the number of recipients and of owners with no
-  address on file. Never an address. `--test-to <email>` sends one copy to one address.
-- **Notice period:** the effective date must be at least **30 days** away.
-- **Recipients:** every workspace owner's address, lower-cased and deduplicated across workspaces.
-  Closed workspaces not yet purged are included: Supahound still holds their data. Admins and members
-  are not.
-- **Reading owners across tenants:** a new role, `supahound_notifier` (decision 004: cross-tenant
-  admin work gets its own role). It reads `memberships (tenant_id, role, email)` of owner rows and
-  nothing else. Its login is created by `supabase/setup/notifier-user.sql`, outside migrations.
-- **Sending:** the Cloudflare Email Sending REST API (decision 014's service, from Node), one email
-  per address. `--send` needs `--journal <file>`: a line per address sent, as a SHA-256 hash, so a
-  run that stops half way resumes without sending twice.
-- **The list itself** is the privacy policy in the private site repo; Erik updates it in the same
-  change as the notice.
+`pnpm subprocessor-notice` (core CLI, run by an operator): counts by default and prints no address;
+`--test-to` sends one copy; `--send --journal` emails each workspace owner once (deduplicated,
+lower-cased), including closed workspaces not yet purged. The effective date must be at least 30
+days away. Owners are read through `supahound_notifier` (owner rows of `memberships`, three columns,
+nothing else; decision 004). Sending uses the Cloudflare Email Sending REST API (decision 014's
+service). The subprocessor list is the privacy policy in the private site repo.
 
 ## Alternatives considered
 
-- **Delete open incidents by `last_seen_at` directly.** Rejected by decision 035's warning; resolving
-  first keeps the rule "the job deletes only resolved incidents".
-- **Keep findings of an incident still in the window.** Rejected: it breaks "a finding older than the
-  window is deleted", and nothing displays findings.
-- **Disconnect keeps history** (clear the token, keep the projects). Rejected for now: the sealed
-  token column is NOT NULL, a reconnect would need to rebind projects, and removing a project already
-  deletes its history (decision 022).
-- **Close deletes the tokens at once.** Rejected: reopening would restore an unusable workspace. The
-  closed page offers Disconnect for an owner who wants the token gone before the purge.
-- **Tombstone the tenant row and delete children one by one.** Rejected: the app has no DELETE grant
-  on `audit_log`, `billing_accounts` or `scan_authorizations`, on purpose. The cascade from `tenants`
-  reaches all of them, and the kept fields move to a table without the foreign key.
-- **Send notices from the poller (Workers email binding).** Rejected: an operator must control
-  when a legal notice goes out, with a dry run first. The REST API needs no new Worker config.
-- **Give the scheduler role access to owners' emails.** Rejected: the scheduler sees IDs only.
+- **Delete the tenant row and cascade** (the first version). Rejected by Erik: the record and the
+  payment history stay.
+- **Cancel Stripe at once.** Rejected by Erik: the customer paid for the period.
+- **Delete history by the calendar even while paying.** Rejected by Erik: never delete a paying
+  customer's data.
+- **Treat a Management API 401 as a revocation.** Rejected: an expired access token gives the same
+  answer; deleting a live customer's token on that would be worse than detecting late.
+- **Match a reconnect by organization ID.** Possible, but old rows lack it; the project ref match
+  works for every row.
+- **Send notices from the poller.** Rejected: an operator decides when a legal notice goes out,
+  with a dry run first.
 
 ## Consequences
 
-- Migration `20261112030000_data_controls.sql` is additive: a new table, a new NOLOGIN role, new
-  policies and grants. It must be applied before this code deploys. The code before it keeps working
-  with it applied (develop's unchanged suites pass on it, except the catalog check that lists tables).
-- The poller needs no new trigger, var or secret.
-- Production needs a `supahound_notifier_login` user (Erik, `supabase/setup/notifier-user.sql`) only
-  when the first notice goes out.
-- The privacy policy (private site repo) should state the rules above. The `dataControls` flag in the
-  site's `content/features.ts` flips to live when this ships.
+- Migration `20261112030000_data_controls.sql` is additive: a new table, new nullable columns, a new
+  check that existing rows meet, a new NOLOGIN role, new policies and grants. It has no DROP and
+  changes no data. It runs after `20261112020000_posture_scan.sql`.
+- The poller needs no new trigger, var or secret. The web app needs none either.
+- A paying workspace keeps every poll run and finding: `poll_runs` grows by about 1,440 rows per
+  project per day for as long as it pays. A later decision may roll old runs up instead.
+- The privacy policy should state these rules. The `dataControls` flag in the site's
+  `content/features.ts` flips to live when this ships.
