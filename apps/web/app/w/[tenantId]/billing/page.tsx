@@ -5,13 +5,13 @@ import { listProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { exemptDomains, mode } from "../../../../lib/billing";
 import { brandFrom } from "../../../../lib/brand";
 import { withPool } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/supabase";
 import { openPortalAction, startCheckoutAction } from "./actions";
+import { Shell } from "../../../../components/Shell";
 
 // The billing page (decision 028). The one workspace page that opens before a card is validated,
 // so it uses withTenantForUser; every other tenant page goes through the paid gate.
@@ -59,9 +59,10 @@ export default async function Billing({
           billing = await getBilling(tx);
         }
       }
-      const names = new Map((await listProjects(tx)).map((p) => [p.id, p.name]));
+      const projects = await listProjects(tx);
+      const names = new Map(projects.map((p) => [p.id, p.name]));
       const tiers = (await projectTiers(tx)).map((t) => ({ ...t, name: names.get(t.id) ?? "Project" }));
-      return { granted: false as const, role, billing, tiers };
+      return { granted: false as const, role, billing, tiers, projects };
     }),
   ).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();
@@ -79,12 +80,9 @@ export default async function Billing({
   const brand = brandFrom(env);
   const canManage = role !== "member";
 
-  return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Billing</h1>
-        {access !== "blocked" && <Link href={`/w/${tenant}`} className="text-sm text-slate-600 hover:text-slate-950">Back to overview</Link>}
-      </header>
+  const content = (
+    <>
+      <h1 className="mb-8 text-2xl font-semibold">Billing</h1>
 
       {error && <p role="alert" className="mb-6 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">{error}</p>}
 
@@ -184,6 +182,15 @@ export default async function Billing({
           </form>
         </section>
       )}
-    </main>
+    </>
+  );
+
+  // Before a card is validated every other page sends the user back here, so the sidebar would
+  // only bounce; the page stands alone until then.
+  if (access === "blocked") return <main className="mx-auto max-w-2xl px-6 py-10">{content}</main>;
+  return (
+    <Shell tenant={tenant} role={role} projects={data.projects} tiers={tiers} billingOn active={{ kind: "workspace", page: "billing" }}>
+      <div className="max-w-2xl">{content}</div>
+    </Shell>
   );
 }

@@ -8,10 +8,13 @@ import { env } from "cloudflare:workers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { withPool } from "../../../../lib/db";
-import { paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
+import { mode, paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { requireUser } from "../../../../lib/supabase";
 import { removeProjectAction, watchProjectsAction } from "./actions";
+import { Notice, Shell } from "../../../../components/Shell";
+import { projectPath } from "../../../../lib/nav";
+import { projectTiers } from "@supahound/core/db/billing";
 
 const ERRORS: Record<string, string> = {
   none: "Select at least one running project.",
@@ -21,6 +24,7 @@ const ERRORS: Record<string, string> = {
   supabase: "Supabase did not answer. Try again in a minute.",
   mismatch: "The name did not match. Nothing was removed.",
   missing: "That project is not watched in this workspace.",
+  alerts_missing: "That project is not watched in this workspace.",
 };
 
 type Listing =
@@ -66,7 +70,7 @@ export default async function Projects({
           tokens.push({ connectionId: c.id, label: c.label, token });
         }
       }
-      return { role, watched, connections: connections.length, tokens };
+      return { role, watched, tiers: await projectTiers(tx), connections: connections.length, tokens };
     }),
   ).catch((err: unknown) => {
     toBillingIfUnpaid(err);
@@ -99,17 +103,10 @@ export default async function Projects({
         : undefined;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Projects</h1>
-        <Link href={`/w/${tenant}`} className="text-sm text-slate-600 hover:text-slate-950">Back to overview</Link>
-      </header>
+    <Shell tenant={tenant} role={data.role} projects={data.watched} tiers={data.tiers} billingOn={mode() !== "off"} active={{ kind: "workspace", page: "projects" }}>
+      <h1 className="mb-8 text-2xl font-semibold">Projects</h1>
 
-      {notice && (
-        <p role="status" className={`mb-6 rounded-md border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
-          {notice.text}
-        </p>
-      )}
+      {notice && <Notice tone={notice.tone as "ok" | "error"}>{notice.text}</Notice>}
 
       {removing && (
         <section aria-labelledby="remove-heading" className="mb-10 rounded-md border border-red-300 bg-red-50 p-6">
@@ -139,16 +136,21 @@ export default async function Projects({
         ) : (
           <ul aria-label="Watched projects" className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
             {data.watched.map((p) => (
-              <li key={p.id} className="flex items-center justify-between px-4 py-3">
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <span>
-                  <span className="font-medium">{p.name}</span>
+                  <Link href={projectPath(tenant, p.id)} className="font-medium hover:underline">{p.name}</Link>
                   <span className="ml-2 font-mono text-xs text-slate-500">{p.supabaseRef}</span>
                 </span>
-                {canEdit && (
-                  <Link href={`/w/${tenant}/projects?remove=${p.id}`} className="text-sm text-red-700 hover:text-red-900" aria-label={`Remove ${p.name}`}>
-                    Remove
+                <span className="flex flex-wrap items-center gap-4">
+                  <Link href={projectPath(tenant, p.id, "general")} className="text-sm text-slate-700 hover:text-slate-950">
+                    Settings<span className="sr-only"> for {p.name}</span>
                   </Link>
-                )}
+                  {canEdit && (
+                    <Link href={`/w/${tenant}/projects?remove=${p.id}`} className="text-sm text-red-700 hover:text-red-900" aria-label={`Remove ${p.name}`}>
+                      Remove
+                    </Link>
+                  )}
+                </span>
               </li>
             ))}
           </ul>
@@ -191,6 +193,6 @@ export default async function Projects({
           </section>
         ))
       )}
-    </main>
+    </Shell>
   );
 }

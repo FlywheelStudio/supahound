@@ -34,7 +34,7 @@ Its gate: legal review before any active-scan work.
 | Detector 4: service-role misuse | Built; live run pending | #3, #5 |
 | Detector 5: credential stuffing | Not built | #14 |
 | Incident engine: per-actor scoring, dedup | Grouping and dedup built; stacked scoring not built | #15 |
-| Email and signed webhook alerts | Not built | #16, #17 |
+| Email and signed webhook alerts | Email built (#16, decision 030); signed webhooks not built | #16, #17 |
 | Weekly digest | Not built | #22 |
 | Basic agency dashboard | Workspace overview built; agency view not built | #23 |
 | Tenant isolation, vault, poller | Built; needs Supahound's Supabase project | #8 |

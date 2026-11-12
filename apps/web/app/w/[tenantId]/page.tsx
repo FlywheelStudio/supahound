@@ -1,24 +1,19 @@
 import { needsEnterprise, PRICE_LABEL, seatsFor } from "@supahound/core/billing/policy";
 import { getBilling, projectTiers } from "@supahound/core/db/billing";
-import { countConnections, listOpenIncidents, listProjects } from "@supahound/core/db/repo";
+import { countConnections, listOpenIncidents, listProjects, recordMemberEmail } from "@supahound/core/db/repo";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Checklist } from "../../../components/Checklist";
+import { Notice, SeverityBadge, Shell } from "../../../components/Shell";
+import { projectPath } from "../../../lib/nav";
 import { crossTenantNote } from "../../../lib/coverage";
 import { withPool } from "../../../lib/db";
 import { mode, paidTenant, syncSeatsAfterChange, toBillingIfUnpaid } from "../../../lib/billing";
 import { currentStep, onboardingSteps } from "../../../lib/onboarding";
 import { requireUser } from "../../../lib/supabase";
 import { startConnect } from "./actions";
-
-const SEVERITY_STYLE: Record<string, string> = {
-  critical: "bg-red-100 text-red-800",
-  high: "bg-orange-100 text-orange-800",
-  medium: "bg-amber-100 text-amber-800",
-  low: "bg-slate-100 text-slate-700",
-};
 
 const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   welcome: { tone: "ok", text: "Card confirmed and the hold released. Your 7-day trial has started. Next, connect Supabase." },
@@ -48,6 +43,8 @@ export default async function Workspace({
   // the same 404 as a workspace that does not exist.
   const data = await withPool((pool) =>
     paidTenant(pool, user.id, tenant, async (tx, role, access) => ({
+      // Alerts go to the address in the verified JWT; copied here, written only when it changed.
+      emailRecorded: await recordMemberEmail(tx, user.id, user.email),
       role,
       access,
       billing: await getBilling(tx),
@@ -75,16 +72,8 @@ export default async function Workspace({
   const setupLeft = currentStep(steps);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Overview</h1>
-        <div className="flex items-center gap-4">
-          <Link href={`/w/${tenant}/billing`} className="text-sm text-slate-600 hover:text-slate-950">Billing</Link>
-        <form action="/auth/signout" method="post">
-          <button className="text-sm text-slate-600 hover:text-slate-950">Sign out</button>
-        </form>
-        </div>
-      </header>
+    <Shell tenant={tenant} role={data.role} projects={data.projects} tiers={data.tiers} billingOn={mode() !== "off"} active={{ kind: "workspace", page: "overview" }}>
+      <h1 className="mb-8 text-2xl font-semibold">Overview</h1>
 
       {data.access === "grace" && (
         <p role="alert" className="mb-6 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
@@ -104,9 +93,7 @@ export default async function Workspace({
         </p>
       )}
       {notice && (
-        <p role="status" className={`mb-6 rounded-md border p-3 text-sm ${notice.tone === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
-          {notice.text}
-        </p>
+        <Notice tone={notice.tone}>{notice.text}</Notice>
       )}
 
       {setupLeft && (
@@ -141,8 +128,8 @@ export default async function Workspace({
             {data.incidents.map((i) => (
               <li key={i.id} className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${SEVERITY_STYLE[i.severity]}`}>{i.severity}</span>
-                  <span className="font-medium">{i.projectName}</span>
+                  <SeverityBadge severity={i.severity} />
+                  <Link href={projectPath(tenant, i.projectId)} className="font-medium hover:underline">{i.projectName}</Link>
                   <span className="text-sm text-slate-500">{i.hits} requests · last {i.lastSeenAt.toISOString()}</span>
                 </div>
                 {i.summary?.summary && <p className="mt-1 text-sm text-slate-700">{i.summary.summary}</p>}
@@ -170,7 +157,7 @@ export default async function Workspace({
               return (
                 <li key={p.id} className="px-4 py-3">
                   <div className="flex justify-between">
-                    <span className="font-medium">{p.name}</span>
+                    <Link href={projectPath(tenant, p.id)} className="font-medium hover:underline">{p.name}</Link>
                     <span className="text-sm text-slate-500">
                       {(() => {
                         const t = data.tiers.find((x) => x.id === p.id);
@@ -191,6 +178,6 @@ export default async function Workspace({
           </ul>
         )}
       </section>
-    </main>
+    </Shell>
   );
 }

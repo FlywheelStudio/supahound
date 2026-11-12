@@ -126,6 +126,12 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W14 | Remove needs the exact name; it deletes the project and its incidents and keeps its audit rows |
 | UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
 | UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
+| UAT-W17 | The owner's address is on file; every incident emails by default; the owner raises the threshold (`alerts.uat.spec.ts`) |
+| UAT-W18 | A member sees the threshold but cannot change it, even by replaying the owner's form; visiting records the member's address |
+| UAT-W19 | The owner opens a project from the overview and switches projects from the dropdown (`nav.uat.spec.ts`) |
+| UAT-W20 | Project settings: General with Remove, Notifications with SMS Coming soon, Plan, People; Soon badges |
+| UAT-W21 | A project ID from another workspace, a made-up ID and a malformed ID are each a 404 |
+| UAT-W22 | A member opens every project page but gets no Add project, no Remove and no alert form |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -189,6 +195,12 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | The scheduler polls exempt workspaces (decision 029) | `dueProjects` drops `OR exempt_at IS NOT NULL` | 1 Postgres exemption test fails |
 | The exempt domain must match (decision 029) | E2E exempt list set to another domain | UAT-B13 fails |
 | Only the sole owner is exempt (decision 029) | Admins may be granted it; the gate skips the sole-owner check | UAT-B13 and UAT-B14 fail |
+| Alerts send once per severity (#16) | `pendingAlerts` ignores `alerted_severity` | 4 Postgres alert tests fail |
+| A sent alert is marked (#16) | `sendPendingAlerts` never calls `markAlerted` | 5 Postgres alert tests fail |
+| Model text loses its links (#16) | `cleanText` skips `stripLinks` | 1 unit test fails |
+| Only owners and admins set the threshold (#16) | `setEmailAlertsAction` treats every role as owner | UAT-W18 fails |
+| Project pages show only this tenant's projects (#98) | `loadProjectPage` falls back to the first project for an unknown ID | UAT-W21 fails (200, not 404) |
+| The dashboard lists one project's incidents (#98) | `listOpenIncidents` ignores its project filter | `projects.test.ts` fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

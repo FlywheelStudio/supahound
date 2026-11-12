@@ -51,7 +51,7 @@ project for it.
 | A Cloudflare account with Workers, Queues and Hyperdrive | dash.cloudflare.com | both Workers | account | yes |
 | Two Hyperdrive configs, caching off | `wrangler hyperdrive create` (step 4) | `HYPERDRIVE_APP` (both), `HYPERDRIVE_SCHEDULER` (poller) | binding | yes |
 | A queue and a dead-letter queue | `wrangler queues create` (step 5) | poller | binding | yes |
-| A sending domain on Cloudflare Email Service, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `wrangler email sending enable` (step 6) | web | binding, var | yes |
+| A sending domain on Cloudflare Email Service, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `wrangler email sending enable` (step 6) | web (sign-in), poller (incident alerts) | binding, var | yes |
 | `SUPAHOUND_MASTER_KEYS` | `pnpm -s master-key` (step 2) | both Workers, the same value | secret | yes |
 | `APP_URL` | Your app's origin, for example `https://supahound.example.com` | both Workers | var | yes |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | poller | secret | no |
@@ -150,7 +150,8 @@ wrangler email sending enable <your domain>
 ```
 
 Set `EMAIL_FROM_ADDRESS` (an address on that domain) and `EMAIL_FROM_NAME` in
-`apps/web/wrangler.jsonc`.
+`apps/web/wrangler.jsonc` (sign-in links) and in `apps/poller/wrangler.jsonc` (incident alerts,
+decision 030). They may differ, for example `login@` and `alerts@`.
 
 ### 7. The Supabase OAuth app
 
