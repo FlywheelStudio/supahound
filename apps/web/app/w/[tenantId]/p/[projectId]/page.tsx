@@ -4,7 +4,7 @@ import Link from "next/link";
 import { SeverityBadge, Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
 import { crossTenantNote } from "../../../../../lib/coverage";
-import { projectPath, utc } from "../../../../../lib/nav";
+import { incidentPath, projectPath, utc } from "../../../../../lib/nav";
 import { loadProjectPage } from "../../../../../lib/projectPage";
 
 // The project dashboard (issue #98): status, usage and plan, detector coverage, open incidents.
@@ -68,12 +68,14 @@ export default async function ProjectDashboard({ params }: { params: Promise<{ t
         ) : (
           <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
             {d.extra.map((i) => (
-              <li key={i.id} className="px-4 py-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <SeverityBadge severity={i.severity} />
-                  <span className="text-sm text-slate-500">{i.hits} requests · last {utc(i.lastSeenAt)}</span>
-                </div>
-                {i.summary?.summary && <p className="mt-1 text-sm text-slate-700">{i.summary.summary}</p>}
+              <li key={i.id}>
+                <Link href={incidentPath(tenant, p.id, i.id)} className="block px-4 py-3 hover:bg-slate-50">
+                  <span className="flex flex-wrap items-center gap-3">
+                    <SeverityBadge severity={i.severity} />
+                    <span className="text-sm text-slate-500">{i.hits} requests · last {utc(i.lastSeenAt)}</span>
+                  </span>
+                  {i.summary?.summary && <span className="mt-1 block text-sm text-slate-700">{i.summary.summary}</span>}
+                </Link>
               </li>
             ))}
           </ul>

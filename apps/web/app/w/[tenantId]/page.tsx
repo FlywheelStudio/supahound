@@ -7,7 +7,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Checklist } from "../../../components/Checklist";
 import { Notice, SeverityBadge, Shell } from "../../../components/Shell";
-import { projectPath } from "../../../lib/nav";
+import { incidentPath, projectPath } from "../../../lib/nav";
 import { crossTenantNote } from "../../../lib/coverage";
 import { withPool } from "../../../lib/db";
 import { mode, paidTenant, syncSeatsAfterChange, toBillingIfUnpaid } from "../../../lib/billing";
@@ -131,6 +131,7 @@ export default async function Workspace({
                   <SeverityBadge severity={i.severity} />
                   <Link href={projectPath(tenant, i.projectId)} className="font-medium hover:underline">{i.projectName}</Link>
                   <span className="text-sm text-slate-500">{i.hits} requests · last {i.lastSeenAt.toISOString()}</span>
+                  <Link href={incidentPath(tenant, i.projectId, i.id)} className="ml-auto text-sm text-slate-600 hover:text-slate-950">Details</Link>
                 </div>
                 {i.summary?.summary && <p className="mt-1 text-sm text-slate-700">{i.summary.summary}</p>}
               </li>

@@ -22,6 +22,11 @@ export function projectPath(tenant: TenantId, project: ProjectId, page: ProjectP
   return `/w/${tenant}/p/${project}${PROJECT_SUFFIX[page]}`;
 }
 
+// One incident's detail page (issue #44). The nav marks "Incidents" as current there.
+export function incidentPath(tenant: TenantId, project: ProjectId, incident: string): string {
+  return `${projectPath(tenant, project, "incidents")}/${incident}`;
+}
+
 export function workspacePath(tenant: TenantId, page: WorkspacePage = "overview"): string {
   return page === "overview" ? `/w/${tenant}` : `/w/${tenant}/${page}`;
 }

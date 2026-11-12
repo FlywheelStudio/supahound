@@ -1,6 +1,6 @@
 # State
 
-Updated 2026-11-11. The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
+Updated 2026-11-12. The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
 grouped by [milestone](https://github.com/FlywheelStudio/supahound/milestones) (decision 019).
 This file tracks only what is in progress and what is done.
 
@@ -20,6 +20,7 @@ This file tracks only what is in progress and what is done.
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
+| Incident history: 30-day list (open and resolved, keyset pages) and incident detail per project | #44 | 2026-11-12, into `develop` | [features/incident-history.md](features/incident-history.md), decision 035 |
 | Project navigation: project dropdown, project dashboard, project settings (notifications with SMS Coming soon, plan) | #98 | 2026-11-11, PR #101 into `develop` | [features/project-navigation.md](features/project-navigation.md), decision 031 |
 | Incident alert email: every member, every severity by default, threshold per project | #16 | 2026-11-11, into `develop` | [features/incident-alert-email.md](features/incident-alert-email.md), decision 030 |
 | Ownership refresh: RLS policies read in the poll, detector 2 coverage states | #10 | 2026-11-09, PR #62 into `develop` | [features/ownership-refresh.md](features/ownership-refresh.md), decision 024 |

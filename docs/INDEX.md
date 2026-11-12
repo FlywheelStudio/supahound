@@ -9,6 +9,7 @@
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
+| [features/incident-history.md](features/incident-history.md) | Incident history (#44): 30-day list per project with keyset pages, incident detail, 404 rules, tests |
 | [features/project-navigation.md](features/project-navigation.md) | Project navigation (#98): project dropdown, project dashboard and settings, the URL holds the project |
 | [features/incident-alert-email.md](features/incident-alert-email.md) | Incident alert email (#16): every member, threshold per project, the incident row as outbox, tests |
 | [features/ownership-refresh.md](features/ownership-refresh.md) | Ownership refresh (#10): RLS policies read in the poll, detector 2 coverage states, tests |
@@ -54,3 +55,4 @@
 | [decisions/032-subscription-per-project.md](decisions/032-subscription-per-project.md) | One Stripe subscription per project; the workspace keeps the customer and card (supersedes 028's seats; not built, #99) |
 | [decisions/033-people-per-project.md](decisions/033-people-per-project.md) | Per-project roles Owner/Admin/Editor/Viewer with email invites, enforced by RLS (not built, #24) |
 | [decisions/034-scan-domains-per-project.md](decisions/034-scan-domains-per-project.md) | A verified scan domain belongs to one project; the project's Security scan tab lists them (not built, #100) |
+| [decisions/035-incident-history-window.md](decisions/035-incident-history-window.md) | Incident history: last seen in 30 days or still open; keyset pages; actor alias; the suggested fix is the explainer's next steps, no generated SQL |
