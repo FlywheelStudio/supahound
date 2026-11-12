@@ -152,6 +152,8 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
 | `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
 | `audit_log` | Every query and model call, append-only |
+| `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project); processed Stripe events; requests per project per day (decisions 028, 041) |
+| `project_subscriptions` | One Stripe subscription per watched project: tier, status, period end; kept as payment history when the project is removed (decision 041) |
 | `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |
 
 Data controls (decision 037): once a day at 00:40 UTC the poller enqueues a `data` message per

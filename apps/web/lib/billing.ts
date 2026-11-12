@@ -1,5 +1,5 @@
 import { parseExemptDomains, type Access } from "@supahound/core/billing/policy";
-import { billingPath, syncSeats, type FlowDeps } from "@supahound/core/billing/flow";
+import { billingPath, syncBilling, type FlowDeps } from "@supahound/core/billing/flow";
 import { billingMode, PaymentRequiredError, withPaidTenantForUser, type BillingMode } from "@supahound/core/db/billing";
 import { WorkspaceClosedError } from "@supahound/core/db/closure";
 import type { TenantTx } from "@supahound/core/db/tenant";
@@ -42,15 +42,16 @@ export function flowDeps(pool: pg.Pool): FlowDeps {
   return { pool, stripe: stripeGateway(), appUrl: env.APP_URL, now: () => new Date() };
 }
 
-// After the picker adds or removes a project: bill the new count now, pro rata. A failure is logged, not shown;
-// the overview syncs again when it sees the stored seats drift from the project count.
-// prorate: true after the picker (a project added now is billed now); false when the overview
-// repairs drift, so a repair never charges anything before the next renewal.
-export async function syncSeatsAfterChange(pool: pg.Pool, tenant: TenantId, prorate = true): Promise<void> {
+// After the picker adds or removes a project, a disconnect, or when the overview sees drift: bill
+// the change. Seat model (decision 028): prorate true after the picker (a project added now is
+// billed now); false when the overview repairs drift, so a repair never charges anything before
+// the next renewal. Per-project model (decision 041): reconcile, which adds, resumes or cancels
+// project subscriptions. A failure is logged, not shown; the overview and the daily job retry.
+export async function syncBillingAfterChange(pool: pg.Pool, tenant: TenantId, prorate = true): Promise<void> {
   if (mode() === "off") return;
   try {
-    await syncSeats(flowDeps(pool), tenant, prorate);
+    await syncBilling(flowDeps(pool), tenant, prorate);
   } catch {
-    console.log(JSON.stringify({ event: "seat_sync_failed", tenant_id: tenant }));
+    console.log(JSON.stringify({ event: "billing_sync_failed", tenant_id: tenant }));
   }
 }

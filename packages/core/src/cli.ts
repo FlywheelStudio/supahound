@@ -22,6 +22,11 @@ import {
   cloudflareSender, noticeProblems, noticeRecipients, renderSubprocessorNotice, sendNotice,
   type SendFn, type SubprocessorNotice,
 } from "./notices/subprocessor.js";
+import { convertSubscriptions } from "./billing/convert.js";
+import type { StripeGateway } from "./billing/flow.js";
+import { parseExemptDomains } from "./billing/policy.js";
+import { stripeGateway } from "./billing/stripeGateway.js";
+import { tenantId as parseTenantId } from "./tenancy/scope.js";
 
 const LOCAL_SCOPE = projectScope("00000000-0000-4000-8000-000000000000", "00000000-0000-4000-8000-000000000001");
 
@@ -33,6 +38,7 @@ const USAGE = `Usage:
   supahound master-key [--rotate]
   supahound subprocessor-notice --name <n> --purpose <p> --location <l> --effective YYYY-MM-DD --contact <email>
                [--policy-url <https url>] [--test-to <email> | --send --journal <file>]
+  supahound convert-subscriptions [--tenant <id>] [--include-empty] [--apply [--confirm-live]]
 
 --ownership takes a JSON object {"table": ["owner_col", ...]} or a JSON array of pg_policies rows
 (run the SQL from print-sql). Live calls read SUPABASE_ACCESS_TOKEN (analytics:read) from the env or .env.
@@ -40,7 +46,12 @@ master-key prints a new SUPAHOUND_MASTER_KEYS value. --rotate reads the current 
 SUPAHOUND_MASTER_KEYS env var and appends a new version; old tokens still open.
 subprocessor-notice counts the workspace owners who would get the notice and sends nothing (dry run),
 unless --send is given. Reads SUPAHOUND_NOTIFIER_DATABASE_URL; sending also reads CLOUDFLARE_ACCOUNT_ID,
-CLOUDFLARE_EMAIL_API_TOKEN, NOTICE_FROM_ADDRESS and NOTICE_FROM_NAME. --test-to sends one copy to one address.`;
+CLOUDFLARE_EMAIL_API_TOKEN, NOTICE_FROM_ADDRESS and NOTICE_FROM_NAME. --test-to sends one copy to one address.
+convert-subscriptions moves seat subscriptions to one subscription per project (decision 041). It prints
+each workspace's plan and changes nothing (dry run), unless --apply is given; with a live Stripe key,
+--apply also needs --confirm-live. Reads SUPAHOUND_APP_DATABASE_URL, SUPAHOUND_SCHEDULER_DATABASE_URL,
+STRIPE_SECRET_KEY, STRIPE_PRICE_STARTER, STRIPE_PRICE_PRO, SUPAHOUND_BILLING_EXEMPT_DOMAINS and
+optionally STRIPE_API_URL.`;
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n\n${USAGE}\n`);
@@ -237,6 +248,55 @@ export async function runSubprocessorNotice(args: string[], deps: NoticeCliDeps)
   return result.failed > 0 ? 1 : 0;
 }
 
+export interface ConvertCliDeps {
+  env: NodeJS.ProcessEnv;
+  pool: (url: string) => pg.Pool;
+  // The real gateway unless a test passes a fake.
+  stripe?: StripeGateway;
+  now: () => Date;
+  out: (line: string) => void;
+}
+
+// The conversion of seat subscriptions (decision 041). Safe by default: without --apply it reads
+// and prints. Returns the exit code.
+export async function runConvertSubscriptions(args: string[], deps: ConvertCliDeps): Promise<number> {
+  const { values } = parseArgs({
+    args, options: { apply: { type: "boolean" }, tenant: { type: "string" }, "confirm-live": { type: "boolean" }, "include-empty": { type: "boolean" } },
+  });
+  const e = deps.env;
+  const missing = ["SUPAHOUND_APP_DATABASE_URL", "SUPAHOUND_SCHEDULER_DATABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO"]
+    .filter((k) => !e[k]);
+  if (missing.length > 0) {
+    deps.out(`error: set ${missing.join(", ")}`);
+    return 2;
+  }
+  if (values.apply && e.STRIPE_SECRET_KEY!.startsWith("sk_live_") && !values["confirm-live"]) {
+    deps.out("error: this is a live Stripe key. Run the dry run first, then add --confirm-live to --apply.");
+    return 2;
+  }
+  let only;
+  let exemptDomains;
+  try {
+    only = values.tenant ? parseTenantId(values.tenant) : undefined;
+    exemptDomains = parseExemptDomains(e.SUPAHOUND_BILLING_EXEMPT_DOMAINS);
+  } catch (err) {
+    deps.out(`error: ${err instanceof Error ? err.message : "bad input"}`);
+    return 2;
+  }
+  const stripe = deps.stripe ?? stripeGateway({
+    secretKey: e.STRIPE_SECRET_KEY!, apiUrl: e.STRIPE_API_URL || "https://api.stripe.com",
+    prices: { starter: e.STRIPE_PRICE_STARTER!, pro: e.STRIPE_PRICE_PRO! },
+  });
+  const app = deps.pool(e.SUPAHOUND_APP_DATABASE_URL!);
+  const scheduler = deps.pool(e.SUPAHOUND_SCHEDULER_DATABASE_URL!);
+  try {
+    const r = await convertSubscriptions({ app, scheduler, stripe, now: deps.now, exemptDomains, out: deps.out }, { apply: values.apply === true, only, includeEmpty: values["include-empty"] === true });
+    return r.failed > 0 ? 1 : 0;
+  } finally {
+    await Promise.all([app.end(), scheduler.end()]);
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   switch (command) {
@@ -255,6 +315,15 @@ async function main(argv: string[]): Promise<void> {
       const current = values.rotate ? process.env.SUPAHOUND_MASTER_KEYS : undefined;
       if (values.rotate && !current) fail("--rotate needs the current value in SUPAHOUND_MASTER_KEYS");
       process.stdout.write(`${newMasterKeys(current)}\n`);
+      return;
+    }
+    case "convert-subscriptions": {
+      loadEnv();
+      process.exitCode = await runConvertSubscriptions(rest, {
+        env: process.env, now: () => new Date(),
+        pool: (url) => new pg.Pool({ connectionString: url, max: 2 }),
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
       return;
     }
     case "subprocessor-notice": {

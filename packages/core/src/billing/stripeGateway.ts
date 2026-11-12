@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import type { StripeGateway } from "./flow.js";
-import { TRIAL_DAYS, VERIFICATION_CURRENCY, VERIFICATION_HOLD_CENTS } from "./policy.js";
-import { PURPOSE, seatsFromItems, sessionFromStripe, subscriptionFromStripe, termsText, type PriceIds } from "./stripeMap.js";
+import { VERIFICATION_CURRENCY, VERIFICATION_HOLD_CENTS } from "./policy.js";
+import { invoiceFromStripe, PURPOSE, seatsFromItems, sessionFromStripe, subscriptionFromStripe, termsText, type PriceIds } from "./stripeMap.js";
 
 // The real StripeGateway (decision 013, 028), shared by the web app and the poller. Runs on
 // Workers and Node: the fetch HTTP client, one client per request. apiUrl points at a fake in E2E.
@@ -83,22 +83,10 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
     },
 
     async liveSubscription(customerId) {
-      const list = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 20 });
-      const live = list.data.find((s) => !["canceled", "incomplete_expired"].includes(s.status));
+      const list = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 });
+      // The seat subscription only: project subscriptions carry metadata.project_id (decision 041).
+      const live = list.data.find((s) => !["canceled", "incomplete_expired"].includes(s.status) && !s.metadata?.project_id);
       return live ? subscriptionFromStripe(asObj(live), prices) : null;
-    },
-
-    async createTrialSubscription({ tenant, customerId, seats, paymentMethodId, cardVerifiedAt, idempotencyKey, trial }) {
-      const s = await stripe.subscriptions.create({
-        customer: customerId,
-        // Both tiers are always items, so a project changing tier only changes quantities.
-        items: [{ price: prices.starter, quantity: seats.starter }, { price: prices.pro, quantity: seats.pro }],
-        ...(trial ? { trial_period_days: TRIAL_DAYS, trial_settings: { end_behavior: { missing_payment_method: "cancel" as const } } } : {}),
-        default_payment_method: paymentMethodId,
-        payment_settings: { save_default_payment_method: "on_subscription" },
-        metadata: { tenant_id: tenant, card_verified_at: cardVerifiedAt.toISOString() },
-      }, { idempotencyKey });
-      return subscriptionFromStripe(asObj(s), prices);
     },
 
     async getSubscription(id) {
@@ -117,8 +105,69 @@ export function stripeGateway(config: StripeConfig, stripe: Stripe = stripeClien
       });
     },
 
-    async setCancelAtPeriodEnd(id, cancel) {
-      return subscriptionFromStripe(asObj(await stripe.subscriptions.update(id, { cancel_at_period_end: cancel })), prices);
+    async setCancelAtPeriodEnd(id, cancel, options) {
+      let s = asObj(await stripe.subscriptions.update(
+        id,
+        { cancel_at_period_end: cancel, ...(options?.converted ? { metadata: { converted: "yes" } } : {}) },
+        options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined,
+      ));
+      // Undo a cancel the Billing Portal set: it uses `cancel_at`, which the flag does not clear.
+      // An empty value unsets it. A second call, so the two parameters are never sent together.
+      if (!cancel && typeof s.cancel_at === "number") {
+        s = asObj(await stripe.subscriptions.update(
+          id,
+          { cancel_at: "" },
+          options?.idempotencyKey ? { idempotencyKey: `${options.idempotencyKey}-clear` } : undefined,
+        ));
+      }
+      return subscriptionFromStripe(s, prices);
+    },
+
+    // --- One subscription per project (decision 041) ---
+
+    async setInvoicePaymentMethod(customerId, paymentMethodId, idempotencyKey) {
+      await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: paymentMethodId } }, { idempotencyKey });
+    },
+
+    async createProjectSubscription({ tenant, projectId, supabaseRef, customerId, tier, trialEnd, anchor, idempotencyKey }) {
+      const s = await stripe.subscriptions.create({
+        customer: customerId,
+        items: [{ price: prices[tier], quantity: 1 }],
+        // The workspace trial (shared by every project added during it), or a seat subscription's
+        // trial end during conversion. A missing card at the trial end cancels, as in decision 028.
+        ...(trialEnd
+          ? { trial_end: Math.floor(trialEnd.getTime() / 1000), trial_settings: { end_behavior: { missing_payment_method: "cancel" as const } } }
+          : {}),
+        // Conversion of a paid seat subscription: no charge until its period end, then monthly.
+        ...(anchor ? { billing_cycle_anchor: Math.floor(anchor.getTime() / 1000), proration_behavior: "none" as const } : {}),
+        metadata: { tenant_id: tenant, project_id: projectId, supabase_ref: supabaseRef },
+      }, { idempotencyKey });
+      return subscriptionFromStripe(asObj(s), prices);
+    },
+
+    async customerSubscriptions(customerId) {
+      const out = [];
+      for await (const s of stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 })) {
+        out.push(subscriptionFromStripe(asObj(s), prices));
+      }
+      return out;
+    },
+
+    async setProjectTier(subscriptionId, tier) {
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      const item = sub.items.data[0];
+      if (!item) throw new Error("project subscription without an item");
+      // Takes effect at the next renewal, in both directions (decision 028).
+      const s = await stripe.subscriptions.update(subscriptionId, {
+        items: [{ id: item.id, price: prices[tier], quantity: 1 }],
+        proration_behavior: "none",
+      });
+      return subscriptionFromStripe(asObj(s), prices);
+    },
+
+    async invoices(subscriptionId, limit) {
+      const list = await stripe.invoices.list({ subscription: subscriptionId, limit });
+      return list.data.map((i) => invoiceFromStripe(asObj(i)));
     },
 
     async portalUrl(customerId, returnUrl) {

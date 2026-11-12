@@ -87,6 +87,12 @@ export async function seedFullTenant(db: Db, name: string, token: string): Promi
     }, new Date());
     expect(await billing.claimStripeEvent(tx, `evt_${slug}1`, "checkout.session.completed")).toBe(true);
     await billing.saveDailyUsage(tx, project, "2026-11-09", 1234);
+    // One subscription per project (decision 041): a trialing subscription for the project.
+    const [ref] = await tx.query<{ supabase_ref: string }>("SELECT supabase_ref FROM supahound.projects WHERE tenant_id = $1 AND id = $2", [tenant, project]);
+    await billing.saveProjectSubscription(tx, {
+      subscriptionId: `sub_${slug}p1`, supabaseRef: ref!.supabase_ref, tier: "starter", status: "trialing",
+      trialEnd: new Date(Date.now() + 7 * 86_400_000), currentPeriodEnd: null, cancelAtPeriodEnd: false,
+    }, project);
     // Posture scan (decision 038): one scan with one finding.
     const scanId = (await posture.claimPostureScan(tx, project, new Date(), { refreshSeconds: 1, retrySeconds: 1 }))!;
     await posture.savePostureScan(tx, project, scanId, {

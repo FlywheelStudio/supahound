@@ -1,105 +1,27 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
-  applyUsageTiers, completeVerification, handleBillingEvent, refreshSubscription, startCheckout, syncSeats,
-  type FlowDeps, type StripeGateway, type VerificationSession,
+  applyUsageTiers, completeVerification, handleBillingEvent, reconcileProjects, refreshSubscription, startCheckout, syncSeats,
+  type FlowDeps,
 } from "../../src/billing/flow.js";
-import type { Seats } from "../../src/billing/policy.js";
 import { countDailyUsage, previousUtcDay } from "../../src/billing/usage.js";
 import {
-  getBilling, PaymentRequiredError, projectTiers, saveDailyUsage, saveSubscription, withPaidTenantForUser, type SubscriptionSnapshot,
+  getBilling, PaymentRequiredError, projectTiers, saveDailyUsage, saveSubscription, setStripeCustomer, withPaidTenantForUser,
 } from "../../src/db/billing.js";
 import * as repo from "../../src/db/repo.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { createWorkspace, NotAMemberError, withTenantForUser } from "../../src/db/user.js";
 import type { ProjectId, TenantId, UserId } from "../../src/tenancy/scope.js";
 import { verifiedUserId } from "../../src/tenancy/scope.js";
+import { FakeStripe, GOOD } from "./fakeStripe.js";
 import { pgInfo, useDb } from "./harness.js";
 
 // Billing with a validated card, priced per project by traffic (decision 028), against real
 // Postgres with forced RLS. Stripe is a fake that records every call.
 
-type Card = { approved: boolean; cvc: string | null; funding: string | null };
-const GOOD: Card = { approved: true, cvc: "pass", funding: "credit" };
-type Sub = SubscriptionSnapshot & { tenant: string; cardVerifiedAt: Date | null };
-
-class FakeStripe implements StripeGateway {
-  customers: { id: string; tenant: string; key: string }[] = [];
-  sessions = new Map<string, VerificationSession>();
-  subscriptions = new Map<string, Sub>();
-  creates: { key: string; seats: Seats; trial: boolean }[] = [];
-  seatUpdates: { id: string; seats: Seats; prorate: boolean }[] = [];
-  private byKey = new Map<string, string>();
-  private n = 0;
-  private id = (p: string) => `${p}_${(++this.n).toString().padStart(6, "0")}`;
-
-  async createCustomer(i: { tenant: TenantId; idempotencyKey: string }) {
-    const old = this.customers.find((c) => c.key === i.idempotencyKey);
-    if (old) return { id: old.id };
-    const c = { id: this.id("cus"), tenant: i.tenant, key: i.idempotencyKey };
-    this.customers.push(c);
-    return { id: c.id };
-  }
-  async createVerificationCheckout(i: { tenant: TenantId; customerId: string; trial: boolean }) {
-    const id = this.id("cs");
-    this.sessions.set(id, { id, status: "open", tenant: i.tenant, customerId: i.customerId, trialAllowed: i.trial, hold: null });
-    return { id, url: `https://checkout.stripe.test/${id}` };
-  }
-  // What Stripe does when the customer pays on the Checkout page.
-  pay(sessionId: string, card: Card) {
-    const s = this.sessions.get(sessionId)!;
-    s.status = "complete";
-    s.hold = {
-      paymentIntentId: this.id("pi"), releasable: card.approved, paymentMethodId: card.approved ? this.id("pm") : null,
-      approvedByIssuer: card.approved, captured: false, cvcCheck: card.cvc, funding: card.funding,
-    };
-  }
-  async getVerificationSession(id: string) {
-    const s = this.sessions.get(id);
-    if (!s) throw new Error("no such session");
-    return structuredClone(s);
-  }
-  async releaseHold(pi: string) {
-    for (const s of this.sessions.values()) if (s.hold?.paymentIntentId === pi) s.hold.releasable = false;
-  }
-  async liveSubscription(customerId: string) {
-    return [...this.subscriptions.values()].find((s) => s.customerId === customerId && s.status !== "canceled") ?? null;
-  }
-  async createTrialSubscription(i: { tenant: TenantId; customerId: string; seats: Seats; paymentMethodId: string; cardVerifiedAt: Date; idempotencyKey: string; trial: boolean }) {
-    this.creates.push({ key: i.idempotencyKey, seats: i.seats, trial: i.trial });
-    // Like Stripe: the same idempotency key returns the first result.
-    const replay = this.byKey.get(i.idempotencyKey);
-    if (replay) return { ...this.subscriptions.get(replay)! };
-    const sub: Sub = {
-      id: this.id("sub"), customerId: i.customerId, status: i.trial ? "trialing" : "active", seats: { ...i.seats },
-      trialEnd: i.trial ? new Date(Date.now() + 7 * 86_400_000) : null,
-      currentPeriodEnd: i.trial ? null : new Date(Date.now() + 30 * 86_400_000), cancelAtPeriodEnd: false,
-      tenant: i.tenant, cardVerifiedAt: i.cardVerifiedAt,
-    };
-    this.subscriptions.set(sub.id, sub);
-    this.byKey.set(i.idempotencyKey, sub.id);
-    return { ...sub };
-  }
-  async getSubscription(id: string) {
-    const s = this.subscriptions.get(id);
-    if (!s) throw new Error("no such subscription");
-    return { ...s };
-  }
-  async setSeats(id: string, seats: Seats, prorate: boolean) {
-    this.seatUpdates.push({ id, seats: { ...seats }, prorate });
-    this.subscriptions.get(id)!.seats = { ...seats };
-  }
-  async portalUrl() {
-    return "https://billing.stripe.test/portal";
-  }
-  async setCancelAtPeriodEnd(id: string, cancel: boolean) {
-    const s = this.subscriptions.get(id);
-    if (!s) throw new Error("no such subscription");
-    s.cancelAtPeriodEnd = cancel;
-    return { ...s };
-  }
-}
-
+// The Stripe stand-in is shared with the per-project suites (fakeStripe.ts). Since decision 041 a
+// card check starts the per-project model; seat workspaces (decision 028) are seeded as the code
+// before it left them, and keep their own tests until the conversion CLI moves them.
 describe.skipIf(pgInfo === null)("billing with a validated card", () => {
   const db = useDb();
   let stripe: FakeStripe;
@@ -147,6 +69,20 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
 
   const subOf = async (t: TenantId) => (await withTenant(db.app, t, getBilling)).subscriptionId!;
 
+  // A workspace on one seat subscription (decision 028), as the code before decision 041 left it.
+  async function seatWorkspace(name: string, trial = true): Promise<TenantId> {
+    const t = await workspace(name);
+    const { id: customerId } = await stripe.createCustomer({ tenant: t, email: null, idempotencyKey: `customer-${t}` });
+    const sub = stripe.seedSeatSubscription({ tenant: t, customerId, seats: { starter: 1, pro: 0 }, trial, periodEnd: new Date(Date.now() + 7 * 86_400_000) });
+    await withTenant(db.app, t, async (tx) => {
+      await setStripeCustomer(tx, customerId);
+      await saveSubscription(tx, sub, new Date());
+    });
+    return t;
+  }
+
+  const projectSubsOf = (t: TenantId) => stripe.projectSubs(t);
+
   describe("the gate", () => {
     it("blocks a workspace with no subscription before the callback runs", async () => {
       const t = await workspace("Unpaid");
@@ -162,14 +98,14 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
 
     it.each([
       ["trialing", "full"], ["active", "full"], ["past_due", "grace"],
-    ] as const)("lets %s in with %s access", async (status, access) => {
-      const t = await paidWorkspace(`Paid ${status}`);
+    ] as const)("lets a seat workspace in with status %s and %s access", async (status, access) => {
+      const t = await seatWorkspace(`Paid ${status}`);
       await db.admin.query("UPDATE supahound.billing_accounts SET status = $2 WHERE tenant_id = $1", [t, status]);
       expect(await withPaidTenantForUser(db.app, "stripe", owner, t, async (_tx, _role, a) => a)).toBe(access);
     });
 
-    it.each(["canceled", "unpaid", "incomplete", "incomplete_expired", "paused"])("blocks %s", async (status) => {
-      const t = await paidWorkspace(`Lapsed ${status}`);
+    it.each(["canceled", "unpaid", "incomplete", "incomplete_expired", "paused"])("blocks a seat workspace with status %s", async (status) => {
+      const t = await seatWorkspace(`Lapsed ${status}`);
       await db.admin.query("UPDATE supahound.billing_accounts SET status = $2 WHERE tenant_id = $1", [t, status]);
       await expect(withPaidTenantForUser(db.app, "stripe", owner, t, async () => undefined)).rejects.toBeInstanceOf(PaymentRequiredError);
     });
@@ -182,9 +118,9 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
 
   describe("the scheduler", () => {
     it("polls, and counts usage for, only tenants whose subscription allows it; all of them with billing off", async () => {
-      const paid = await paidWorkspace("Polled");
+      const paid = await seatWorkspace("Polled");
       const unpaid = await workspace("Not polled");
-      const lapsed = await paidWorkspace("Lapsed polled");
+      const lapsed = await seatWorkspace("Lapsed polled");
       await db.admin.query("UPDATE supahound.billing_accounts SET status = 'canceled' WHERE tenant_id = $1", [lapsed]);
       for (const t of [paid, unpaid, lapsed]) await addProjects(t, ["abcdefghijklmnopqrst"]);
       const due = (await repo.dueProjects(db.scheduler, 60, 1000, "stripe")).map((s) => s.tenantId);
@@ -234,12 +170,20 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
   });
 
   describe("the card check", () => {
-    it("starts a 7-day trial on a validated card at one Starter seat, and releases the hold", async () => {
+    it("starts the workspace's 7-day trial on a validated card, creates no subscription, and releases the hold (decision 041)", async () => {
+      const before = Date.now();
       const t = await paidWorkspace("Trial");
       const b = await withTenant(db.app, t, getBilling);
-      expect([b.status, b.seats, b.cardVerifiedAt !== null, b.verificationError]).toEqual(["trialing", { starter: 1, pro: 0 }, true, null]);
-      const session = [...stripe.sessions.values()].find((s) => s.tenant === t)!;
+      expect([b.model, b.status, b.subscriptionId, b.seats, b.cardVerifiedAt !== null, b.verificationError]).toEqual(["project", "none", null, null, true, null]);
+      expect(b.trialEnd!.getTime()).toBeGreaterThanOrEqual(before + 7 * 86_400_000 - 1000);
+      expect(b.trialEnd!.getTime()).toBeLessThanOrEqual(Date.now() + 7 * 86_400_000);
+      expect(projectSubsOf(t)).toEqual([]);
+      const session = [...stripe.sessions.values()].find((x) => x.tenant === t)!;
       expect(session.hold!.releasable).toBe(false);
+      // The card becomes the customer's default, so every project subscription bills it.
+      expect(stripe.customers.find((c) => c.tenant === t)!.defaultPaymentMethod).toBe(session.hold!.paymentMethodId);
+      // A validated card with no project to bill opens the workspace.
+      expect(await withPaidTenantForUser(db.app, "stripe", owner, t, async (_tx, _role, a) => a)).toBe("full");
     });
 
     it.each([
@@ -272,17 +216,27 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       expect((await withTenant(db.app, t, getBilling)).subscriptionId).toBeNull();
     });
 
-    it("gives one free trial per workspace, ever: a second card starts a paid subscription (decision 037)", async () => {
+    it("gives one free trial per workspace, ever: after a lapse, a second card bills its projects at once (decisions 037, 041)", async () => {
       const t = await paidWorkspace("Second card");
-      const sub = await subOf(t);
-      stripe.subscriptions.get(sub)!.status = "canceled";
-      await refreshSubscription(deps, sub);
+      await addProjects(t, ["secondcardaaaaaaaaaa"]);
+      await reconcileProjects(deps, t);
+      const [first] = projectSubsOf(t);
+      expect(first!.status).toBe("trialing");
+      // Stripe ends the subscription (say, the card failed at the trial end): the workspace is blocked.
+      stripe.set(first!.id, { status: "canceled" });
+      await refreshSubscription(deps, first!.id);
+      await expect(withPaidTenantForUser(db.app, "stripe", owner, t, async () => undefined)).rejects.toBeInstanceOf(PaymentRequiredError);
+      // The lapse comes after the trial (inside it, the new subscription would share what is left of it).
+      await db.admin.query("UPDATE supahound.billing_accounts SET trial_end = now() - interval '1 day' WHERE tenant_id = $1", [t]);
+      const trialEnd = (await withTenant(db.app, t, getBilling)).trialEnd;
       const session = await checkout(t);
       expect(stripe.sessions.get(session)!.trialAllowed).toBe(false);
       stripe.pay(session, GOOD);
       expect((await completeVerification(deps, session, t)).result).toBe("subscribed");
-      expect(stripe.creates.at(-1)!.trial).toBe(false);
-      expect((await withTenant(db.app, t, getBilling)).status).toBe("active");
+      const subs = projectSubsOf(t);
+      expect(subs.map((x) => [x.status, x.trialEnd])).toEqual([["canceled", first!.trialEnd], ["active", null]]);
+      const b = await withTenant(db.app, t, getBilling);
+      expect([b.status, b.trialEnd]).toEqual(["active", trialEnd]);
     });
 
     it("gives one trial even when two checkouts start before either finishes (decision 037)", async () => {
@@ -292,13 +246,12 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       expect([stripe.sessions.get(first)!.trialAllowed, stripe.sessions.get(second)!.trialAllowed]).toEqual([true, true]);
       stripe.pay(first, GOOD);
       await completeVerification(deps, first, t);
-      expect(stripe.creates.at(-1)!.trial).toBe(true);
-      // The first subscription ends; the second tab's checkout still says "trial", the workspace does not.
-      stripe.subscriptions.get(await subOf(t))!.status = "canceled";
-      await refreshSubscription(deps, await subOf(t));
+      const trialEnd = (await withTenant(db.app, t, getBilling)).trialEnd;
+      expect(trialEnd).not.toBeNull();
+      // The second tab's checkout still says "trial"; the workspace keeps its first trial end.
       stripe.pay(second, GOOD);
       expect((await completeVerification(deps, second, t)).result).toBe("subscribed");
-      expect(stripe.creates.at(-1)!.trial).toBe(false);
+      expect((await withTenant(db.app, t, getBilling)).trialEnd).toEqual(trialEnd);
     });
 
     it("refuses a trial to a user who owns another workspace that had one, but not to a new owner (decision 037)", async () => {
@@ -307,20 +260,32 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       const s1 = (await startCheckout(deps, { user: repeat, email: null, tenant: first, acceptedTerms: true })).split("/").at(-1)!;
       stripe.pay(s1, GOOD);
       await completeVerification(deps, s1, first);
-      expect(stripe.creates.at(-1)!.trial).toBe(true);
+      expect((await withTenant(db.app, first, getBilling)).trialEnd).not.toBeNull();
 
       const second = await createWorkspace(db.app, repeat, "Second owned");
       const s2 = (await startCheckout(deps, { user: repeat, email: null, tenant: second, acceptedTerms: true })).split("/").at(-1)!;
       expect(stripe.sessions.get(s2)!.trialAllowed).toBe(false);
       stripe.pay(s2, GOOD);
       await completeVerification(deps, s2, second);
-      expect(stripe.creates.at(-1)!.trial).toBe(false);
+      const b2 = await withTenant(db.app, second, getBilling);
+      expect([b2.model, b2.trialEnd, b2.cardVerifiedAt !== null]).toEqual(["project", null, true]);
       // A user who never owned a trialed workspace still gets one, even as another workspace's admin.
       const fresh = verifiedUserId(randomUUID());
       const third = await createWorkspace(db.app, fresh, "Fresh owner");
       await db.admin.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')", [first, fresh]);
       const s3 = (await startCheckout(deps, { user: fresh, email: null, tenant: third, acceptedTerms: true })).split("/").at(-1)!;
       expect(stripe.sessions.get(s3)!.trialAllowed).toBe(true);
+    });
+
+    it("keeps a live seat subscription found at the card check instead of starting the per-project model", async () => {
+      const t = await workspace("Seat retry");
+      const session = await checkout(t);
+      stripe.pay(session, GOOD);
+      const customer = stripe.customers.find((c) => c.tenant === t)!.id;
+      stripe.seedSeatSubscription({ tenant: t, customerId: customer, seats: { starter: 1, pro: 0 }, trial: true, periodEnd: new Date(Date.now() + 86_400_000) });
+      expect((await completeVerification(deps, session, t)).result).toBe("subscribed");
+      const b = await withTenant(db.app, t, getBilling);
+      expect([b.model, b.status, b.seats]).toEqual(["workspace", "trialing", { starter: 1, pro: 0 }]);
     });
 
     it("accepts a CVC the issuer did not check", async () => {
@@ -338,8 +303,9 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       expect(results.map((r) => r.result)).toEqual(["subscribed", "subscribed"]);
       // A third run, after the hold is gone, still sees the issuer's approval on the charge.
       expect((await completeVerification(deps, session, t)).result).toBe("subscribed");
-      expect([...stripe.subscriptions.values()].filter((s) => s.tenant === t)).toHaveLength(1);
-      expect((await withTenant(db.app, t, getBilling)).status).toBe("trialing");
+      expect([...stripe.subscriptions.values()].filter((s) => s.tenant === t)).toHaveLength(0);
+      const b = await withTenant(db.app, t, getBilling);
+      expect([b.model, b.status, b.trialEnd !== null]).toEqual(["project", "none", true]);
     });
 
     it("ignores a session that is still open, one for another workspace, and one whose customer is not this workspace's", async () => {
@@ -363,11 +329,11 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       const event = { id: "evt_replay1", type: "checkout.session.completed", tenant: t, checkoutSessionId: session, subscriptionId: null };
       expect(await handleBillingEvent(deps, event)).toBe("processed");
       expect(await handleBillingEvent(deps, event)).toBe("duplicate");
-      expect((await withTenant(db.app, t, getBilling)).status).toBe("trialing");
+      expect((await withTenant(db.app, t, getBilling)).model).toBe("project");
     });
 
     it("ignores events with no tenant or a tenant that does not own the subscription", async () => {
-      const t = await paidWorkspace("Owner of sub");
+      const t = await seatWorkspace("Owner of sub");
       const other = await workspace("Not the owner");
       const sub = await subOf(t);
       expect(await handleBillingEvent(deps, { id: "evt_none1", type: "customer.subscription.updated", tenant: null, checkoutSessionId: null, subscriptionId: sub })).toBe("ignored");
@@ -376,30 +342,28 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
       expect((await withTenant(db.app, other, getBilling)).subscriptionId).toBeNull();
     });
 
-    it("copies a cancellation from Stripe, which closes the gate", async () => {
-      const t = await paidWorkspace("Cancels");
+    it("copies a seat subscription's cancellation from Stripe, which closes the gate", async () => {
+      const t = await seatWorkspace("Cancels");
       const sub = await subOf(t);
       stripe.subscriptions.get(sub)!.status = "canceled";
       expect(await handleBillingEvent(deps, { id: "evt_cancel1", type: "customer.subscription.deleted", tenant: t, checkoutSessionId: null, subscriptionId: sub })).toBe("processed");
       await expect(withPaidTenantForUser(db.app, "stripe", owner, t, async () => undefined)).rejects.toBeInstanceOf(PaymentRequiredError);
     });
 
-    it("saves a subscription event that arrives before the checkout finishes saving", async () => {
+    it("saves a seat subscription event that arrives before the workspace row has it", async () => {
       const t = await workspace("Early event");
       const session = await checkout(t);
       stripe.pay(session, GOOD);
       const customer = stripe.customers.find((c) => c.tenant === t)!.id;
-      const sub = await stripe.createTrialSubscription({
-        tenant: t, customerId: customer, seats: { starter: 1, pro: 0 }, paymentMethodId: "pm_x", cardVerifiedAt: new Date(), idempotencyKey: "early", trial: true,
-      });
+      const sub = stripe.seedSeatSubscription({ tenant: t, customerId: customer, seats: { starter: 1, pro: 0 }, trial: true, periodEnd: new Date(Date.now() + 86_400_000) });
       expect(await refreshSubscription(deps, sub.id)).toBe(t);
       expect((await withTenant(db.app, t, getBilling)).status).toBe("trialing");
     });
   });
 
-  describe("per-project tiers", () => {
+  describe("seat model (decision 028), until the conversion CLI moves the workspace", () => {
     it("bills each added project at Starter right away, pro rata", async () => {
-      const t = await paidWorkspace("Seats");
+      const t = await seatWorkspace("Seats");
       const sub = await subOf(t);
       await syncSeats(deps, t, true); // no projects: the 1-seat minimum, already billed
       expect(stripe.seatUpdates.filter((u) => u.id === sub)).toEqual([]);
@@ -411,7 +375,7 @@ describe.skipIf(pgInfo === null)("billing with a validated card", () => {
     });
 
     it("moves a project above 1 million requests in 30 days to Pro at the next renewal, and back down", async () => {
-      const t = await paidWorkspace("Tiers");
+      const t = await seatWorkspace("Tiers");
       const sub = await subOf(t);
       const [busy, quiet] = await addProjects(t, ["dddddddddddddddddddd", "eeeeeeeeeeeeeeeeeeee"]);
       await syncSeats(deps, t, true);

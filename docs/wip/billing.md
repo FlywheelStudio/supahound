@@ -60,6 +60,9 @@ Migration, `packages/core/src/{billing,db}`, `apps/web/app/w/[tenantId]/**`,
 
 ## Next
 
+Since #99 (decision 041), each project bills on its own subscription; the seat model below stays
+only until `pnpm convert-subscriptions` moves the existing workspaces.
+
 1. Merge PR #88 (hook fix), then this branch, into `develop`, then release to `main`.
 2. Erik runs `scripts/stripe-setup.sh` in the private deploy repo with a test key, then tests.
 3. Live cutover: the same script with a live key, after Erik approves (CLAUDE.md).

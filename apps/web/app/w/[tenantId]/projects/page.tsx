@@ -15,7 +15,7 @@ import { requireUser } from "../../../../lib/supabase";
 import { removeProjectAction, watchProjectsAction } from "./actions";
 import { Notice, Shell } from "../../../../components/Shell";
 import { projectPath } from "../../../../lib/nav";
-import { projectTiers } from "@supahound/core/db/billing";
+import { getBilling, projectTiers } from "@supahound/core/db/billing";
 
 const ERRORS: Record<string, string> = {
   none: "Select at least one running project.",
@@ -71,7 +71,7 @@ export default async function Projects({
           tokens.push({ connectionId: c.id, label: c.label, token });
         }
       }
-      return { role, watched, tiers: await projectTiers(tx), connections: connections.length, tokens };
+      return { role, watched, tiers: await projectTiers(tx), connections: connections.length, tokens, perProject: (await getBilling(tx)).model === "project" };
     }),
   ).catch((err: unknown) => {
     toBillingIfUnpaid(err);
@@ -117,6 +117,7 @@ export default async function Projects({
             Supahound stops watching this project and permanently deletes its incidents, findings and poll history.
             You cannot undo this. Audit log entries for the project are kept. To watch it again later, pick it again;
             history starts from zero.
+            {mode() !== "off" && data.perProject && " Its subscription stops at the end of its paid month: nothing more is charged for it, and nothing is refunded."}
           </p>
           <form action={removeProjectAction} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="tenantId" value={tenant} />
