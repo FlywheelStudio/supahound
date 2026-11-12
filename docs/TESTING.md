@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 663 core (unit + Postgres + detection UAT), 137 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 182, within the 663 |
-| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 663 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 725 core (unit + Postgres + detection UAT), 145 web |
+| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 227, within the 725 |
+| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 725 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 44 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 51 |
 
-Totals on `feature/posture-scan` (2026-11-12): core 663, web 137, poller 12, E2E 55.
+Totals on `feature/data-controls` (2026-11-12): core 725, web 145, poller 15, E2E 62.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -144,6 +144,13 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W28 | An invite is bound to its address; a resend kills the old link; an expired or canceled invite is refused; a non-member gets a 404 |
 | UAT-W29 | The first poll after a pick shows posture findings on the overview, the dashboard and the Posture tab, with fix SQL; Advisor duplicates show once; no Advisor free text; a refused project reads "unable to assess" (`posture.uat.spec.ts`) |
 | UAT-W30 | Scan now queues a scan the next poll runs within the 24 hours; a viewer gets no button and a replayed owner form is refused |
+| UAT-W31 | An owner disconnects Supabase after typing its name: token emptied, polling stops, history kept, the owner and the project's viewer get the email, Supabase gets the revoke (`dataControls.uat.spec.ts`) |
+| UAT-W32 | A member gets no Disconnect and a replayed owner form is refused; an admin disconnects; a refused revoke tells the owner what to do; a connection with no project goes at once |
+| UAT-W33 | A grant revoked at Supabase (`invalid_grant` on refresh) stops polling, emails the project's people once, and shows "Access revoked" with Reconnect on settings |
+| UAT-W34 | The owner closes after typing the exact name: Stripe gets `cancel_at_period_end`, the workspace works until the period ends, then every page (billing too) goes to the closed page; a member cannot reopen |
+| UAT-W35 | An admin cannot close, even by a replayed form; the owner keeps it open (the Stripe cancel is undone), later reopens after the period, and gets no second free trial |
+| UAT-W36 | An owner who had a free trial gets none in a second workspace (our page and Checkout both say so) |
+| UAT-W37 | Once the closed workspace stops paying, the data job deletes its logs and history and keeps its record, members, billing, Stripe events and audit log; another workspace is untouched; members still see the closed page |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -264,5 +271,39 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | The server checks the role before Scan now (#11) | `scanNowAction` skips `canScan` | UAT-W30 fails (no role notice) |
 | The Posture tab shows the fix SQL (#11) | The page hides the SQL | UAT-W29 fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
+| Nothing is deleted while a workspace pays (#43) | `payingAccount` always false (the paying check removed) | 10 Postgres tests fail (retention, purge, disconnect, for active, past_due and exempt) |
+| Open incidents are resolved before delete (#43) | The resolve step matches nothing | 18 Postgres tests fail |
+| The retention window is 30 days (#43) | `RETENTION_DAYS` set to 3650 | 5 Postgres tests fail |
+| Old findings go even with a live incident (#43) | Findings delete keeps rows with an incident | 1 Postgres test fails |
+| The latest good poll run stays (#43) | Retention drops the latest-ok exclusion | 1 Postgres test fails |
+| The purge deletes the history (#43) | `purgeHistory` keeps the connections | 1 Postgres test fails |
+| The purge waits for its date (#43) | `purgeHistory` ignores `purge_after` | 4 Postgres tests fail |
+| A closing workspace works until its period ends (#43) | The gate closes it at once; separately, never | 1 Postgres test fails each |
+| Closed workspaces reach the closed page (#43) | `toBillingIfUnpaid` drops the closed redirect | UAT-W34 and UAT-W37 fail |
+| Only owners and admins change or delete a connection (#43) | `connection_write`; separately `connection_remove`, passes every role | 1 Postgres test fails each |
+| Only an owner writes a closure (#43) | `closure_insert` passes every role | 1 Postgres test fails |
+| The workspace record is never deleted (#43) | `tenant_keep` passes every row; separately, `closure_delete` drops `purged_at IS NULL` | 1 Postgres test fails each |
+| The scheduler skips closed workspaces (#43) | `dueProjects` drops its closure check | `isolation.test.ts` fails |
+| The notifier reads owners only (#43) | `notifier_read` passes every row | `isolation.test.ts` fails |
+| Close cancels at the period end (#43) | Core skips the Stripe call; separately, the web action passes no gateway | 3 Postgres tests fail; UAT-W34 fails |
+| Keeping it open undoes the cancel (#43) | Reopen skips the Stripe call | 1 Postgres test fails |
+| A closed workspace starts no checkout (#43) | `startCheckout` skips the closure check; separately, `completeVerification` does | 1 Postgres test fails each |
+| One free trial per workspace (#43) | `completeVerification` trusts the session alone | 1 Postgres test fails (two checkouts at once) |
+| No trial for an owner who had one (#43) | `trialAvailable` skips the owner check | 1 Postgres test fails |
+| Closing ends a staff exemption (#43) | `recordClosure` keeps it | 1 Postgres test fails |
+| Disconnect revokes at Supabase (#43) | Core never revokes | 2 Postgres tests fail |
+| Disconnect emails the project's people (#43) | The web action sends no email | UAT-W31 fails |
+| Disconnect and close check the role (#43) | Core drops the member check (disconnect) or the owner check (close) | 1 and 2 Postgres tests fail |
+| Disconnected history waits 30 days (#43) | `deleteExpiredConnections` ignores `delete_after` | 10 Postgres tests fail |
+| Reconnecting keeps the history (#43) | `storeConnection` never matches | 1 Postgres test fails |
+| Paused projects are not billed (#43) | `billedTiers` counts paused projects | 1 Postgres test fails |
+| Only `invalid_grant` is a revocation (#43) | Any 401 counts | 3 Postgres tests fail (500, `invalid_client`, a 401 without a code) |
+| A revocation emails once (#43) | `markDisconnected` matches an already disconnected connection | 1 Postgres test fails |
+| A notice comes 30 days ahead (#43) | The period check set to 0 days | 2 unit tests fail |
+| The notice CLI only counts by default (#43) | The dry-run branch removed | 1 unit test fails |
+| Each owner gets one notice (#43) | Recipients not deduplicated; separately, the journal ignored | 1 Postgres test; 2 unit tests fail |
+| Forms return only to known pages (#43) | `parseBack` returns its input | 1 web unit test fails |
+| `data` messages reach the data job (#43) | The consumer never parses them | 1 workerd test fails |
+| The production migration keeps the old code working (#43) | — (a check, not a mutation): `develop` @ c366a6d's unchanged suites on the new schema | Core 662 of 663 (the 1 is the table-list check), web 137, poller 12, E2E 55 of 55 |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

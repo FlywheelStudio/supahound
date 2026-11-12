@@ -120,3 +120,43 @@ describe.skipIf(pgInfo === null)("login-users.sql", () => {
     ]);
   });
 });
+
+// supabase/setup/notifier-user.sql (decision 037). In this file, after the suite above, because
+// login roles are cluster-wide and that suite counts them.
+describe.skipIf(pgInfo === null)("notifier-user.sql", () => {
+  const NOTIFIER_SQL = fileURLToPath(new URL("../../../../supabase/setup/notifier-user.sql", import.meta.url));
+  const name = `t_${randomUUID().replace(/-/g, "")}`;
+  let admin: pg.Client;
+  const run = (password: string) =>
+    spawnSync(join(pgBin()!, "psql"), [
+      "-X", "-q", "-h", pgInfo!.host, "-p", String(pgInfo!.port), "-U", "postgres", "-d", name,
+      "-v", `notifier_password=${password}`, "-f", NOTIFIER_SQL,
+    ], { encoding: "utf8" });
+
+  beforeAll(async () => {
+    admin = new pg.Client({ host: pgInfo!.host, port: pgInfo!.port, user: "postgres", database: "postgres" });
+    await admin.connect();
+    await admin.query(`CREATE DATABASE ${name} TEMPLATE ${pgInfo!.template}`);
+  });
+
+  afterAll(async () => {
+    await admin.query(`DROP DATABASE IF EXISTS ${name}`);
+    await admin.query("DROP ROLE IF EXISTS supahound_notifier_login");
+    await admin.end();
+  });
+
+  it("refuses a short password, then creates one login in supahound_notifier only, twice safely", async () => {
+    const short = run("short");
+    expect(short.status).not.toBe(0);
+    expect(short.stderr).toContain("at least 24 characters");
+    for (let i = 0; i < 2; i++) {
+      const r = run("n".repeat(24 + i));
+      expect(r.status, r.stderr).toBe(0);
+    }
+    const { rows } = await admin.query(`
+      SELECT r.rolcanlogin, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb,
+             array(SELECT g.rolname::text FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid WHERE m.member = r.oid) AS member_of
+      FROM pg_roles r WHERE r.rolname = 'supahound_notifier_login'`);
+    expect(rows).toEqual([{ rolcanlogin: true, rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false, member_of: ["supahound_notifier"] }]);
+  });
+});

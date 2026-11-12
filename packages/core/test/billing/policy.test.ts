@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  accessFor, accessForAccount, checkCard, isExemptEmail, needsEnterprise, parseExemptDomains, POLLABLE_STATUSES, seatsFor, tierFor, type BillingStatus,
+  accessFor, accessForAccount, checkCard, isExemptEmail, needsEnterprise, parseExemptDomains, payingAccount, POLLABLE_STATUSES, seatsFor, tierFor, type BillingStatus,
 } from "../../src/billing/policy.js";
 
 const ALL: BillingStatus[] = ["none", "incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"];
@@ -84,5 +84,13 @@ describe("staff exemption (decision 029)", () => {
     expect(accessForAccount({ status: "canceled", exempt: true })).toBe("full");
     expect(accessForAccount({ status: "none", exempt: false })).toBe("blocked");
     expect(accessForAccount({ status: "past_due", exempt: false })).toBe("grace");
+  });
+});
+
+describe("payingAccount (decision 037)", () => {
+  it("counts active, past_due and a staff exemption as paying, and nothing else", () => {
+    const all: BillingStatus[] = ["none", "incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"];
+    expect(all.filter((status) => payingAccount({ status, exempt: false }))).toEqual(["active", "past_due"]);
+    expect(all.every((status) => payingAccount({ status, exempt: true }))).toBe(true);
   });
 });

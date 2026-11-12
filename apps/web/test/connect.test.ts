@@ -47,6 +47,11 @@ describe("Supabase OAuth callback", () => {
     expect(stored).toEqual([CREDS]);
   });
 
+  it("says so when the token went back into a disconnected connection (decision 037)", async () => {
+    const { deps, start } = fakeDeps({ store: async () => true });
+    expect(await handleOAuthCallback(params({ code: "c", state: start() }), USER, deps)).toBe(`/w/${TENANT}?reconnected=1`);
+  });
+
   it("refuses a replay of the same callback URL", async () => {
     const { deps, stored, start } = fakeDeps();
     const state = start();

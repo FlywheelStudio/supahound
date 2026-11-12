@@ -111,6 +111,10 @@ The web app adds a seventh: membership is checked in the same transaction that r
 non-member gets the same 404 as a missing workspace (E2E UAT-W7). An eighth works inside the tenant
 (decision 036): restrictive RLS hides a project's rows from a signed-in user without a role on that
 project, and refuses settings and people writes the role does not allow (`people.test.ts`, UAT-W26).
+Data controls (decision 037) add restrictive policies too: only a workspace owner closes or reopens,
+only owners and admins change or delete a connection, and no transaction deletes a tenant row
+(`dataControls.test.ts`). A purge is checked against every tenant table in the catalog: the other
+tenant's row counts stay the same.
 
 ## Security of the monitor
 
@@ -146,6 +150,15 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `posture_scans` | One per project: Scan now request, last attempt, status and time per source (decision 038) |
 | `posture_findings` | Latest posture findings per source: check, severity, object, structured evidence |
 | `audit_log` | Every query and model call, append-only |
+| `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |
+
+Data controls (decision 037): once a day at 00:40 UTC the poller enqueues a `data` message per
+tenant. For a workspace that does not pay, the job deletes incidents, findings and poll runs past
+the 30-day window, the history of a Supabase connection disconnected 30 days ago, and the logs and
+history of a workspace closed and unpaid for 30 days. It never deletes the workspace record, its
+billing and payment history or the audit log, and deletes nothing while a workspace pays.
+`supahound_notifier` is a third NOLOGIN role: it reads owners' addresses across tenants for the
+subprocessor notice, and nothing else.
 
 ## Decisions
 

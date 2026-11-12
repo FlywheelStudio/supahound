@@ -1,6 +1,7 @@
 import { parseExemptDomains, type Access } from "@supahound/core/billing/policy";
 import { billingPath, syncSeats, type FlowDeps } from "@supahound/core/billing/flow";
 import { billingMode, PaymentRequiredError, withPaidTenantForUser, type BillingMode } from "@supahound/core/db/billing";
+import { WorkspaceClosedError } from "@supahound/core/db/closure";
 import type { TenantTx } from "@supahound/core/db/tenant";
 import type { Role } from "@supahound/core/db/user";
 import type { TenantId, UserId } from "@supahound/core/tenancy/scope";
@@ -30,8 +31,10 @@ export function paidTenant<T>(
   return withPaidTenantForUser(pool, mode(), user, tenant, fn);
 }
 
-// For .catch() on a gated call: a workspace without a validated card goes to its billing page.
+// For .catch() on a gated call: a workspace without a validated card goes to its billing page,
+// and a closed workspace to its closed page (decision 037).
 export function toBillingIfUnpaid(err: unknown): void {
+  if (err instanceof WorkspaceClosedError) redirect(`/w/${err.tenant}/closed`);
   if (err instanceof PaymentRequiredError) redirect(billingPath(err.tenant));
 }
 

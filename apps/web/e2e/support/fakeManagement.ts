@@ -1,9 +1,10 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 
 // A stand-in for the Supabase Management API: GET /v1/projects, which the project picker
-// (issue #9) calls from the Worker, and the two posture scan endpoints (issue #11), which the
-// E2E poll (support/seed.ts) calls through core's real clients: POST .../database/query/read-only
-// and GET .../advisors/security. A test sets each ref's answers through /__test/posture. Browser-side page.route cannot see server-side calls, so the
+// (issue #9) calls from the Worker; POST /v1/oauth/revoke, which Disconnect calls (#43); and the two
+// posture scan endpoints (issue #11), which the E2E poll (support/seed.ts) calls through core's real
+// clients: POST .../database/query/read-only and GET .../advisors/security. A test sets each ref's
+// answers through /__test/posture. Browser-side page.route cannot see server-side calls, so the
 // Worker reaches this through SUPABASE_API_URL. Each bearer token gets its own answer, set by a
 // test through /__test/projects; an unknown token gets 401, like a revoked grant.
 
@@ -30,6 +31,9 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 export async function startFakeManagement(port: number): Promise<FakeManagement> {
   const answers = new Map<string, { status: number; projects: FakeProject[] }>();
   const calls: { token: string; path: string }[] = [];
+  // Disconnect (decision 037): POST /v1/oauth/revoke. Refresh tokens listed here are refused.
+  const revokes: { client_id: unknown; refresh_token: unknown }[] = [];
+  const refuse = new Set<string>();
   // Posture answers per project ref: rows or lints, or an HTTP status to fail with.
   const posture = new Map<string, { catalog: unknown[] | number; advisor: unknown[] | number }>();
 
@@ -46,6 +50,18 @@ export async function startFakeManagement(port: number): Promise<FakeManagement>
         return send(200, {});
       }
       if (req.method === "GET" && path === "/__test/calls") return send(200, calls);
+      if (req.method === "GET" && path === "/__test/revokes") return send(200, revokes);
+      if (req.method === "POST" && path === "/__test/refuse-revoke") {
+        refuse.add(String((await readJson(req)).refresh_token));
+        return send(200, {});
+      }
+      if (req.method === "POST" && path === "/v1/oauth/revoke") {
+        const b = await readJson(req);
+        revokes.push({ client_id: b.client_id, refresh_token: b.refresh_token });
+        if (!b.client_secret || refuse.has(String(b.refresh_token))) return send(403, { message: "Forbidden action" });
+        res.writeHead(204).end();
+        return;
+      }
       if (req.method === "POST" && path === "/__test/posture") {
         const b = await readJson(req);
         posture.set(String(b.ref), { catalog: b.catalog as unknown[] | number, advisor: b.advisor as unknown[] | number });

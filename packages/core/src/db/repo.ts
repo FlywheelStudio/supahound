@@ -320,7 +320,9 @@ export async function appendAudit(
 // tenant transaction.
 //
 // billing "stripe" skips tenants whose subscription may not be polled (decision 028), unless the
-// workspace is exempt (decision 029); "off" is for self-hosting without billing. The scheduler
+// workspace is exempt (decision 029); "off" is for self-hosting without billing. A closed
+// workspace whose paid period has ended (decision 037) is skipped in both modes. Projects of a
+// disconnected connection are paused. The scheduler
 // reads billing_accounts (tenant_id, status, exempt_at) only. A membership trigger clears
 // exempt_at when the owners change, so the scheduler needs no access to memberships.
 export async function dueProjects(
@@ -333,11 +335,13 @@ export async function dueProjects(
     billing === "off"
       ? `SELECT p.tenant_id, p.id FROM supahound.projects p
          WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+           AND NOT EXISTS (SELECT 1 FROM supahound.account_closures c WHERE c.tenant_id = p.tenant_id AND c.access_ends_at <= now())
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`
       : `SELECT p.tenant_id, p.id FROM supahound.projects p
          JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND (b.status = ANY($3::text[]) OR b.exempt_at IS NOT NULL)
          WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
+           AND NOT EXISTS (SELECT 1 FROM supahound.account_closures c WHERE c.tenant_id = p.tenant_id AND c.access_ends_at <= now())
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`,
     billing === "off" ? [olderThanSeconds, limit] : [olderThanSeconds, limit, POLLABLE_STATUSES],
@@ -351,6 +355,21 @@ export async function billedTenants(schedulerPool: Pool): Promise<TenantId[]> {
   const res = await schedulerPool.query<{ tenant_id: string }>(
     "SELECT tenant_id FROM supahound.billing_accounts WHERE status = ANY($1::text[]) ORDER BY tenant_id",
     [POLLABLE_STATUSES],
+  );
+  return res.rows.map((r) => tenantId(r.tenant_id));
+}
+
+// The tenants the daily data job visits (decision 037): every tenant with a project (retention,
+// disconnected history) and every closed workspace whose purge date has come. Scheduler role:
+// reads project tenant IDs and account_closures (tenant_id, purge_after, purged_at) only. Billing
+// does not filter it; the job asks whether each workspace pays, inside its own transaction.
+export async function dataJobTenants(schedulerPool: Pool, now: Date): Promise<TenantId[]> {
+  const res = await schedulerPool.query<{ tenant_id: string }>(
+    `SELECT tenant_id FROM supahound.projects
+     UNION
+     SELECT tenant_id FROM supahound.account_closures WHERE purged_at IS NULL AND purge_after <= $1
+     ORDER BY 1`,
+    [now],
   );
   return res.rows.map((r) => tenantId(r.tenant_id));
 }
@@ -536,9 +555,10 @@ export interface ConnectionSummary {
   createdAt: Date;
 }
 
+// Live connections only: a disconnected one has no token (decision 037).
 export async function listConnections(tx: TenantTx): Promise<ConnectionSummary[]> {
   const rows = await tx.query<{ id: string; label: string; created_at: Date }>(
-    "SELECT id, label, created_at FROM supahound.connections WHERE tenant_id = $1 ORDER BY created_at, id",
+    "SELECT id, label, created_at FROM supahound.connections WHERE tenant_id = $1 AND disconnected_at IS NULL ORDER BY created_at, id",
     [tx.tenantId],
   );
   return rows.map((r) => ({ id: connectionId(r.id), label: r.label, createdAt: r.created_at }));
@@ -569,8 +589,37 @@ export async function removeProject(tx: TenantTx, id: ProjectId): Promise<boolea
   return rows.length === 1;
 }
 
+// Workspace settings (decision 037): each connection, live or disconnected, with the number of
+// projects watched through it. RLS hides projects a signed-in user has no role on, so the count is
+// exact for workspace owners and admins, who see every project.
+export interface ConnectionStatus extends ConnectionSummary {
+  projects: number;
+  disconnectedAt: Date | null;
+  disconnectReason: "user" | "revoked" | null;
+  deleteAfter: Date | null;
+}
+
+export async function listConnectionsWithProjects(tx: TenantTx): Promise<ConnectionStatus[]> {
+  const rows = await tx.query<{
+    id: string; label: string; created_at: Date; projects: number; disconnected_at: Date | null;
+    disconnect_reason: "user" | "revoked" | null; delete_after: Date | null;
+  }>(
+    `SELECT c.id, c.label, c.created_at, c.disconnected_at, c.disconnect_reason, c.delete_after,
+            (SELECT count(*)::int FROM supahound.projects p WHERE p.tenant_id = c.tenant_id AND p.connection_id = c.id) AS projects
+     FROM supahound.connections c WHERE c.tenant_id = $1 ORDER BY c.created_at, c.id`,
+    [tx.tenantId],
+  );
+  return rows.map((r) => ({
+    id: connectionId(r.id), label: r.label, createdAt: r.created_at, projects: r.projects,
+    disconnectedAt: r.disconnected_at, disconnectReason: r.disconnect_reason, deleteAfter: r.delete_after,
+  }));
+}
+
 export async function countConnections(tx: TenantTx): Promise<number> {
-  const rows = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM supahound.connections WHERE tenant_id = $1", [tx.tenantId]);
+  const rows = await tx.query<{ n: number }>(
+    "SELECT count(*)::int AS n FROM supahound.connections WHERE tenant_id = $1 AND disconnected_at IS NULL",
+    [tx.tenantId],
+  );
   return rows[0]?.n ?? 0;
 }
 

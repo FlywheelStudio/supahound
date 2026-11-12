@@ -102,6 +102,18 @@ export function isExemptEmail(email: string | null, domains: readonly string[]):
   return domains.includes(email.slice(at + 1).toLowerCase());
 }
 
+// Paying (decision 037): the workspace has a live paid subscription, or a staff exemption
+// (decision 029). Stripe keeps "active" until the end of a period that a closing owner canceled,
+// so the paid time after a close counts. "past_due" counts: Stripe still retries the payment. A
+// trial that never paid does not count, nor does a self-hosted copy without billing. While a
+// workspace pays, Supahound deletes none of its data: no retention, no purge, no delete after a
+// disconnect. This is the only definition; every deletion path calls it.
+export const PAYING_STATUSES: readonly BillingStatus[] = ["active", "past_due"];
+
+export function payingAccount(account: { status: BillingStatus; exempt: boolean }): boolean {
+  return account.exempt || PAYING_STATUSES.includes(account.status);
+}
+
 // The statuses whose projects the poller still polls. Kept next to accessFor so the two agree.
 export const POLLABLE_STATUSES: readonly BillingStatus[] = STATUSES.filter((s) => accessFor(s) !== "blocked");
 

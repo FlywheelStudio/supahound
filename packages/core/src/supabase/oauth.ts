@@ -29,10 +29,21 @@ export class OAuthError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    // The OAuth "error" field of the token endpoint's answer (RFC 6749 5.2), when it sent one.
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "OAuthError";
   }
+}
+
+// The grant is gone (decision 037): the token endpoint answered a refresh with "invalid_grant"
+// (RFC 6749 5.2: the refresh token is invalid, expired or revoked), with HTTP 400 or 401. Nothing
+// else counts: not a 5xx, a timeout or a network error (transient), not "invalid_client" (our own
+// client secret is wrong, which must never cost a customer their tokens), and not a Management API
+// 401 on its own (an access token can lapse while the grant lives; the next refresh decides).
+export function isRevokedGrant(err: unknown): boolean {
+  return err instanceof OAuthError && (err.status === 400 || err.status === 401) && err.code === "invalid_grant";
 }
 
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -81,7 +92,16 @@ async function tokenRequest(client: OAuthClient, body: Record<string, string>, n
     body: new URLSearchParams(body).toString(),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) throw new OAuthError(`Token endpoint returned HTTP ${res.status}`, res.status);
+  if (!res.ok) {
+    let code: string | null = null;
+    try {
+      const e = (await res.json()) as { error?: unknown };
+      code = typeof e.error === "string" && /^[a-z_]{1,64}$/.test(e.error) ? e.error : null;
+    } catch {
+      // Not JSON: no code.
+    }
+    throw new OAuthError(`Token endpoint returned HTTP ${res.status}`, res.status, code);
+  }
   const j = (await res.json()) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
   if (typeof j.access_token !== "string" || j.access_token === "") throw new OAuthError("No access token in response", res.status);
   const expiresIn = typeof j.expires_in === "number" && j.expires_in > 0 ? j.expires_in : null;
@@ -115,4 +135,21 @@ export function parseCredentials(stored: string): Credentials {
     return { accessToken: c.accessToken, refreshToken: c.refreshToken ?? null, expiresAt: c.expiresAt ?? null };
   }
   return { accessToken: stored, refreshToken: null, expiresAt: null };
+}
+
+// Ends the grant at Supabase (disconnect, decision 037): POST /v1/oauth/revoke with the app's
+// credentials and the refresh token. Supabase marks this endpoint Beta, so the caller treats it as
+// best effort: false on any failure, never a throw. The local token is deleted either way.
+export async function revokeGrant(client: OAuthClient, refreshToken: string, baseUrl = "https://api.supabase.com"): Promise<boolean> {
+  try {
+    const res = await (client.fetch ?? fetch)(new URL("/v1/oauth/revoke", baseUrl).toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ client_id: client.clientId, client_secret: client.clientSecret, refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
