@@ -46,7 +46,7 @@ export interface NavGroup {
 }
 
 // Pages that are placeholders until their issue ships. Remove an entry when the page is real.
-export const SOON: ReadonlySet<ProjectPage> = new Set<ProjectPage>(["findings"]);
+export const SOON: ReadonlySet<ProjectPage> = new Set<ProjectPage>([]);
 
 const item = (label: string, href: string, current: boolean, soon = false): NavItem => ({ label, href, current, soon });
 

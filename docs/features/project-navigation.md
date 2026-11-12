@@ -11,8 +11,8 @@ and the app opens that project's dashboard. Each project has these pages:
 | --- | --- | --- |
 | Dashboard | (none) | Status, open incidents, 30-day requests, plan, detector 2 coverage, top 5 open incidents |
 | Incidents | `/incidents` | 30-day history, newest first, and `/incidents/<id>` detail ([incident-history.md](incident-history.md), #44) |
-| Security scan | `/findings` | Coming soon (#100, decision 034) |
-| Settings → General | `/settings` | Name, ref, polling, last poll; Remove (owners and admins) |
+| Security scan | `/findings` | The newest finished scan of each attached domain ([scan-domains.md](scan-domains.md), #100) |
+| Settings → General | `/settings` | Name, ref, polling, last poll; Security scan domains (attach, detach: owners and admins, #100); Remove (owners and admins) |
 | Settings → Notifications | `/settings/notifications` | Email alert threshold (decision 030); SMS disabled, Coming soon (#32) |
 | Settings → Plan & billing | `/settings/plan` | Tier, price, 30-day requests, how the tier is set; read-only until #99 |
 | Settings → People | `/settings/people` | Coming soon (#24, decision 033) |
