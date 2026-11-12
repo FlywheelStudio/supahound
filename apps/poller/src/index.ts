@@ -6,6 +6,7 @@ import { billedTenants, dueProjects } from "@supahound/core/db/repo";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
+import { querySecurityAdvisor } from "@supahound/core/posture/advisor";
 import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
 import { projectScope, tenantId as parseTenantId, type ProjectScope, type TenantId } from "@supahound/core/tenancy/scope";
 import { TokenVault } from "@supahound/core/vault/vault";
@@ -147,6 +148,8 @@ export default {
       // Optional secret (decision 025): without it, alerts use template text and no model is called.
       explain: explainerFor((env as Env & { AI_GATEWAY_API_KEY?: string }).AI_GATEWAY_API_KEY),
       env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
+      // Posture scan (decision 038): catalog SQL on the read-only endpoint and the Security Advisor.
+      posture: { querySql: queryReadOnly, queryAdvisor: querySecurityAdvisor },
       // Incident alert email (decision 030): one email per incident per member.
       alerts: {
         send: (m) => env.EMAIL.send(m),
