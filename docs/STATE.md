@@ -14,13 +14,13 @@ This file tracks only what is in progress and what is done.
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
 | Tenant isolation (storage, vault, poller) | #8 | Built; live database, login users and Hyperdrive (session pooler, caching off) up on 2026-11-10; the poller cron runs against it | Asymmetric JWT signing keys (optional: `getClaims()` works without them) | [wip/tenant-isolation.md](wip/tenant-isolation.md) |
 | Billing: validated card, 7-day trial, per-project tiers (Starter $19.99, Pro $99 with SMS, Enterprise) | #25 | **Live** on app.supahound.com since 2026-11-11 with live Stripe (deployed from `develop` @ 9bfed15); site repriced (supahound-site #2). Staff exemption (#94, decision 029) built; production migration, config and deploy wait for Erik | Feature doc after the first real customer flow; SMS provider (#32) | [wip/billing.md](wip/billing.md) |
-| Posture scan V1: RLS coverage, permissive policies, Security Advisor | #11 | Building on `feature/posture-scan` | — | [wip/posture-scan.md](wip/posture-scan.md) |
 | Web app: auth, onboarding, dashboard | #9 | Sign-in, workspace, overview, OAuth connect built; E2E in CI; project picker shipped; ownership refresh (#10) next | Supahound's Supabase project, OAuth app, email domain | [wip/web-app.md](wip/web-app.md) |
 
 ## Completed
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
+| Posture scan V1: tables without RLS, open policies, views without `security_invoker`, Security Advisor; daily, first poll and Scan now; raises detections on exposed tables | #11 | 2026-11-12, PR into `develop`; waits for the production migration (Erik) before merge | [features/posture-scan.md](features/posture-scan.md), decision 038 |
 | People and roles per project: Owner/Admin/Editor/Viewer, RLS by project, email invites (7 days, single use, bound to the address) | #24 | 2026-11-12, PR #105 into `develop`; waits for the production migration (Erik) before merge | [features/project-people.md](features/project-people.md), decision 036 |
 | Incident history: 30-day list (open and resolved, keyset pages) and incident detail per project | #44 | 2026-11-12, into `develop` | [features/incident-history.md](features/incident-history.md), decision 035 |
 | Project navigation: project dropdown, project dashboard, project settings (notifications with SMS Coming soon, plan) | #98 | 2026-11-11, PR #101 into `develop` | [features/project-navigation.md](features/project-navigation.md), decision 031 |

@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 589 core (unit + Postgres + detection UAT), 127 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 161, within the 589 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 662 core (unit + Postgres + detection UAT), 137 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 181, within the 662 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 589 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 662 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 42 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 44 |
 
-Totals on `feature/project-people` (2026-11-12): core 589, web 127, poller 12, E2E 53.
+Totals on `feature/posture-scan` (2026-11-12): core 662, web 137, poller 12, E2E 55.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -38,7 +38,9 @@ fails if any suite reports skipped tests.
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.
 3. **A fake Supabase Management API** (`support/fakeManagement.ts`). It serves `GET /v1/projects`
-   per bearer token; an unknown token gets 401. The Worker reaches it through `SUPABASE_API_URL`,
+   per bearer token; an unknown token gets 401. For the posture scan (#11) it also serves the
+   read-only SQL endpoint and `GET .../advisors/security` per project ref, set through `/__test/posture`;
+   the E2E poll reaches them through core's real clients. The Worker reaches it through `SUPABASE_API_URL`,
    because `page.route` cannot see server-side calls.
 4. **The built Worker** under `wrangler dev`, with test-only secrets in a temp env file.
 
@@ -140,6 +142,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W26 | An owner invites a colleague by email; signed out, they open the link, sign in, accept, and see only that project; the other project is a 404; the link works once (`people.uat.spec.ts`) |
 | UAT-W27 | A viewer gets no invite form and a replayed owner form is refused; an admin cannot invite an Owner, even by a forged form |
 | UAT-W28 | An invite is bound to its address; a resend kills the old link; an expired or canceled invite is refused; a non-member gets a 404 |
+| UAT-W29 | The first poll after a pick shows posture findings on the overview, the dashboard and the Posture tab, with fix SQL; Advisor duplicates show once; no Advisor free text; a refused project reads "unable to assess" (`posture.uat.spec.ts`) |
+| UAT-W30 | Scan now queues a scan the next poll runs within the 24 hours; a viewer gets no button and a replayed owner form is refused |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -235,6 +239,29 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Nobody manages their own role (#24) | `canManagePerson` drops the self check | 1 unit test fails |
 | Admins never grant Owner (#24) | `assignableRoles("admin")` includes Owner | 2 unit tests fail |
 | Invite email HTML is escaped (#24) | `renderInviteEmail` drops `escapeHtml` on the lead | 1 unit test fails |
+| RLS off is rated by the API grants (#11) | `rls_disabled` ignores grants | 1 unit test fails |
+| `USING (true)` is detected (#11) | `isTrueExpr` never matches | 9 unit tests fail |
+| A restrictive policy still filters (#11) | Restrictive policies ignored | 1 unit test fails |
+| `security_invoker` views pass (#11) | The invoker check removed | 2 tests fail (unit and Postgres) |
+| FORCE is not required (#11) | RLS counts only when forced | 2 unit tests fail |
+| The Advisor's "unavailable" lint is not clean (#11) | The lint ignored | 2 tests fail (unit and Postgres) |
+| An Advisor body without lints is an error (#11) | Read as no lints | 1 unit test fails |
+| No Advisor free text is kept (#11) | `parseLints` keeps `title` | 2 unit tests fail |
+| Names with control characters are dropped (#11) | `safeName` allows them | 3 unit tests fail |
+| Advisor duplicates show once (#11) | `dedupePosture` keeps all | 2 tests fail (unit and Postgres) |
+| Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
+| Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |
+| Scan now runs within the 24 hours (#11) | The claim ignores a pending request | 1 Postgres test fails |
+| Daily refresh (#11) | Refresh wait set to 10^9 s | 3 Postgres tests fail |
+| A failed scan retries after an hour (#11) | Retry wait 0 | 1 Postgres test fails |
+| A failed source keeps its findings (#11) | Failed sources wipe their rows | 3 Postgres tests fail |
+| Posture audit row precedes the calls (#11) | Audit row not written | 1 Postgres test fails |
+| Posture rows hidden without a project role (#11) | `project_access` passes every row | 3 Postgres tests fail |
+| Only owners, admins and editors ask for a scan (#11) | INSERT policy passes every role / UPDATE policy passes every role | 1 Postgres test fails each |
+| Signed-in users never write findings (#11) | Findings INSERT policy passes every role | 1 Postgres test fails |
+| The overview never calls a failed scan clean (#11) | `postureLine` drops the unable state / hides the Advisor gap | 1 web unit test fails each |
+| The server checks the role before Scan now (#11) | `scanNowAction` skips `canScan` | UAT-W30 fails (no role notice) |
+| The Posture tab shows the fix SQL (#11) | The page hides the SQL | UAT-W29 fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

@@ -51,7 +51,7 @@ pnpm --filter @supahound/web e2e:only     # Playwright only, on an existing buil
 
 pnpm scan --file test/fixtures/events.ndjson --ownership test/fixtures/policies.json   # core CLI
 pnpm discover-keys --project <ref>        # PRD task 1: which auth fields exist in edge logs
-pnpm -s print-sql                         # the rollup, key-discovery and pg_policies SQL
+pnpm -s print-sql                         # the rollup, key-discovery, pg_policies and posture SQL
 pnpm -s master-key [--rotate]             # a new SUPAHOUND_MASTER_KEYS value (self-hosting)
 pnpm --filter @supahound/web dev          # web app (needs .dev.vars, see apps/web/wrangler.jsonc)
 pnpm --filter @supahound/poller dev       # poller Worker
@@ -75,6 +75,8 @@ prints the wrangler output. Prove each new check can fail before you trust it (d
 | Path | Purpose |
 | --- | --- |
 | `packages/core/src/config/fields.ts` | The only place that knows Supabase log field paths |
+| `packages/core/src/config/posture.ts` | The only place that knows the posture scan's SQL, Advisor endpoint and lint names |
+| `packages/core/src/posture/` | Posture scan: catalog checks, Security Advisor client, dedupe and severity raise, fix prompts |
 | `packages/core/src/logs/` | Rollup SQL, Management API logs client, row → `EdgeEvent` |
 | `packages/core/src/postgrest/`, `ownership/`, `network/`, `detectors/` | Detectors 2 and 4 |
 | `packages/core/src/tenancy/scope.ts` | Branded tenant/project/user IDs; every state key includes the tenant |

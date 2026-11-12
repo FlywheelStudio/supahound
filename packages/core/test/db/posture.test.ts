@@ -326,6 +326,8 @@ describe.skipIf(pgInfo === null)("posture storage and RLS for signed-in users", 
     expect(await as(u.editor, A, (tx) => posture.requestPostureScan(tx, p1, u.editor, 0))).toBe("queued");
     await expect(as(u.viewer, A, (tx) => posture.requestPostureScan(tx, p1, u.viewer, 0))).rejects.toThrow(/row-level security/);
     await expect(as(u.stranger, A, (tx) => posture.requestPostureScan(tx, p1, u.stranger, 0))).rejects.toThrow(/row-level security/);
+    // A plain UPDATE (not the upsert, whose INSERT check already refuses) changes nothing for a viewer.
+    expect(await as(u.viewer, A, (tx) => tx.query("UPDATE supahound.posture_scans SET requested_at = now() RETURNING id"))).toEqual([]);
     // Before the first scan, the request inserts the row: a viewer is refused there too.
     const p3 = await withTenant(db.app, A, async (tx) => {
       const conn = await repo.createConnection(tx, db.vault, { label: "x", token: "t" });
