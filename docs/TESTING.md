@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 740 core (unit + Postgres + detection UAT), 157 web |
-| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 242, within the 740 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 794 core (unit + Postgres + detection UAT), 166 web |
+| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 269, within the 794 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 740 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 794 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 54 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 60 |
 
-Totals on `feature/scan-domains` (2026-11-12): core 740, web 157, poller 15, E2E 65.
+Totals on `feature/project-subscriptions` (2026-11-12): core 794, web 166, poller 15, E2E 71.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -154,8 +154,13 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W38 | An owner attaches a verified domain (an unverified one is not offered) and sees the newest finished scan's findings, most severe first, with the fix and allowlisted evidence; a planted secret never reaches the page; the domain belongs to one project; detaching hides the findings (`scanDomains.uat.spec.ts`) |
 | UAT-W39 | A viewer sees the findings and the attached domain but no Attach or Detach, never sees an unattached domain, and replayed owner forms are refused |
 | UAT-W40 | Another workspace's project is a 404 on the Security scan tab and its settings; my own project shows nothing of its domain |
+| UAT-W45 | A project added during the trial gets its own subscription that ends the trial with the workspace; its plan page shows "Free trial" and the first charge; workspace billing lists it with the total (`projectBilling.uat.spec.ts`, decision 041) |
+| UAT-W46 | A project added after the trial is billed from that day (no `trial_end`, active, an invoice), and its plan page shows the next charge and the invoice |
+| UAT-W47 | Removing a project (the warning says so) cancels its subscription at the period end and keeps the row; workspace billing shows when it ends; adding the project back resumes the same subscription with no second charge |
+| UAT-W48 | A project Viewer sees the plan and status but no portal button and no invoices; a replayed owner portal form is refused and opens no portal session |
+| UAT-W49 | The owner opens the Billing Portal from the plan page; the portal returns to that page |
 
-### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
+### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
 Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the real Stripe SDK.
 
@@ -163,18 +168,19 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | --- | --- |
 | UAT-B1 | A new workspace opens nothing but billing: overview, projects and the OAuth callback all go to billing |
 | UAT-B2 | The terms must be ticked (checked on the server); our page and Checkout both state the hold, trial and prices |
-| UAT-B3 | A good card starts a 7-day trial at one Starter seat, the $1 hold is released, the workspace opens |
+| UAT-B3 | A good card starts the workspace's 7-day trial with no subscription (decision 041), becomes the customer's default card, the $1 hold is released, the workspace opens |
 | UAT-B4 | A card whose bank skips the CVC check passes |
 | UAT-B5 | A prepaid card is refused; no trial; no hold left; the workspace stays closed |
 | UAT-B6 | A failed CVC is refused, the same way |
 | UAT-B7 | Giving up after a decline adds no card |
-| UAT-B8 | The webhook alone starts the trial; a replayed event changes nothing |
+| UAT-B8 | The webhook alone validates the card and starts the trial; a replayed event changes nothing; one customer |
 | UAT-B9 | A webhook without Stripe's signature gets 400 |
-| UAT-B10 | A canceled subscription closes the workspace again |
+| UAT-B10 | A watched project's canceled subscription closes the workspace again; the next card gets no second trial |
 | UAT-B11 | A member cannot add the card and is told to ask an owner |
-| UAT-B12 | Each project shows its tier and 30-day requests; a busy project bills at Pro without proration; above 10M shows Enterprise |
+| UAT-B12 | Each project bills on its own subscription at its tier, sharing the trial; a tier change swaps the price without proration; above 10M shows Enterprise |
 | UAT-B13 | A staff owner (exempt domain) opens a workspace with no card and no Stripe calls; the workspace needs a card once a second owner joins (decision 029) |
 | UAT-B14 | A staff admin in a customer's workspace does not make it free (decision 029) |
+| UAT-B15 | A signed `customer.subscription.created` event for a project subscription is processed once; its replay is a duplicate (`projectBilling.uat.spec.ts`) |
 
 ### Manual (needs a live service)
 
@@ -318,6 +324,25 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Each owner gets one notice (#43) | Recipients not deduplicated; separately, the journal ignored | 1 Postgres test; 2 unit tests fail |
 | Forms return only to known pages (#43) | `parseBack` returns its input | 1 web unit test fails |
 | `data` messages reach the data job (#43) | The consumer never parses them | 1 workerd test fails |
+| A seat subscription converts at its period end (#99) | The planner anchors at "now + 2 hours" instead of the period end | 4 tests fail (unit and Postgres) |
+| The conversion skips exempt workspaces (#99) | The exempt check removed | 2 tests fail |
+| The conversion skips staff workspaces not yet granted (#99) | `exemptEligible` always false | 1 Postgres test fails |
+| A dry run changes nothing (#99) | `convertSubscriptions` applies without `--apply` | 1 Postgres test fails |
+| A repeated conversion keeps what exists (#99) | The planner ignores existing project subscriptions | 1 unit test fails (the fake's 24-hour key memory hides it in Postgres, as Stripe would within a day) |
+| A converted seat subscription is never charged again (#99) | `syncSeats` drops its model check | 1 Postgres test fails |
+| Paying counts project subscriptions (#99) | `payingAccount` ignores the per-project model | 2 tests fail |
+| A removed project cancels at the period end (#99) | The reconcile plan drops its cancels | 3 tests fail |
+| A re-added project resumes its subscription (#99) | The reconcile plan never relinks | 2 tests fail |
+| Projects share the workspace trial (#99) | `trialEndForNewProject` returns no trial | 4 tests fail |
+| Webhooks route project subscriptions (#99) | `refreshSubscription` skips the project branch | 4 Postgres tests fail |
+| Closing cancels every project subscription (#99) | The close cancels none | 1 Postgres test fails |
+| A closing workspace is not reconciled (#99) | `reconcileProjects` drops its closure check | 1 Postgres test fails |
+| A blocked workspace waits for a new card (#99) | `reconcileProjects` drops its blocked check | 1 Postgres test fails |
+| Project subscriptions follow project roles (#99) | The migration leaves out `project_access` | 4 Postgres tests fail (people, isolation, RLS) |
+| Members cannot write subscription rows (#99) | `subscription_update` allows everyone | 1 Postgres test fails |
+| Nobody deletes payment history (#99) | The migration grants DELETE | 2 Postgres tests fail |
+| A Viewer cannot open the portal (#99) | `canManageBilling` always true; separately, the portal action skips its role check | UAT-W48 fails each time |
+| The #99 migration keeps the old code working | — (a check, not a mutation): `develop` @ 345fa77's unchanged suites on the new schema | Core 738 of 740 (the 2 are the table-list check and the purge test's "every table has rows"), web 157, poller 15, E2E 65 of 65 |
 | The production migration keeps the old code working (#43) | — (a check, not a mutation): `develop` @ c366a6d's unchanged suites on the new schema | Core 662 of 663 (the 1 is the table-list check), web 137, poller 12, E2E 55 of 55 |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.
