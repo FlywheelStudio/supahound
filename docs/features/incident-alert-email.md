@@ -4,6 +4,9 @@ Issue #16. Decisions 014 and 030.
 
 ## What it does
 
+Since #24 (decision 036) the recipients are the project's people: workspace owners and admins,
+and everyone with a role on the project.
+
 When an incident opens or escalates, every member of the workspace gets an HTML email (with a
 plain-text part). The email shows:
 

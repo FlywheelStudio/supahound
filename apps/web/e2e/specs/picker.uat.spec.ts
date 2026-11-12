@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { adminQuery, managementCalls, pollAttack, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
+import { addViewer, adminQuery, managementCalls, pollAttack, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
 import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // UAT for the project picker (issue #9): connect → pick → watched, members, removal, Supabase errors.
@@ -81,7 +81,7 @@ test.describe("UAT: choose the projects Supahound watches", () => {
     const member = await browser.newPage();
     const memberEmail = uniqueEmail("w13-member");
     await signIn(member, memberEmail);
-    await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, await userIdFor(memberEmail)]);
+    await addViewer(tenant, await userIdFor(memberEmail));
     const callsBefore = await managementCalls(token);
 
     await member.goto(`/w/${tenant}/projects?remove=${shopId}`);

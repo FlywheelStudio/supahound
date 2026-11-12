@@ -124,19 +124,22 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W10 | The magic-link form gives the same answer for a known and an unknown address |
 | UAT-W11 | The owner picks a project; it shows "waiting for first poll"; inactive projects cannot be picked |
 | UAT-W12 | A forged pick adds only running projects Supabase lists, with Supabase's name, each once |
-| UAT-W13 | A member sees watched projects, gets no picker or Remove, triggers no Supabase call; a replayed owner form is refused |
+| UAT-W13 | A viewer sees watched projects, gets no picker or Remove, triggers no Supabase call; a replayed owner form is refused |
 | UAT-W14 | Remove needs the exact name; it deletes the project and its incidents and keeps its audit rows |
 | UAT-W15 | A revoked Supabase grant shows "Reconnect Supabase", not a 500 |
 | UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 | UAT-W17 | The owner's address is on file; every incident emails by default; the owner raises the threshold (`alerts.uat.spec.ts`) |
-| UAT-W18 | A member sees the threshold but cannot change it, even by replaying the owner's form; visiting records the member's address |
+| UAT-W18 | A viewer sees the threshold but cannot change it, even by replaying the owner's form; visiting records the member's address |
 | UAT-W19 | The owner opens a project from the overview and switches projects from the dropdown (`nav.uat.spec.ts`) |
-| UAT-W20 | Project settings: General with Remove, Notifications with SMS Coming soon, Plan, People; Soon badges |
+| UAT-W20 | Project settings: General with Remove, Notifications with SMS Coming soon, Plan, People (live since #24); Soon badge on Security scan |
 | UAT-W21 | A project ID from another workspace, a made-up ID and a malformed ID are each a 404 |
-| UAT-W22 | A member opens every project page but gets no Add project, no Remove and no alert form |
+| UAT-W22 | A viewer opens every project page but gets no Add project, no Remove and no alert form |
 | UAT-W23 | The incident list shows 30 days of open and resolved incidents, newest first, in keyset pages; a 31-day-old resolved one is gone (`incidents.uat.spec.ts`) |
 | UAT-W24 | The incident detail shows the actor alias, signals, counts, time range, summary and suggested fix; no raw IDs; a summary from counts when none is stored |
 | UAT-W25 | Another workspace's, another project's, an old resolved, a made-up or a malformed incident, and a malformed cursor, are each a 404; so is my incident for another workspace's user |
+| UAT-W26 | An owner invites a colleague by email; signed out, they open the link, sign in, accept, and see only that project; the other project is a 404; the link works once (`people.uat.spec.ts`) |
+| UAT-W27 | A viewer gets no invite form and a replayed owner form is refused; an admin cannot invite an Owner, even by a forged form |
+| UAT-W28 | An invite is bound to its address; a resend kills the old link; an expired or canceled invite is refused; a non-member gets a 404 |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 

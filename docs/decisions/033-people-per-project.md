@@ -17,7 +17,8 @@ on 2026-11-11 to give each project its own people and permissions, as PushFire a
 
 ## Status
 
-Accepted; not built. The People page is a Coming soon placeholder until #24 ships.
+Accepted; built on 2026-11-12 (#24). How it works: decision 036 and
+[features/project-people.md](../features/project-people.md).
 
 ## Answered by Erik on 2026-11-11
 

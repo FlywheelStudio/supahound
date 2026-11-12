@@ -25,6 +25,11 @@ export function safeNext(next: string | null | undefined, fallback = "/app"): st
   return next;
 }
 
+// Where to go after a magic-link sign-in. The login form stores it here (httpOnly, 1 hour) and
+// /auth/confirm reads and clears it, so an invite link survives the round trip through email.
+export const NEXT_COOKIE = "supahound_next";
+export const NEXT_COOKIE_MAX_AGE = 3600;
+
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }

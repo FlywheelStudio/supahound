@@ -15,6 +15,7 @@ const TABLES = [
   "memberships", "oauth_states",
   "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
   "billing_accounts", "stripe_events", "project_usage",
+  "project_members", "project_invites",
 ] as const;
 
 interface Seeded {
@@ -48,6 +49,15 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       await repo.saveNetworks(tx, project, [16509]);
       await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
       await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
+      // People per project (decision 036): a viewer and an open invite.
+      const viewer = randomUUID();
+      await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, viewer]);
+      await tx.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')", [tenant, project, viewer]);
+      await tx.query(
+        `INSERT INTO supahound.project_invites (tenant_id, project_id, email, role, token_hash, invited_by, expires_at)
+         VALUES ($1, $2, $3, 'editor', $4, $5, now() + interval '7 days')`,
+        [tenant, project, `invitee@${name.toLowerCase()}.test`, randomUUID().replace(/-/g, "").padEnd(64, "0"), viewer],
+      );
       await repo.createOAuthState(tx, {
         userId: randomUUID(), stateHash: randomUUID().replace(/-/g, "").padEnd(64, "0"),
         codeVerifier: "v".repeat(64), expiresAt: new Date(Date.now() + 600_000),

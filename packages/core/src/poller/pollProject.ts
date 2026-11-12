@@ -291,7 +291,7 @@ export async function sendPendingAlerts(scope: ProjectScope, deps: PollDeps): Pr
     const loaded = await withTenant(deps.app, scope.tenantId, async (tx) => {
       const project = await repo.getProject(tx, scope.projectId);
       if (!project) return null;
-      return { project, pending: await repo.pendingAlerts(tx, scope.projectId), recipients: await repo.alertRecipients(tx) };
+      return { project, pending: await repo.pendingAlerts(tx, scope.projectId), recipients: await repo.alertRecipients(tx, scope.projectId) };
     });
     if (!loaded || loaded.pending.length === 0) return 0;
 

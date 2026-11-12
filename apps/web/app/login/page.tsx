@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { redirect } from "next/navigation";
 import { mode } from "../../lib/billing";
 import { brandFrom } from "../../lib/brand";
+import { safeNext } from "../../lib/security";
 import { currentUser } from "../../lib/supabase";
 import { authCopy } from "../../lib/signup";
 import { sendMagicLink } from "./actions";
@@ -13,8 +14,8 @@ const ERRORS: Record<string, string> = {
 };
 
 export default async function Login({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  if (await currentUser()) redirect("/app");
   const params = await searchParams;
+  if (await currentUser()) redirect(safeNext(params.next));
   const error = params.error ? ERRORS[params.error] : undefined;
   const copy = authCopy(params, mode() === "stripe");
   const brand = brandFrom(env);
@@ -29,6 +30,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
         </p>
       ) : (
         <form action={sendMagicLink} className="flex flex-col gap-3">
+          {params.next && <input type="hidden" name="next" value={safeNext(params.next)} />}
           <label htmlFor="email" className="text-sm font-medium">Work email</label>
           <input id="email" name="email" type="email" required autoComplete="email"
             className="rounded-md border border-slate-300 px-3 py-2" placeholder="you@company.com" />

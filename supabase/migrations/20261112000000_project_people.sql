@@ -71,8 +71,10 @@ CREATE OR REPLACE FUNCTION supahound.current_workspace_role() RETURNS text
   WHERE m.tenant_id = supahound.current_tenant() AND m.user_id = supahound.current_user_id()
 $$;
 
--- The signed-in user's effective role on one project of the transaction's tenant, or NULL.
--- SECURITY INVOKER on purpose: it reads through the caller's RLS, so it never sees another tenant.
+-- The signed-in user's effective role on one project of the transaction's tenant, or NULL when
+-- the project is not in this tenant. SECURITY INVOKER on purpose: it reads through the caller's
+-- RLS, so it never sees another tenant. (In Supabase the tables' owner is not a superuser, and
+-- forced RLS gives it no policy, so a SECURITY DEFINER function would see nothing at all.)
 CREATE OR REPLACE FUNCTION supahound.project_role(p_project uuid) RETURNS text
   LANGUAGE sql STABLE SET search_path = '' AS $$
   SELECT CASE
@@ -81,6 +83,7 @@ CREATE OR REPLACE FUNCTION supahound.project_role(p_project uuid) RETURNS text
            WHEN w.role IS NOT NULL THEN pm.role
          END
   FROM (SELECT supahound.current_tenant() AS t, supahound.current_user_id() AS u) me
+  JOIN supahound.projects p ON p.tenant_id = me.t AND p.id = p_project
   LEFT JOIN supahound.memberships w ON w.tenant_id = me.t AND w.user_id = me.u
   LEFT JOIN supahound.project_members pm ON pm.tenant_id = me.t AND pm.project_id = p_project AND pm.user_id = me.u
 $$;

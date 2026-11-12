@@ -1,11 +1,10 @@
 import { isAlertLevel, type AlertLevel } from "@supahound/core/alerts/email";
-import type { Role } from "@supahound/core/db/user";
 import type { ProjectId, TenantId } from "@supahound/core/tenancy/scope";
 import { projectPath, workspacePath } from "./nav";
 
 // The per-project email alert threshold (issue #16, decision 030) as pure functions, so every
-// branch is testable. Owners and admins change it; the role is checked in the same transaction
-// as the write.
+// branch is testable. The project's owners, admins and editors change it (decision 036); the role
+// is checked in the same transaction as the write.
 
 export const ALERT_LEVEL_LABEL: Record<AlertLevel, string> = {
   low: "Every incident",
@@ -25,15 +24,15 @@ export function alertsPath(tenant: TenantId, project: ProjectId, notice: AlertNo
 }
 
 export interface AlertSettingDeps {
-  // Inside paidTenant: returns the member's role and, for owners and admins only, whether the
-  // project row was updated. Must not write for a member.
-  apply: (level: AlertLevel) => Promise<{ role: Role; updated: boolean }>;
+  // Inside the project transaction: whether the user's project role may change settings and, only
+  // then, whether the project row was updated. Must not write when not allowed.
+  apply: (level: AlertLevel) => Promise<{ allowed: boolean; updated: boolean }>;
 }
 
 export async function handleAlertSetting(tenant: TenantId, project: ProjectId, value: unknown, deps: AlertSettingDeps): Promise<string> {
   if (!isAlertLevel(value)) return alertsPath(tenant, project, "level");
-  const { role, updated } = await deps.apply(value);
-  if (role === "member") return alertsPath(tenant, project, "role");
+  const { allowed, updated } = await deps.apply(value);
+  if (!allowed) return alertsPath(tenant, project, "role");
   if (!updated) return alertsPath(tenant, project, "missing");
   return alertsPath(tenant, project, "saved", value);
 }

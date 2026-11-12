@@ -10,7 +10,7 @@ how a failed send is retried. Erik answered the first two on 2026-11-11.
 
 ## Decision
 
-1. **Recipients: every member of the workspace.** Each member gets their own email (no shared
+1. **Recipients: every member of the workspace** (amended by 036: the project's people only). Each member gets their own email (no shared
    `To:` line). The address comes only from the verified JWT (`getClaims()`), copied onto
    `memberships.email` when the workspace is created and when the member opens the workspace
    overview. The migration backfills existing members from `auth.users` on Supabase.

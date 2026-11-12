@@ -1,4 +1,6 @@
+import type { ProjectRole } from "@supahound/core/db/people";
 import type { Role } from "@supahound/core/db/user";
+import { canRemoveProject } from "./people";
 import { isPickable, ManagementApiError, PROJECT_REF, type SupabaseProject } from "@supahound/core/supabase/management";
 import { OAuthError } from "@supahound/core/supabase/oauth";
 import type { ConnectionId, TenantId } from "@supahound/core/tenancy/scope";
@@ -63,10 +65,16 @@ export async function handleWatch(tenant: TenantId, connection: ConnectionId, va
   return picksPath(tenant, "added", added.length);
 }
 
-// Remove needs the exact project name typed back (surrounding spaces ignored).
-export function removalOutcome(role: Role, project: { name: string } | null, typed: string): "removed" | "role" | "missing" | "mismatch" {
-  if (role === "member") return "role";
-  if (!project) return "missing";
+// Remove needs the exact project name typed back (surrounding spaces ignored). Allowed for the
+// project's Owner and for workspace owners and admins (decision 036). `project` carries the
+// user's project role; a project hidden from the user (no role) is null.
+export function removalOutcome(
+  role: Role,
+  project: { name: string; role: ProjectRole | null } | null,
+  typed: string,
+): "removed" | "role" | "missing" | "mismatch" {
+  if (!project) return role === "member" ? "role" : "missing";
+  if (!canRemoveProject(project.role, role)) return "role";
   if (typed.trim() !== project.name) return "mismatch";
   return "removed";
 }

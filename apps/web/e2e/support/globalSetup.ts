@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,6 +84,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   config.secrets = { required: [...(config.secrets?.required ?? []), "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"] };
   writeFileSync(e2eConfig, JSON.stringify(config));
   let output = "";
+  // The wrangler log, as a file the specs can read: Miniflare logs each email the Worker sends,
+  // with the path of its text body (support/mail.ts reads invite links from it).
+  const logFile = join(dir, "wrangler.log");
+  writeFileSync(logFile, "");
   const wrangler = spawn(
     "pnpm",
     ["exec", "wrangler", "dev", "--config", "dist/server/wrangler.e2e.json", "--ip", "127.0.0.1", "--port", String(APP_PORT),
@@ -98,8 +102,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  wrangler.stdout?.on("data", (d) => (output += String(d)));
-  wrangler.stderr?.on("data", (d) => (output += String(d)));
+  const capture = (d: unknown) => {
+    output += String(d);
+    appendFileSync(logFile, String(d));
+  };
+  wrangler.stdout?.on("data", capture);
+  wrangler.stderr?.on("data", capture);
 
   try {
     await waitFor(`${APP_URL}/login`, wrangler, () => output);
@@ -119,6 +127,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env.E2E_ADMIN_DB_URL = pg.adminUrl;
   process.env.E2E_APP_DB_URL = pg.appUrl;
   process.env.E2E_MASTER_KEYS = masterKeys;
+  process.env.E2E_WRANGLER_LOG = logFile;
   if (process.env.E2E_DEBUG) process.stdout.write(output);
 
   return async () => {
