@@ -18,6 +18,7 @@ const TABLES = [
   "billing_accounts", "stripe_events", "project_usage",
   "project_members", "project_invites",
   "posture_scans", "posture_findings",
+  "scan_domain_links",
 ] as const;
 
 interface Seeded {
@@ -89,6 +90,8 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
         [tenant, scanRowId],
       );
       await tx.query("INSERT INTO supahound.scan_jobs (tenant_id, scan_id, state) VALUES ($1, $2, 'queued')", [tenant, scanRowId]);
+      // Scan domains per project (decision 040): the verified domain belongs to the project.
+      await tx.query("INSERT INTO supahound.scan_domain_links (tenant_id, domain_id, project_id) VALUES ($1, $2, $3)", [tenant, domainRowId, project]);
       // Billing rows (decision 028): a trialing subscription and one processed Stripe event.
       await billing.saveSubscription(tx, {
         id: `sub_${slug}1`, customerId: `cus_${slug}1`, status: "trialing", seats: { starter: 1, pro: 0 },
