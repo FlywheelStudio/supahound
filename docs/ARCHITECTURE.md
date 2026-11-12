@@ -1,6 +1,6 @@
 # Architecture
 
-Updated 2026-11-09.
+Updated 2026-11-12.
 
 Supahound reads a customer's Supabase edge logs through read-only OAuth scopes. It runs
 deterministic detectors on them every minute and groups findings into incidents per actor. A model
@@ -33,7 +33,7 @@ flowchart LR
   end
 
   CONS -->|OAuth token, analytics:read| LOGS
-  CONS -.->|database:read, planned| CAT
+  CONS -->|database:read| CAT
   CONS -->|structured features only| GW
   CRON -->|scheduler role, IDs only| PG
   CONS -->|app role, withTenant| PG
@@ -73,11 +73,15 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    **Ownership.** On the first poll, then every 24 hours (1 hour after a failure), the poller audits
    and runs `POLICIES_SQL` on the read-only SQL endpoint and stores the owner columns (decision 024).
    A failed read keeps the last good map and never fails the poll.
+   **Posture.** On the first poll, daily, 1 hour after a failure and on Scan now, the poller audits
+   and runs `POSTURE_SQL` (catalog only) and calls the Security Advisor, in parallel. Each source
+   that succeeds replaces its findings (decision 038). It never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
+   A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
@@ -107,6 +111,10 @@ The web app adds a seventh: membership is checked in the same transaction that r
 non-member gets the same 404 as a missing workspace (E2E UAT-W7). An eighth works inside the tenant
 (decision 036): restrictive RLS hides a project's rows from a signed-in user without a role on that
 project, and refuses settings and people writes the role does not allow (`people.test.ts`, UAT-W26).
+Data controls (decision 037) add restrictive policies too: only a workspace owner closes or reopens,
+only owners and admins change or delete a connection, and no transaction deletes a tenant row
+(`dataControls.test.ts`). A purge is checked against every tenant table in the catalog: the other
+tenant's row counts stay the same.
 
 ## Security of the monitor
 
@@ -139,7 +147,20 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `incidents` | Grouped findings per actor; severity, hits, summary and its source |
 | `service_role_networks` | Learned server ASNs per project (decision 003) |
 | `oauth_states` | Hashed OAuth state + PKCE verifier, 10-minute TTL, single use |
+| `posture_scans` | One per project: Scan now request, last attempt, status and time per source (decision 038) |
+| `posture_findings` | Latest posture findings per source: check, severity, object, structured evidence |
+| `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
+| `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
 | `audit_log` | Every query and model call, append-only |
+| `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |
+
+Data controls (decision 037): once a day at 00:40 UTC the poller enqueues a `data` message per
+tenant. For a workspace that does not pay, the job deletes incidents, findings and poll runs past
+the 30-day window, the history of a Supabase connection disconnected 30 days ago, and the logs and
+history of a workspace closed and unpaid for 30 days. It never deletes the workspace record, its
+billing and payment history or the audit log, and deletes nothing while a workspace pays.
+`supahound_notifier` is a third NOLOGIN role: it reads owners' addresses across tenants for the
+subprocessor notice, and nothing else.
 
 ## Decisions
 

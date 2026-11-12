@@ -1,14 +1,19 @@
 import { needsEnterprise, PRICE_LABEL } from "@supahound/core/billing/policy";
+import { getPostureScan, listPostureFindings } from "@supahound/core/db/posture";
 import { listOpenIncidents } from "@supahound/core/db/repo";
+import { countBySeverity } from "@supahound/core/posture/findings";
+import { checkTitle } from "@supahound/core/posture/fix";
 import Link from "../../../../../components/NavLink";
 import { Notice, SeverityBadge, Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
 import { crossTenantNote } from "../../../../../lib/coverage";
 import { incidentPath, projectPath, utc } from "../../../../../lib/nav";
 import { ROLE_LABEL } from "../../../../../lib/people";
+import { countsText, postureState, sourceNotes, stateText } from "../../../../../lib/posture";
 import { loadProjectPage } from "../../../../../lib/projectPage";
 
-// The project dashboard (issue #98): status, usage and plan, detector coverage, open incidents.
+// The project dashboard (issue #98): status, usage and plan, detector coverage, posture (#11),
+// open incidents.
 
 function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
@@ -27,7 +32,12 @@ export default async function ProjectDashboard({
   params: Promise<{ tenantId: string; projectId: string }>;
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const d = await loadProjectPage(params, (tx, p) => listOpenIncidents(tx, 5, p.id));
+  const d = await loadProjectPage(params, async (tx, p) => ({
+    incidents: await listOpenIncidents(tx, 5, p.id),
+    scan: await getPostureScan(tx, p.id),
+    posture: await listPostureFindings(tx, p.id),
+  }));
+  const posture = postureState(d.extra.scan);
   const joined = (await searchParams).joined === "1";
   const { tenant, project: p } = d;
   const billingOn = mode() !== "off";
@@ -67,16 +77,41 @@ export default async function ProjectDashboard({
         </p>
       )}
 
+      <section aria-labelledby="posture-heading" className="mb-8">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 id="posture-heading" className="font-semibold">Posture</h2>
+          <Link href={projectPath(tenant, p.id, "posture")} className="text-sm text-slate-600 hover:text-slate-950">All posture findings</Link>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-white">
+          <p className={`px-4 py-3 text-sm ${posture.kind === "unable" ? "text-amber-900" : "text-slate-700"}`}>
+            {stateText(posture)}
+            {posture.kind === "scanned" && ` ${countsText(countBySeverity(d.extra.posture))}.`}
+          </p>
+          {sourceNotes(d.extra.scan).map((n) => <p key={n} className="px-4 pb-3 text-sm text-amber-900">{n}</p>)}
+          {d.extra.posture.length > 0 && (
+            <ul className="divide-y divide-slate-200 border-t border-slate-200">
+              {d.extra.posture.slice(0, 3).map((f) => (
+                <li key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <SeverityBadge severity={f.severity} />
+                  <span className="text-sm font-medium">{checkTitle(f)}</span>
+                  <span className="font-mono text-sm text-slate-600">{f.schema && f.object ? `${f.schema}.${f.object}` : f.object ?? ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-semibold">Open incidents</h2>
           <Link href={projectPath(tenant, p.id, "incidents")} className="text-sm text-slate-600 hover:text-slate-950">All incidents</Link>
         </div>
-        {d.extra.length === 0 ? (
+        {d.extra.incidents.length === 0 ? (
           <p className="text-slate-600">No open incidents.</p>
         ) : (
           <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-            {d.extra.map((i) => (
+            {d.extra.incidents.map((i) => (
               <li key={i.id}>
                 <Link href={incidentPath(tenant, p.id, i.id)} className="block px-4 py-3 hover:bg-slate-50">
                   <span className="flex flex-wrap items-center gap-3">

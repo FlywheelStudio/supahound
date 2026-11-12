@@ -10,6 +10,7 @@ describe("project navigation (issue #98)", () => {
   it("puts the project in the URL for every project page", () => {
     expect(projectPath(T, P)).toBe(base);
     expect(projectPath(T, P, "incidents")).toBe(`${base}/incidents`);
+    expect(projectPath(T, P, "posture")).toBe(`${base}/posture`);
     expect(projectPath(T, P, "findings")).toBe(`${base}/findings`);
     expect(projectPath(T, P, "general")).toBe(`${base}/settings`);
     expect(projectPath(T, P, "notifications")).toBe(`${base}/settings/notifications`);
@@ -20,13 +21,13 @@ describe("project navigation (issue #98)", () => {
   it("lists the project pages in order, with settings in their own group", () => {
     const [main, settings] = projectNav(T, P, "dashboard");
     expect(main!.label).toBeNull();
-    expect(main!.items.map((i) => i.label)).toEqual(["Dashboard", "Incidents", "Security scan"]);
+    expect(main!.items.map((i) => i.label)).toEqual(["Dashboard", "Incidents", "Posture", "Security scan"]);
     expect(settings!.label).toBe("Settings");
     expect(settings!.items.map((i) => i.label)).toEqual(["General", "Notifications", "Plan & billing", "People"]);
   });
 
   it("marks exactly one item current", () => {
-    for (const page of ["dashboard", "incidents", "findings", "general", "notifications", "plan", "people"] as const) {
+    for (const page of ["dashboard", "incidents", "posture", "findings", "general", "notifications", "plan", "people"] as const) {
       const current = projectNav(T, P, page).flatMap((g) => g.items).filter((i) => i.current);
       expect(current.map((i) => i.href)).toEqual([projectPath(T, P, page)]);
     }
@@ -34,14 +35,15 @@ describe("project navigation (issue #98)", () => {
 
   it("badges only the placeholder pages as Soon", () => {
     const soon = projectNav(T, P, "dashboard").flatMap((g) => g.items).filter((i) => i.soon).map((i) => i.label);
-    // People shipped with issue #24.
-    expect(soon).toEqual(["Security scan"]);
-    expect([...SOON].sort()).toEqual(["findings"]);
+    // People shipped with issue #24, Security scan with issue #100.
+    expect(soon).toEqual([]);
+    expect([...SOON]).toEqual([]);
   });
 
   it("shows workspace billing only when billing is on", () => {
-    expect(workspaceNav(T, "overview", true).items.map((i) => i.label)).toEqual(["Overview", "Projects", "Billing"]);
-    expect(workspaceNav(T, "overview", false).items.map((i) => i.label)).toEqual(["Overview", "Projects"]);
+    expect(workspaceNav(T, "overview", true).items.map((i) => i.label)).toEqual(["Overview", "Projects", "Billing", "Settings"]);
+    expect(workspaceNav(T, "overview", false).items.map((i) => i.label)).toEqual(["Overview", "Projects", "Settings"]);
+    expect(workspaceNav(T, "settings", true).items.find((i) => i.current)?.href).toBe(`/w/${T}/settings`);
     expect(workspaceNav(T, null, true).items.some((i) => i.current)).toBe(false);
     expect(workspacePath(T)).toBe(`/w/${T}`);
     expect(workspacePath(T, "billing")).toBe(`/w/${T}/billing`);

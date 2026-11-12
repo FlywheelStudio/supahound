@@ -22,6 +22,9 @@ export function templateExplanation(f: IncidentFeatures): Explanation {
     } else {
       impact = "Row-level security returned no rows, so this looks like a blocked probe.";
     }
+    if (f.signals.includes("posture_exposed")) {
+      steps.unshift(`Fix the posture finding on ${list(c.tables)} first: the project's Posture page has the SQL.`);
+    }
     steps.push("Review this user's other requests in the incident timeline.");
   }
 

@@ -218,13 +218,17 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
         return ok({ object: "list", data, has_more: false, url: "/v1/subscriptions" });
       }
       if (req.method === "POST" && path === "/v1/subscriptions") {
-        const trialEnd = Math.floor(Date.now() / 1000) + Number(body.trial_period_days) * 86_400;
+        // No trial_period_days (decision 037: one trial ever): active at once, a 30-day period.
+        const trial = body.trial_period_days !== undefined;
+        const now = Math.floor(Date.now() / 1000);
+        const trialEnd = trial ? now + Number(body.trial_period_days) * 86_400 : null;
+        const periodEnd = trialEnd ?? now + 30 * 86_400;
         const sub: Obj = {
-          id: id("sub"), object: "subscription", customer: body.customer, status: "trialing", trial_end: trialEnd,
+          id: id("sub"), object: "subscription", customer: body.customer, status: trial ? "trialing" : "active", trial_end: trialEnd,
           cancel_at_period_end: false, metadata: body.metadata ?? {}, default_payment_method: body.default_payment_method,
-          trial_period_days: Number(body.trial_period_days),
+          trial_period_days: trial ? Number(body.trial_period_days) : null,
           items: { object: "list", data: (body.items as Obj[]).map((item) => ({
-            id: id("si"), quantity: Number(item.quantity), current_period_end: trialEnd, price: { id: item.price },
+            id: id("si"), quantity: Number(item.quantity), current_period_end: periodEnd, price: { id: item.price },
           })) },
         };
         subscriptions.set(String(sub.id), sub);
@@ -241,6 +245,13 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
           else data.push({ id: id("si"), quantity: Number(change.quantity), price: { id: change.price } });
         }
         sub.last_proration_behavior = body.proration_behavior;
+        // Closing and reopening a workspace (decision 037). Like Stripe, it also sends the event.
+        if (body.cancel_at_period_end !== undefined) {
+          sub.cancel_at_period_end = body.cancel_at_period_end === "true";
+          ok(sub);
+          void deliver("customer.subscription.updated", { ...sub });
+          return;
+        }
         return ok(sub);
       }
       const subGet = /^\/v1\/subscriptions\/(sub_[a-z0-9]+)$/.exec(path);

@@ -1,6 +1,7 @@
 import { accessFor, accessForAccount, isExemptEmail, needsEnterprise, PRICE_LABEL, REJECTION_TEXT, TRIAL_DAYS } from "@supahound/core/billing/policy";
 import { termsText } from "@supahound/core/billing/stripeMap";
-import { getBilling, grantExemption, projectTiers } from "@supahound/core/db/billing";
+import { getBilling, grantExemption, projectTiers, trialAvailable } from "@supahound/core/db/billing";
+import { getClosure, isClosedNow } from "@supahound/core/db/closure";
 import { listProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
@@ -51,24 +52,28 @@ export default async function Billing({
   const staff = isExemptEmail(user.email, exemptDomains());
   const data = await withPool((pool) =>
     withTenantForUser(pool, user.id, tenant, async (tx, role) => {
+      // A closed workspace has no billing page; its closed page explains what happens (decision 037).
+      if (isClosedNow(await getClosure(tx), new Date())) return { closed: true as const };
       let billing = await getBilling(tx);
       if (!billing.exempt && staff && role === "owner") {
         const blocked = accessForAccount(billing) === "blocked";
         if (await grantExemption(tx, user.id, new Date())) {
-          if (blocked) return { granted: true as const };
+          if (blocked) return { closed: false as const, granted: true as const };
           billing = await getBilling(tx);
         }
       }
       const projects = await listProjects(tx);
       const names = new Map(projects.map((p) => [p.id, p.name]));
       const tiers = (await projectTiers(tx)).map((t) => ({ ...t, name: names.get(t.id) ?? "Project" }));
-      return { granted: false as const, role, billing, tiers, projects };
+      return { closed: false as const, granted: false as const, role, billing, tiers, projects, trial: await trialAvailable(tx, user.id) };
     }),
   ).catch((err: unknown) => {
     if (err instanceof NotAMemberError) notFound();
     throw err;
   });
 
+  if (data.closed) redirect(`/w/${tenant}/closed`);
+  const trial = "trial" in data ? data.trial : true;
   // A new staff workspace: straight on to the overview, after the transaction committed.
   if (data.granted) redirect(`/w/${tenant}`);
 
@@ -160,12 +165,14 @@ export default async function Billing({
         </p>
       ) : (
         <section className="rounded-md border border-slate-200 bg-white p-6">
-          <h2 className="text-lg font-semibold">Add a card to start your {TRIAL_DAYS}-day free trial</h2>
+          <h2 className="text-lg font-semibold">
+            {trial ? `Add a card to start your ${TRIAL_DAYS}-day free trial` : "Add a card to start your subscription"}
+          </h2>
           <p className="mt-2 text-sm text-slate-600">
             Every Supahound workspace needs a card that your bank confirms. Stripe handles the card; Supahound never sees
             the number.
           </p>
-          <p id="billing-terms" className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-slate-700">{termsText()}</p>
+          <p id="billing-terms" className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-slate-700">{termsText(trial)}</p>
           <form action={startCheckoutAction} className="mt-6 flex flex-col gap-4">
             <input type="hidden" name="tenantId" value={tenant} />
             <label className="flex gap-3 text-sm">
@@ -173,13 +180,18 @@ export default async function Billing({
               <span>
                 I agree to the{" "}
                 {brand.termsUrl ? <a href={brand.termsUrl} className="underline">Terms</a> : "Terms"} and authorize Supahound to
-                place a $1 hold now and to charge my card each month after the trial, as described above, until I cancel.
+                place a $1 hold now and to charge my card each month{trial ? " after the trial" : ", starting today"}, as described above, until I cancel.
               </span>
             </label>
             <button type="submit" className="rounded-md bg-slate-950 px-4 py-2 font-medium text-white hover:bg-slate-800">
-              Add card and start trial
+              {trial ? "Add card and start trial" : "Add card and subscribe"}
             </button>
           </form>
+          {canManage && (
+            <p className="mt-6 text-sm text-slate-600">
+              To disconnect Supabase or close this workspace instead, open <a href={`/w/${tenant}/settings`} className="underline">Workspace settings</a>.
+            </p>
+          )}
         </section>
       )}
     </>

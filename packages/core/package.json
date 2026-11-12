@@ -12,6 +12,7 @@
     "discover-keys": "tsx src/cli.ts discover-keys",
     "master-key": "tsx src/cli.ts master-key",
     "print-sql": "tsx src/cli.ts print-sql",
+    "subprocessor-notice": "tsx src/cli.ts subprocessor-notice",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

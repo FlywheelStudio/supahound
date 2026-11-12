@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import * as repo from "@supahound/core/db/repo";
 import { withTenant } from "@supahound/core/db/tenant";
 import { templateExplanation } from "@supahound/core/explainer/template";
-import { SqlQueryError } from "@supahound/core/ownership/client";
+import { queryReadOnly, SqlQueryError } from "@supahound/core/ownership/client";
+import { querySecurityAdvisor } from "@supahound/core/posture/advisor";
 import { ownershipFromColumns } from "@supahound/core/ownership/ownership";
 import { pollProject } from "@supahound/core/poller/pollProject";
 import { projectScope, tenantId } from "@supahound/core/tenancy/scope";
@@ -106,6 +107,20 @@ export async function seedConnection(tenant: string, token: string): Promise<str
   }
 }
 
+// A connection holding OAuth credentials with a refresh token, as the callback stores them, so
+// Disconnect has a grant to revoke (decision 037).
+export async function seedOAuthConnection(tenant: string, accessToken: string, refreshToken: string): Promise<string> {
+  return seedConnection(tenant, JSON.stringify({ accessToken, refreshToken, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+}
+
+export async function revokeCalls(): Promise<{ client_id: string; refresh_token: string }[]> {
+  return (await (await fetch(`${process.env.E2E_MGMT_URL}/__test/revokes`)).json()) as { client_id: string; refresh_token: string }[];
+}
+
+export async function refuseRevoke(refreshToken: string): Promise<void> {
+  await fetch(`${process.env.E2E_MGMT_URL}/__test/refuse-revoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: refreshToken }) });
+}
+
 // What the fake Management API answers for this token (support/fakeManagement.ts).
 export async function setSupabaseProjects(token: string, projects: { ref: string; name: string; status?: string }[], status = 200): Promise<void> {
   const res = await fetch(`${process.env.E2E_MGMT_URL}/__test/projects`, {
@@ -134,4 +149,37 @@ export async function addViewer(tenant: string, userId: string): Promise<void> {
      SELECT tenant_id, id, $2, 'viewer' FROM supahound.projects WHERE tenant_id = $1`,
     [tenant, userId],
   );
+}
+
+// Posture scan (issue #11). What the fake Management API answers for this ref: catalog rows as
+// POSTURE_SQL returns them and Advisor lints, or an HTTP status to fail with.
+export async function setPosture(ref: string, catalog: Record<string, unknown>[] | number, advisor: Record<string, unknown>[] | number): Promise<void> {
+  const res = await fetch(`${process.env.E2E_MGMT_URL}/__test/posture`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ref, catalog, advisor }),
+  });
+  if (!res.ok) throw new Error(`fake management: ${res.status}`);
+}
+
+// One poll of an existing project with the posture scan on, through core's real read-only SQL and
+// Security Advisor clients pointed at the fake Management API. Logs are empty; ownership is read
+// from no policies.
+export async function pollWithPosture(tenant: string, project: string, now = new Date()): Promise<void> {
+  const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 2 });
+  const vault = TokenVault.fromEnv({ SUPAHOUND_MASTER_KEYS: process.env.E2E_MASTER_KEYS });
+  const baseUrl = process.env.E2E_MGMT_URL;
+  try {
+    const outcome = await pollProject(projectScope(tenantId(tenant), project), {
+      app, vault, now: () => now,
+      queryLogs: async () => [],
+      queryPolicies: async () => [],
+      posture: {
+        querySql: (q, o) => queryReadOnly(q, { ...o, baseUrl }),
+        queryAdvisor: (ref, o) => querySecurityAdvisor(ref, { ...o, baseUrl }),
+      },
+      explain: async (f) => ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
+    });
+    if (outcome.status !== "ok") throw new Error(`Poll failed: ${JSON.stringify(outcome)}`);
+  } finally {
+    await app.end();
+  }
 }

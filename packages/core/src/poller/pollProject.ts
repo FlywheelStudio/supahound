@@ -14,11 +14,18 @@ import { normalizeRow } from "../logs/event.js";
 import { edgeRollupSql } from "../logs/sql.js";
 import { parsePolicyRows, SqlQueryError, type ReadOnlyQuery } from "../ownership/client.js";
 import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap } from "../ownership/ownership.js";
+import { POSTURE_SQL } from "../config/posture.js";
+import * as postureRepo from "../db/posture.js";
+import { AdvisorApiError, advisorFindings, type AdvisorLint } from "../posture/advisor.js";
+import { CatalogError, catalogFindings, parseCatalogRows } from "../posture/catalog.js";
+import { raiseForPosture } from "../posture/findings.js";
+import type { SourceStatus } from "../posture/types.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
 import type { ProjectScope } from "../tenancy/scope.js";
+import { markRevoked, sendDisconnectEmails } from "../datacontrols/flow.js";
 import { accessTokenFor } from "../supabase/credentials.js";
-import { OAuthError, type OAuthClient } from "../supabase/oauth.js";
+import { isRevokedGrant, OAuthError, type OAuthClient } from "../supabase/oauth.js";
 import type { TokenVault } from "../vault/vault.js";
 
 // One poll of one project, entirely inside one tenant's scope. Transactions stay short and never
@@ -40,6 +47,16 @@ export interface PollDeps {
   env?: EnvVars;
   // Incident alert email (decision 030). Null or absent: no email is sent and alerts stay pending.
   alerts?: AlertDeps | null;
+  // Posture scan (issue #11, decision 038). Null or absent: no scan runs; stored findings still
+  // raise detections.
+  posture?: PostureDeps | null;
+}
+
+export interface PostureDeps {
+  // The read-only SQL endpoint, for POSTURE_SQL only (the same client as queryPolicies).
+  querySql: (query: ReadOnlyQuery, options: { token: string }) => Promise<Record<string, unknown>[]>;
+  // GET /v1/projects/{ref}/advisors/security.
+  queryAdvisor: (projectRef: string, options: { token: string }) => Promise<AdvisorLint[]>;
 }
 
 export interface OutgoingEmail extends RenderedEmail {
@@ -73,6 +90,9 @@ export const STALE_RUN_SECONDS = 600;
 export const OWNERSHIP_REFRESH_SECONDS = 24 * 60 * 60;
 // After a failed read, the next attempt waits this long instead of running on every poll.
 export const OWNERSHIP_RETRY_SECONDS = 60 * 60;
+// The posture scan (decision 038): daily, 1 hour after a failed catalog read, and on "Scan now".
+export const POSTURE_REFRESH_SECONDS = 24 * 60 * 60;
+export const POSTURE_RETRY_SECONDS = 60 * 60;
 
 const floorToMinute = (ms: number) => Math.floor(ms / 60_000) * 60_000;
 
@@ -149,6 +169,88 @@ async function refreshOwnership(
   return { ownership, loaded: true };
 }
 
+// The status a failed posture source records. Error bodies never get this far: only statuses.
+export function postureSourceStatus(err: unknown): Exclude<SourceStatus, "ok"> {
+  if (err instanceof CatalogError) return "invalid_response";
+  if (err instanceof SqlQueryError || err instanceof AdvisorApiError) {
+    if (err.status < 300) return "invalid_response";
+    if (err.status === 401 || err.status === 403) return "unauthorized";
+    if (err.status === 404) return "unavailable";
+    if (err.status === 429) return "rate_limited";
+    return "query_failed";
+  }
+  return "network_error";
+}
+
+// Runs the posture scan when due (decision 038): the catalog SQL and the Security Advisor, in
+// parallel, outside any transaction. The audit row is written in the claiming transaction,
+// before either call. Never throws: posture must not cost the poll its detections. Returns the
+// exposed tables after a save, or null when nothing was saved.
+async function refreshPosture(
+  scope: ProjectScope,
+  project: repo.ProjectRecord,
+  token: string,
+  deps: PollDeps,
+  now: Date,
+): Promise<Map<string, string> | null> {
+  const posture = deps.posture;
+  if (!posture) return null;
+  try {
+    const scanId = await withTenant(deps.app, scope.tenantId, async (tx) => {
+      const id = await postureRepo.claimPostureScan(tx, scope.projectId, now, {
+        refreshSeconds: POSTURE_REFRESH_SECONDS, retrySeconds: POSTURE_RETRY_SECONDS,
+      });
+      if (id) {
+        // policies_query: a read-only catalog query, as decision 024's. The Advisor call is named in
+        // the same row (decision 038: no new audit action, so the migration changes no constraint).
+        await repo.appendAudit(tx, {
+          projectId: scope.projectId,
+          action: "policies_query",
+          detail: { purpose: "posture_scan", sql_sha256: sha256(POSTURE_SQL), security_advisor: true },
+        });
+      }
+      return id;
+    });
+    if (!scanId) return null;
+
+    const [catalog, advisor] = await Promise.allSettled([
+      posture.querySql({ projectRef: project.supabaseRef, sql: POSTURE_SQL }, { token }),
+      posture.queryAdvisor(project.supabaseRef, { token }),
+    ]);
+    const result: postureRepo.PostureResult = { catalog: { status: "network_error" }, advisor: null };
+    try {
+      if (catalog.status === "rejected") throw catalog.reason;
+      const parsed = parseCatalogRows(catalog.value);
+      result.catalog = {
+        status: "ok",
+        findings: catalogFindings(parsed),
+        counts: {
+          tables: parsed.relations.filter((r) => r.kind === "table").length,
+          views: parsed.relations.filter((r) => r.kind === "view").length,
+          policies: parsed.policies.length,
+        },
+      };
+    } catch (err) {
+      result.catalog = { status: postureSourceStatus(err) };
+    }
+    if (advisor.status === "rejected") {
+      result.advisor = { status: postureSourceStatus(advisor.reason) };
+    } else {
+      const a = advisorFindings(advisor.value);
+      result.advisor = a.status === "ok" ? a : { status: "unavailable" };
+    }
+
+    return await withTenant(deps.app, scope.tenantId, async (tx) => {
+      await postureRepo.savePostureScan(tx, scope.projectId, scanId, result, now);
+      return postureRepo.postureExposedTables(tx, scope.projectId);
+    });
+  } catch {
+    // IDs only, never error text.
+    console.log(JSON.stringify({ event: "posture_scan_crashed", project_id: scope.projectId }));
+    return null;
+  }
+}
+
 export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<PollOutcome> {
   const now = deps.now?.() ?? new Date();
   const sql = edgeRollupSql(deps.env ? { env: deps.env } : {});
@@ -179,6 +281,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       project, runId, window,
       networks: await repo.loadNetworks(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
+      exposed: await postureRepo.postureExposedTables(tx, scope.projectId),
     };
   });
   if ("skip" in loaded) return { status: "skipped", reason: loaded.skip! };
@@ -189,6 +292,18 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   try {
     token = await accessTokenFor(deps.app, deps.vault, scope.tenantId, project.connectionId, deps.oauth ?? null, now);
   } catch (err) {
+    // The grant was revoked at Supabase (decision 037): stop polling the connection, empty its
+    // token, and tell the affected members once. Transient failures stay "unable to assess".
+    if (isRevokedGrant(err)) {
+      const notice = await withTenant(deps.app, scope.tenantId, async (tx) => {
+        await repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: "grant_revoked" });
+        return markRevoked(tx, project.connectionId, now);
+      });
+      if (notice && deps.alerts) {
+        await sendDisconnectEmails(deps.app, scope.tenantId, notice, "revoked", null, deps.alerts);
+      }
+      return { status: "unable_to_assess", errorCode: "grant_revoked" };
+    }
     const code = err instanceof OAuthError ? errorCode(err) : "token_unavailable";
     await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
     return { status: "unable_to_assess", errorCode: code };
@@ -196,6 +311,9 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
 
   // Detector 2's input: the RLS policies, read again when due (decision 024).
   const owners = await refreshOwnership(scope, project, token, deps, now);
+  // Posture (decision 038): first poll, daily, and on "Scan now". Before the logs query, so a logs
+  // outage never blocks it.
+  const exposed = (await refreshPosture(scope, project, token, deps, now)) ?? loaded.exposed;
 
   // 2. Query Supabase outside any transaction. A failure is "unable to assess", never all-clear.
   let rows: Record<string, unknown>[];
@@ -213,9 +331,10 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   const events = rows.map(normalizeRow);
   // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
   const unassessedDetectors: ("cross_tenant")[] = owners.loaded ? [] : ["cross_tenant"];
-  const findings = scan(events, {
+  // A detection on a table that posture shows exposed is raised one step (decision 038).
+  const findings = raiseForPosture(scan(events, {
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
-  });
+  }), exposed);
   const openIncidents: Incident[] = loaded.open.map((i) => ({
     ...i, scope, status: "open", detectors: i.detectors as Incident["detectors"],
   }));
