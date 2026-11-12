@@ -60,7 +60,7 @@ Migration `supabase/migrations/20261112060000_project_removal_grace.sql` (additi
 | `projects.active_until` | Polling stops from this time |
 | `projects.delete_after` | The data job deletes from this time |
 | `projects.removal_source` | `user` or `billing` (a portal cancel) |
-| `projects_removal_schedule` | CHECK: all four set or none; `delete_after` = `active_until` + 7 days; `active_until` ≥ `removal_requested_at` |
+| `projects_removal_schedule` | CHECK: all four set or none; `delete_after` = `active_until` + 168 hours (not `'7 days'`: that adds calendar days in the session time zone); `active_until` ≥ `removal_requested_at` |
 | `projects_delete_after_idx` | Partial index `(tenant_id, delete_after)` for the data job |
 | `project_removal_guard` | BEFORE UPDATE trigger: a signed-in user who is not a workspace owner or admin and not the project's Owner cannot change the four columns |
 | Scheduler grant | `SELECT (active_until)`, so `dueProjects` skips stopped projects |
@@ -84,7 +84,7 @@ Editors update a project, and a policy cannot tell which columns change.
 | Unit | `packages/core/test/billing/projects.test.ts` | Dates: paid, past_due, trial, no subscription, ended or blocked, past period end |
 | Unit | `apps/web/test/removal.test.ts` | The exact sentences, before and after the period, the keep note |
 | Unit | `apps/web/test/picker.test.ts` | `keepOutcome` per role; the `kept` and `removed` notices |
-| Postgres | `packages/core/test/db/removalGrace.test.ts` | Paid, trial, exempt and no-row dates; reconcile cancels and never resumes; polling stops at `active_until`; keep within the period (same subscription) and after it (new one, billed); re-pick keeps; the data job never deletes before `delete_after`, deletes at it while paying, keeps audit and payment rows; undo wins; webhook portal cancel and resume, echo, failed resume, paused, close race |
+| Postgres | `packages/core/test/db/removalGrace.test.ts` | Paid, trial, exempt and no-row dates; a daylight-saving window in a non-UTC session; a project Owner who is only a workspace member gets the period end; reconcile cancels and never resumes; polling stops at `active_until`; keep within the period (same subscription) and after it (new one, billed); re-pick keeps; the data job never deletes before `delete_after`, deletes at it while paying, keeps audit and payment rows; undo wins; webhook portal cancel and resume, echo, failed resume, paused, close race |
 | Postgres | `people.test.ts` | Schedule and keep by role; a raw UPDATE from an Editor is refused by the trigger |
 | Postgres | `projects.test.ts`, `posture.test.ts`, `isolation.test.ts` | Schedule then delete with the cascade; another tenant untouched; the scheduler sees `active_until` only |
 | UAT | `apps/web/e2e/specs/picker.uat.spec.ts` | UAT-W14 |

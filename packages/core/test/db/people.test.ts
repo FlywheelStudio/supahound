@@ -185,7 +185,7 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
       // A raw UPDATE of the removal columns is refused by the trigger, even for an Editor whom the
       // project_settings policy lets update the row.
       const raw = (who: UserId, sql: string) => as(who, A, (tx) => tx.query(sql, [A, p4]));
-      await expect(raw(editor4, "UPDATE supahound.projects SET removal_requested_at = now(), active_until = now(), delete_after = now() + interval '7 days', removal_source = 'user' WHERE tenant_id = $1 AND id = $2"))
+      await expect(raw(editor4, "UPDATE supahound.projects SET removal_requested_at = now(), active_until = now(), delete_after = now() + interval '168 hours', removal_source = 'user' WHERE tenant_id = $1 AND id = $2"))
         .rejects.toThrow(/may schedule or undo a removal/);
       expect(await schedule(u.owner, p4)).toBe(true);
       await expect(raw(editor4, "UPDATE supahound.projects SET removal_requested_at = NULL, active_until = NULL, delete_after = NULL, removal_source = NULL WHERE tenant_id = $1 AND id = $2"))

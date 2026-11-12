@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 818 core (unit + Postgres + detection UAT), 182 web |
-| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 287, within the 818 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 820 core (unit + Postgres + detection UAT), 182 web |
+| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 289, within the 820 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 818 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
 
-Totals on `feature/project-removal-grace` (2026-11-12): core 818, web 182, poller 15, E2E 72.
+Totals on `feature/project-removal-grace` (2026-11-12): core 820, web 182, poller 15, E2E 72.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -361,6 +361,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Removal: the trial end counts during the trial (042) | `removalActiveUntil` uses the period end | `billing/projects.test.ts` fails |
 | Removal: picking again keeps the project (042) | `watchProjects` conflict update matches nothing | `removalGrace.test.ts` fails |
 | Removal: Keep needs a scheduled removal (042) | `keepOutcome` always "kept" | `apps/web/test/picker.test.ts` fails |
+| Removal: the CHECK holds across daylight saving (042) | CHECK uses `interval '7 days'` instead of `'168 hours'` | `removalGrace.test.ts` fails (session in `America/New_York`, window over 2027-03-14) |
 | Removal: the words before and after the period (042) | `removalSentence` ignores the date | `apps/web/test/removal.test.ts` fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

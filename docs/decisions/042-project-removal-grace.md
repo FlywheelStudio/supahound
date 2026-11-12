@@ -76,7 +76,7 @@ Supahound had already deleted. Erik ruled on 2026-11-12:
 ## Consequences
 
 - Migration `20261112060000_project_removal_grace.sql` is additive: four nullable columns, a CHECK
-  (all four set or none; `delete_after` = `active_until` + 7 days), a partial index for the data
+  (all four set or none; `delete_after` = `active_until` + 168 hours, not '7 days', which follows the session time zone across a daylight-saving change), a partial index for the data
   job, a guard trigger and one scheduler column grant (`active_until`). No DROP; no row changes.
 - A project in its grace week still occupies its Supabase ref in the workspace (one row per ref).
 - Decision 022 point 3 and decision 041 point 7 are superseded by this record.

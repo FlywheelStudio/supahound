@@ -28,7 +28,9 @@ ALTER TABLE supahound.projects
   ADD COLUMN IF NOT EXISTS delete_after timestamptz,
   ADD COLUMN IF NOT EXISTS removal_source text;
 
--- All four set, or none. delete_after is exactly 7 days after active_until (Erik, 2026-11-12).
+-- All four set, or none. delete_after is exactly 7 days (168 hours) after active_until (Erik,
+-- 2026-11-12). Hours, not days: timestamptz + '7 days' adds calendar days in the session's time
+-- zone, which is 167 or 169 hours across a daylight-saving change.
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -40,7 +42,7 @@ BEGIN
       OR (removal_requested_at IS NOT NULL AND active_until IS NOT NULL AND delete_after IS NOT NULL
           AND removal_source IN ('user', 'billing')
           AND active_until >= removal_requested_at
-          AND delete_after = active_until + interval '7 days')
+          AND delete_after = active_until + interval '168 hours')
     );
   END IF;
 END

@@ -53,7 +53,7 @@ describe.skipIf(pgInfo === null)("project removal with a grace period", () => {
   // Moves a scheduled removal into the past: its active period ended `hoursAgo` hours ago.
   const periodEnded = (t: TenantId, p: ProjectId, hoursAgo = 1) => db.admin.query(
     `UPDATE supahound.projects SET removal_requested_at = now() - interval '40 days',
-       active_until = now() - make_interval(hours => $3), delete_after = now() - make_interval(hours => $3) + interval '7 days'
+       active_until = now() - make_interval(hours => $3), delete_after = now() - make_interval(hours => $3) + interval '168 hours'
      WHERE tenant_id = $1 AND id = $2`,
     [t, p, hoursAgo],
   );
@@ -100,6 +100,31 @@ describe.skipIf(pgInfo === null)("project removal with a grace period", () => {
       const s = (await remove(owner, tenant, p, now))!;
       expect([s.activeUntil, s.deleteAfter]).toEqual([now, new Date(now.getTime() + 7 * DAY)]);
       expect(stripe.projectSubs(tenant)).toEqual([]);
+    });
+
+    it("schedules across a daylight-saving change in any session time zone (7 days = 168 hours)", async () => {
+      const { tenant, owner } = await cardWorkspace("DST");
+      const p = await addProject(tenant, "Spring forward");
+      // US clocks change on 2027-03-14; the window 2027-03-12 → 2027-03-19 crosses it.
+      const activeUntil = new Date("2027-03-12T12:00:00Z");
+      const dates = { activeUntil, deleteAfter: new Date(activeUntil.getTime() + 7 * DAY) };
+      const s = await withTenantForUser(db.app, owner, tenant, async (tx) => {
+        await tx.query("SET LOCAL TimeZone = 'America/New_York'");
+        return removal.scheduleRemoval(tx, p, new Date("2027-03-01T00:00:00Z"), { dates });
+      });
+      expect(s?.deleteAfter).toEqual(dates.deleteAfter);
+    });
+
+    it("gives a project Owner who is only a workspace member the same dates as a workspace owner", async () => {
+      const { tenant } = await cardWorkspace("Project owner");
+      await endTrial(tenant);
+      const p = await addProject(tenant, "Owned");
+      await reconcileProjects(deps, tenant);
+      const member = user();
+      await db.admin.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, member]);
+      await db.admin.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'owner')", [tenant, p, member]);
+      const s = (await remove(member, tenant, p))!;
+      expect(s.activeUntil).toEqual(subOf(tenant, p).currentPeriodEnd);
     });
 
     it("stops a project with no subscription row at once", async () => {
