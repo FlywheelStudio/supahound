@@ -151,6 +151,8 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | UAT-B10 | A canceled subscription closes the workspace again |
 | UAT-B11 | A member cannot add the card and is told to ask an owner |
 | UAT-B12 | Each project shows its tier and 30-day requests; a busy project bills at Pro without proration; above 10M shows Enterprise |
+| UAT-B13 | A staff owner (exempt domain) opens a workspace with no card and no Stripe calls; the workspace needs a card once a second owner joins (decision 029) |
+| UAT-B14 | A staff admin in a customer's workspace does not make it free (decision 029) |
 
 ### Manual (needs a live service)
 
@@ -189,6 +191,10 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
+| Staff exemption ends with the owners (decision 029) | The membership trigger never fires | 4 Postgres exemption tests fail |
+| The scheduler polls exempt workspaces (decision 029) | `dueProjects` drops `OR exempt_at IS NOT NULL` | 1 Postgres exemption test fails |
+| The exempt domain must match (decision 029) | E2E exempt list set to another domain | UAT-B13 fails |
+| Only the sole owner is exempt (decision 029) | Admins may be granted it; the gate skips the sole-owner check | UAT-B13 and UAT-B14 fail |
 | Alerts send once per severity (#16) | `pendingAlerts` ignores `alerted_severity` | 4 Postgres alert tests fail |
 | A sent alert is marked (#16) | `sendPendingAlerts` never calls `markAlerted` | 5 Postgres alert tests fail |
 | Model text loses its links (#16) | `cleanText` skips `stripLinks` | 1 unit test fails |

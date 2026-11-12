@@ -73,6 +73,35 @@ export function accessFor(status: BillingStatus): Access {
   }
 }
 
+// Staff workspaces (decision 029): a workspace whose only owner has a verified email on an exempt
+// domain gets full access with no card and no Stripe subscription.
+export function accessForAccount(account: { status: BillingStatus; exempt: boolean }): Access {
+  return account.exempt ? "full" : accessFor(account.status);
+}
+
+const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+// SUPAHOUND_BILLING_EXEMPT_DOMAINS: a comma-separated list such as "example.com,example.org".
+// Empty or unset means no exemptions. A malformed entry throws, so a typo cannot pass silently.
+export function parseExemptDomains(value: unknown): readonly string[] {
+  if (value === undefined || value === null || value === "") return [];
+  if (typeof value !== "string") throw new Error("SUPAHOUND_BILLING_EXEMPT_DOMAINS must be a string");
+  const domains = value.split(",").map((d) => d.trim().toLowerCase()).filter((d) => d !== "");
+  for (const d of domains) {
+    if (!DOMAIN.test(d)) throw new Error(`SUPAHOUND_BILLING_EXEMPT_DOMAINS: "${d}" is not a domain`);
+  }
+  return domains;
+}
+
+// Exact match on the part after the last "@". Subdomains do not match: "a@x.example.com" is not
+// on "example.com". The email must come from a verified session (getClaims()).
+export function isExemptEmail(email: string | null, domains: readonly string[]): boolean {
+  if (!email || domains.length === 0) return false;
+  const at = email.lastIndexOf("@");
+  if (at <= 0 || at === email.length - 1) return false;
+  return domains.includes(email.slice(at + 1).toLowerCase());
+}
+
 // The statuses whose projects the poller still polls. Kept next to accessFor so the two agree.
 export const POLLABLE_STATUSES: readonly BillingStatus[] = STATUSES.filter((s) => accessFor(s) !== "blocked");
 

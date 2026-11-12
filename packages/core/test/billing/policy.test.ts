@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  accessFor, checkCard, needsEnterprise, POLLABLE_STATUSES, seatsFor, tierFor, type BillingStatus,
+  accessFor, accessForAccount, checkCard, isExemptEmail, needsEnterprise, parseExemptDomains, POLLABLE_STATUSES, seatsFor, tierFor, type BillingStatus,
 } from "../../src/billing/policy.js";
 
 const ALL: BillingStatus[] = ["none", "incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"];
@@ -44,5 +44,45 @@ describe("billing policy (decision 028)", () => {
     expect(checkCard({ ...ok, captured: true })).toEqual({ ok: false, reason: "not_authorized" });
     expect(checkCard({ ...ok, cvcCheck: "fail" })).toEqual({ ok: false, reason: "cvc_failed" });
     expect(checkCard({ ...ok, funding: "prepaid" })).toEqual({ ok: false, reason: "prepaid" });
+  });
+});
+
+describe("staff exemption (decision 029)", () => {
+  const domains = parseExemptDomains(" Example.com , example.org ");
+
+  it("parses a comma-separated list, lowercased; empty or unset means none", () => {
+    expect(domains).toEqual(["example.com", "example.org"]);
+    expect(parseExemptDomains("")).toEqual([]);
+    expect(parseExemptDomains(undefined)).toEqual([]);
+  });
+
+  it("refuses a malformed entry instead of ignoring it", () => {
+    for (const bad of ["example", "@example.com", "*.example.com", "example.com/x", "exa mple.com", "https://example.com"]) {
+      expect(() => parseExemptDomains(bad), bad).toThrow(/SUPAHOUND_BILLING_EXEMPT_DOMAINS/);
+    }
+    expect(() => parseExemptDomains(1)).toThrow();
+  });
+
+  it("matches the exact domain after the last @, in any case", () => {
+    expect(isExemptEmail("dev@example.com", domains)).toBe(true);
+    expect(isExemptEmail("Dev@EXAMPLE.COM", domains)).toBe(true);
+    expect(isExemptEmail("dev@example.org", domains)).toBe(true);
+  });
+
+  it("refuses look-alike domains, subdomains, quoted local parts and missing emails", () => {
+    for (const email of [
+      "dev@evilexample.com", "dev@example.com.evil.net", "dev@x.example.com", "\"dev@example.com\"@evil.net",
+      "dev@example.co", "example.com", "@example.com", "dev@", "", null,
+    ]) {
+      expect(isExemptEmail(email, domains), String(email)).toBe(false);
+    }
+    expect(isExemptEmail("dev@example.com", [])).toBe(false);
+  });
+
+  it("gives an exempt workspace full access whatever its Stripe status", () => {
+    expect(accessForAccount({ status: "none", exempt: true })).toBe("full");
+    expect(accessForAccount({ status: "canceled", exempt: true })).toBe("full");
+    expect(accessForAccount({ status: "none", exempt: false })).toBe("blocked");
+    expect(accessForAccount({ status: "past_due", exempt: false })).toBe("grace");
   });
 });
