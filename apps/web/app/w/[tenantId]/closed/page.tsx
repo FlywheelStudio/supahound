@@ -4,7 +4,7 @@ import { getClosure, isClosedNow } from "@supahound/core/db/closure";
 import { listConnectionsWithProjects } from "@supahound/core/db/repo";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
-import Link from "next/link";
+import Link from "../../../../components/NavLink";
 import { notFound, redirect } from "next/navigation";
 import { Connections } from "../../../../components/Connections";
 import { Notice } from "../../../../components/Shell";

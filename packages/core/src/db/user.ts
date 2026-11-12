@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { tenantId, type TenantId, type UserId } from "../tenancy/scope.js";
 import { isStorableEmail } from "./repo.js";
-import { TenantTx } from "./tenant.js";
+import { begin, TenantTx } from "./tenant.js";
 
 // Entry points for signed-in users (decision 009). The user ID must come from a verified
 // Supabase JWT. Tenant data is reachable only through withTenantForUser, which confirms
@@ -26,10 +26,7 @@ export interface Workspace {
 async function transaction<T>(pool: Pool, settings: Record<string, string>, fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    for (const [key, value] of Object.entries(settings)) {
-      await client.query("SELECT set_config($1, $2, true)", [key, value]);
-    }
+    await begin(client, settings);
     const result = await fn(client);
     await client.query("COMMIT");
     return result;

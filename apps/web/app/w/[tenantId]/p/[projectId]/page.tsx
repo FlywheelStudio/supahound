@@ -3,7 +3,7 @@ import { getPostureScan, listPostureFindings } from "@supahound/core/db/posture"
 import { listOpenIncidents } from "@supahound/core/db/repo";
 import { countBySeverity } from "@supahound/core/posture/findings";
 import { checkTitle } from "@supahound/core/posture/fix";
-import Link from "next/link";
+import Link from "../../../../../components/NavLink";
 import { Notice, SeverityBadge, Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
 import { crossTenantNote } from "../../../../../lib/coverage";

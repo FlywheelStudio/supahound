@@ -2,7 +2,7 @@ import type { ProjectTier } from "@supahound/core/db/billing";
 import type { ProjectSummary } from "@supahound/core/db/repo";
 import type { Role } from "@supahound/core/db/user";
 import type { TenantId } from "@supahound/core/tenancy/scope";
-import Link from "next/link";
+import Link from "./NavLink";
 import { PRODUCT_NAME } from "../lib/brand";
 import {
   canAddProjects, initialOf, projectNav, projectPath, workspaceNav, workspacePath,
@@ -12,7 +12,7 @@ import {
 // The signed-in shell (issue #98): a sidebar whose header is the project switcher, then the
 // current project's pages, then the workspace pages. Every page renders it with data from its
 // own membership transaction; there is no layout-level data fetch, so the shell is never the
-// access check. Server-rendered, no client JavaScript: the switcher is a <details> element.
+// access check. Server-rendered; the switcher is a <details> element. Links are NavLink (pending bar).
 
 export type ShellActive =
   | { kind: "project"; project: ProjectSummary; page: ProjectPage }
