@@ -426,6 +426,7 @@ describe.skipIf(pgInfo === null)("one subscription per project", () => {
       await addProject(w.tenant, "After conversion");
       const seatCalls = stripe.seatUpdates.length;
       await syncBilling(deps, w.tenant, true);
+      await syncSeats(deps, w.tenant, true);
       expect(stripe.seatUpdates.length).toBe(seatCalls);
       expect(stripe.projectSubs(w.tenant)).toHaveLength(3);
       // A late event for the seat subscription does not overwrite the standing.

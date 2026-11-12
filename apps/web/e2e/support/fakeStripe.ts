@@ -58,6 +58,7 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
   const sessions = new Map<string, Obj>();
   const intents = new Map<string, Obj>();
   const subscriptions = new Map<string, Obj>();
+  const invoices: Obj[] = [];
   const idempotent = new Map<string, unknown>();
   const calls: { method: string; path: string; body: Obj }[] = [];
   const events: { event: Obj; status: number; body: string }[] = [];
@@ -178,6 +179,14 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
         return send(200, data);
       };
 
+      const customerUpdate = /^\/v1\/customers\/(cus_[a-z0-9]+)$/.exec(path);
+      if (req.method === "POST" && customerUpdate) {
+        // Decision 041: the card becomes the customer's default for every project subscription.
+        const c = customers.get(customerUpdate[1]!);
+        if (!c) return error(404, "resource_missing", "No such customer");
+        if (body.invoice_settings) c.invoice_settings = body.invoice_settings;
+        return ok(c);
+      }
       if (req.method === "POST" && path === "/v1/customers") {
         const c = { id: id("cus"), object: "customer", email: body.email ?? null, metadata: body.metadata ?? {} };
         customers.set(c.id, c);
@@ -218,21 +227,41 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
         return ok({ object: "list", data, has_more: false, url: "/v1/subscriptions" });
       }
       if (req.method === "POST" && path === "/v1/subscriptions") {
-        // No trial_period_days (decision 037: one trial ever): active at once, a 30-day period.
-        const trial = body.trial_period_days !== undefined;
+        // No trial (decision 037: one trial ever): active at once, a 30-day period, charged now.
+        // trial_end: a project added during the workspace trial (decision 041) or a converted
+        // trialing seat subscription. billing_cycle_anchor: a converted paid one (nothing charged
+        // until the anchor).
         const now = Math.floor(Date.now() / 1000);
-        const trialEnd = trial ? now + Number(body.trial_period_days) * 86_400 : null;
-        const periodEnd = trialEnd ?? now + 30 * 86_400;
+        const trialEnd = body.trial_end !== undefined ? Number(body.trial_end) : body.trial_period_days !== undefined ? now + Number(body.trial_period_days) * 86_400 : null;
+        const anchor = body.billing_cycle_anchor !== undefined ? Number(body.billing_cycle_anchor) : null;
+        const periodEnd = trialEnd ?? anchor ?? now + 30 * 86_400;
+        const items = (body.items as Obj[]).map((item) => ({
+          id: id("si"), quantity: Number(item.quantity), current_period_end: periodEnd, price: { id: item.price },
+        }));
         const sub: Obj = {
-          id: id("sub"), object: "subscription", customer: body.customer, status: trial ? "trialing" : "active", trial_end: trialEnd,
-          cancel_at_period_end: false, metadata: body.metadata ?? {}, default_payment_method: body.default_payment_method,
-          trial_period_days: trial ? Number(body.trial_period_days) : null,
-          items: { object: "list", data: (body.items as Obj[]).map((item) => ({
-            id: id("si"), quantity: Number(item.quantity), current_period_end: periodEnd, price: { id: item.price },
-          })) },
+          id: id("sub"), object: "subscription", customer: body.customer, status: trialEnd ? "trialing" : "active", trial_end: trialEnd,
+          cancel_at_period_end: false, metadata: body.metadata ?? {}, default_payment_method: body.default_payment_method ?? null,
+          trial_period_days: body.trial_period_days !== undefined ? Number(body.trial_period_days) : null,
+          billing_cycle_anchor: anchor, proration_behavior: body.proration_behavior ?? null,
+          items: { object: "list", data: items },
         };
         subscriptions.set(String(sub.id), sub);
-        return ok(sub);
+        if (!trialEnd && !anchor) {
+          // The first charge, today.
+          const total = items.reduce((sum, i) => sum + (i.price.id === "price_pro_e2e" ? 9900 : 1999) * i.quantity, 0);
+          invoices.push({
+            id: id("in"), object: "invoice", subscription: sub.id, number: `E2E-${invoices.length + 1}`, created: now, total, currency: "usd",
+            status: "paid", hosted_invoice_url: `https://invoice.stripe.test/${sub.id}`,
+          });
+        }
+        const result = ok(sub);
+        // Like Stripe, the creation is also an event.
+        if ((sub.metadata as Obj).project_id) void deliver("customer.subscription.created", { ...sub });
+        return result;
+      }
+      if (req.method === "GET" && path === "/v1/invoices") {
+        const data = invoices.filter((i) => i.subscription === body.subscription).reverse();
+        return ok({ object: "list", data, has_more: false, url: "/v1/invoices" });
       }
       const subUpdate = /^\/v1\/subscriptions\/(sub_[a-z0-9]+)$/.exec(path);
       if (req.method === "POST" && subUpdate) {
@@ -241,8 +270,11 @@ export async function startFakeStripe(port: number, appUrl: string): Promise<Fak
         const data = (sub.items as Obj).data as Obj[];
         for (const change of (body.items as Obj[] | undefined) ?? []) {
           const existing = data.find((i) => i.id === change.id);
-          if (existing) existing.quantity = Number(change.quantity);
-          else data.push({ id: id("si"), quantity: Number(change.quantity), price: { id: change.price } });
+          if (existing) {
+            existing.quantity = Number(change.quantity);
+            // A tier change on a project subscription (decision 041).
+            if (change.price) existing.price = { id: change.price };
+          } else data.push({ id: id("si"), quantity: Number(change.quantity), price: { id: change.price } });
         }
         sub.last_proration_behavior = body.proration_behavior;
         // Closing and reopening a workspace (decision 037). Like Stripe, it also sends the event.

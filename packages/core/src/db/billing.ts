@@ -352,6 +352,8 @@ export async function refreshStanding(tx: TenantTx): Promise<BillingStatus | nul
 export async function projectBillingDrift(tx: TenantTx, now: Date): Promise<boolean> {
   const billing = await getBilling(tx);
   if (billing.model !== "project" || billing.exempt || !billing.cardVerifiedAt) return false;
+  // Closing cancels every subscription; reconcile does nothing until the owner reopens.
+  if (await getClosure(tx)) return false;
   const plan = planReconcile({ now, workspaceTrialEnd: billing.trialEnd, watched: await watchedProjects(tx), subs: await listProjectSubscriptions(tx) });
   return plan.length > 0;
 }

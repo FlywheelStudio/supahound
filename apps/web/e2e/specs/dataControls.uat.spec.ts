@@ -7,7 +7,7 @@ import { TokenVault } from "@supahound/core/vault/vault";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import pg from "pg";
 import { countMailsTo, lastMailTo } from "../support/mail";
-import { addViewer, adminQuery, pollAttack, refuseRevoke, revokeCalls, seedConnection, seedOAuthConnection, userIdFor } from "../support/seed";
+import { addViewer, adminQuery, pollAttack, pollPickedProject, refuseRevoke, revokeCalls, seedConnection, seedOAuthConnection, userIdFor } from "../support/seed";
 import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // UAT for data controls (issue #43, decision 037): disconnect Supabase (with the email to the
@@ -26,7 +26,8 @@ async function stripeSubscription(id: string): Promise<{ status: string; trial_p
   return state.subscriptions.find((s) => s.id === id)!;
 }
 
-// Stripe ends the subscription at the end of its period, and that day comes.
+// Stripe ends the subscription at the end of its period, and that day comes (the workspace trial,
+// which ends with it, is over too).
 async function periodEnds(tenant: string, subscription: string): Promise<void> {
   await fetch(`${STRIPE()}/__test/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscription }) });
   await expect.poll(async () => (await adminQuery<{ status: string }>("SELECT status FROM supahound.billing_accounts WHERE tenant_id = $1", [tenant]))[0]!.status).toBe("canceled");
@@ -34,6 +35,20 @@ async function periodEnds(tenant: string, subscription: string): Promise<void> {
     "UPDATE supahound.account_closures SET closed_at = now() - interval '1 day', access_ends_at = now() - interval '1 second' WHERE tenant_id = $1",
     [tenant],
   );
+  await adminQuery("UPDATE supahound.billing_accounts SET trial_end = now() - interval '1 second' WHERE tenant_id = $1 AND trial_end > now()", [tenant]);
+}
+
+// The workspace's live project subscription (decision 041), once the overview has billed it.
+async function liveProjectSubscription(tenant: string): Promise<string> {
+  let id: string | undefined;
+  await expect.poll(async () => {
+    [{ subscription_id: id } = { subscription_id: undefined }] = await adminQuery<{ subscription_id: string }>(
+      "SELECT subscription_id FROM supahound.project_subscriptions WHERE tenant_id = $1 AND status NOT IN ('canceled', 'incomplete_expired') ORDER BY created_at DESC LIMIT 1",
+      [tenant],
+    );
+    return id;
+  }).toBeTruthy();
+  return id!;
 }
 
 async function owner(page: Page, tag: string): Promise<{ tenant: string; email: string }> {
@@ -49,18 +64,26 @@ async function payThroughCheckout(page: Page, tenant: string, button: RegExp): P
   await page.getByRole("button", { name: button }).click();
   await page.getByRole("link", { name: "Pay with a good card", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/w/${tenant}\\?welcome=1$`));
-  const [row] = await adminQuery<{ subscription_id: string }>("SELECT subscription_id FROM supahound.billing_accounts WHERE tenant_id = $1", [tenant]);
-  return row!.subscription_id;
+  // The card check bills each watched project (decision 041); the overview repairs any drift.
+  await page.goto(`/w/${tenant}`);
+  return liveProjectSubscription(tenant);
 }
 
-// A workspace that paid through the fake Checkout, so it has a real (fake) Stripe subscription.
+// A workspace that paid through the fake Checkout and watches one project, so it has a real
+// (fake) Stripe subscription for that project (decision 041).
 async function subscribedOwner(page: Page, tag: string, email = uniqueEmail(tag)): Promise<{ tenant: string; email: string; subscription: string }> {
   await signIn(page, email);
   await page.getByLabel("Workspace name").fill(`${tag} Co`);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page).toHaveURL(/\/billing$/);
   const tenant = /\/w\/([0-9a-f-]{36})\//.exec(new URL(page.url()).pathname)![1]!;
-  return { tenant, email, subscription: await payThroughCheckout(page, tenant, /^Add card and start trial$/) };
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: /^Add card and start trial$/ }).click();
+  await page.getByRole("link", { name: "Pay with a good card", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/w/${tenant}\\?welcome=1$`));
+  await pollPickedProject(tenant, `${tag} billed app`, []);
+  await page.goto(`/w/${tenant}`);
+  return { tenant, email, subscription: await liveProjectSubscription(tenant) };
 }
 
 async function asMember(browser: Browser, tenant: string, role: "member" | "admin", tag: string): Promise<{ page: Page; email: string }> {
