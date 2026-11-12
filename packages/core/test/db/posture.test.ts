@@ -317,6 +317,22 @@ describe.skipIf(pgInfo === null)("posture storage and RLS for signed-in users", 
     expect(await withTenant(db.app, A, (tx) => posture.listPostureFindings(tx, pB))).toEqual([]);
   });
 
+  it("does not raise for a table the catalog rates low, even when the Advisor rates it high", async () => {
+    const exposed = await withTenant(db.app, A, async (tx) => {
+      const conn = await repo.createConnection(tx, db.vault, { label: "y", token: "t" });
+      const p = await repo.createProject(tx, { connectionId: conn, supabaseRef: "eeeeeeeeeeeeeeeeeeee", name: "No grants" });
+      const scanId = (await posture.claimPostureScan(tx, p, T0, { refreshSeconds: 1, retrySeconds: 1 }))!;
+      await posture.savePostureScan(tx, p, scanId, {
+        catalog: { status: "ok", findings: catalogFindings(parseCatalogRows([{ ...tableRow("quiet", false), grants: "" }, tableRow("loud", false)])) },
+        advisor: { status: "ok", findings: parseLints([lint("rls_disabled_in_public", "quiet"), lint("rls_disabled_in_public", "loud")]).map((l) => ({
+          source: "advisor" as const, check: l.name, severity: "high" as const, schema: l.schema, object: l.object, objectType: l.type, evidence: { level: l.level },
+        })) },
+      }, T0);
+      return posture.postureExposedTables(tx, p);
+    });
+    expect([...exposed.keys()]).toEqual(["loud"]);
+  });
+
   it("counts findings per project for the overview", async () => {
     const m = await as(u.owner, A, (tx) => posture.postureSummaries(tx));
     expect(m.get(p1)).toMatchObject({ counts: { critical: 1, high: 0, medium: 0, low: 0 }, scan: { catalogStatus: "ok" } });

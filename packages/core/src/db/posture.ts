@@ -154,12 +154,14 @@ export async function listPostureFindings(tx: TenantTx, project: ProjectId): Pro
   return dedupePosture(rows.map(toFinding));
 }
 
-// The tables whose posture raises detections on them (decision 038).
+// The tables whose posture raises detections on them (decision 038). No severity filter here:
+// exposedTables dedupes first, so a low catalog finding hides the Advisor's high duplicate, as on
+// the Posture page.
 export async function postureExposedTables(tx: TenantTx, project: ProjectId): Promise<Map<string, string>> {
   const rows = await tx.query<FindingRow>(
     `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
      FROM supahound.posture_findings
-     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public' AND severity IN ('high', 'critical')`,
+     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public'`,
     [tx.tenantId, project],
   );
   return exposedTables(rows.map(toFinding));

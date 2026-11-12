@@ -79,10 +79,10 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
   policies, FORCE and not, views with `security_invoker` true and false, restrictive policies,
   grants; the Advisor client (request shape, every error status, bodies without lints, free
   text dropped, the unavailable lint); dedupe; the severity raise; fix prompts.
-- `packages/core/test/db/posture.test.ts` (20, Postgres): first poll, audit before the calls, both
+- `packages/core/test/db/posture.test.ts` (21, Postgres): first poll, audit before the calls, both
   sources stored; 24-hour refresh; 1-hour retry keeping the last good findings; Advisor failure
   and its unavailable lint; a crash never fails the poll; the raise from a fresh and from a
-  stored scan; no deps, no scan; a scan in the first poll after a pick (`runDuePolls`); Scan now
+  stored scan; a table the catalog rates low is not raised even when the Advisor rates it high; no deps, no scan; a scan in the first poll after a pick (`runDuePolls`); Scan now
   (queued, already queued, cooldown, before the first scan); RLS for owner, editor, viewer,
   member without a role and another tenant; findings never writable by signed-in users; CHECKs;
   cross-tenant foreign keys; cascade on removal; `POSTURE_SQL` on a real Postgres 17 catalog.

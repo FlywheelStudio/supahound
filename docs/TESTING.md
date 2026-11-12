@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 662 core (unit + Postgres + detection UAT), 137 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 181, within the 662 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 663 core (unit + Postgres + detection UAT), 137 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 182, within the 663 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 662 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 663 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 44 |
 
-Totals on `feature/posture-scan` (2026-11-12): core 662, web 137, poller 12, E2E 55.
+Totals on `feature/posture-scan` (2026-11-12): core 663, web 137, poller 12, E2E 55.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -250,6 +250,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Names with control characters are dropped (#11) | `safeName` allows them | 3 unit tests fail |
 | Advisor duplicates show once (#11) | `dedupePosture` keeps all | 2 tests fail (unit and Postgres) |
 | Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
+| The raise agrees with the Posture page (#11) | `postureExposedTables` filters by severity before dedupe | 1 Postgres test fails |
 | Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |
 | Scan now runs within the 24 hours (#11) | The claim ignores a pending request | 1 Postgres test fails |
 | Daily refresh (#11) | Refresh wait set to 10^9 s | 3 Postgres tests fail |

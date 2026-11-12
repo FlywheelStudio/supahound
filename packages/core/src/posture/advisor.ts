@@ -1,5 +1,5 @@
 import {
-  ADVISOR_LEVELS, ADVISOR_OBJECT_TYPES, ADVISOR_PATH, ADVISOR_SECURITY_CATEGORY, ADVISOR_UNAVAILABLE_LINT,
+  ADVISOR_FIELDS as F, ADVISOR_LEVELS, ADVISOR_OBJECT_TYPES, ADVISOR_PATH, ADVISOR_SECURITY_CATEGORY, ADVISOR_UNAVAILABLE_LINT,
   LINT_NAME_RE, MAX_ADVISOR_LINTS, type AdvisorLevel,
 } from "../config/posture.js";
 import type { Severity } from "../detectors/finding.js";
@@ -59,7 +59,8 @@ export async function querySecurityAdvisor(projectRef: string, options: AdvisorC
   } catch {
     throw new AdvisorApiError("Security Advisor response is not JSON", res.status);
   }
-  const lints = body !== null && typeof body === "object" && "lints" in body && Array.isArray(body.lints) ? body.lints : null;
+  const list = body !== null && typeof body === "object" ? (body as Record<string, unknown>)[F.lints] : undefined;
+  const lints = Array.isArray(list) ? list : null;
   if (lints === null) throw new AdvisorApiError("Security Advisor response has no lints array", res.status);
   if (lints.length > MAX_ADVISOR_LINTS) throw new AdvisorApiError(`More than ${MAX_ADVISOR_LINTS} lints`, res.status);
   return parseLints(lints);
@@ -70,18 +71,20 @@ export function parseLints(lints: unknown[]): AdvisorLint[] {
   for (const l of lints) {
     if (l === null || typeof l !== "object") continue;
     const r = l as Record<string, unknown>;
-    const name = typeof r.name === "string" && LINT_NAME_RE.test(r.name) ? r.name : null;
-    const level = ADVISOR_LEVELS.find((x) => x === r.level) ?? null;
+    const rawName = r[F.name];
+    const name = typeof rawName === "string" && LINT_NAME_RE.test(rawName) ? rawName : null;
+    const level = ADVISOR_LEVELS.find((x) => x === r[F.level]) ?? null;
     if (!name || !level) continue;
-    const categories = Array.isArray(r.categories) ? r.categories : [];
-    const meta = r.metadata !== null && typeof r.metadata === "object" ? (r.metadata as Record<string, unknown>) : {};
+    const categories = Array.isArray(r[F.categories]) ? (r[F.categories] as unknown[]) : [];
+    const rawMeta = r[F.metadata];
+    const meta = rawMeta !== null && typeof rawMeta === "object" ? (rawMeta as Record<string, unknown>) : {};
     out.push({
       name,
       level,
       security: categories.includes(ADVISOR_SECURITY_CATEGORY),
-      schema: safeName(meta.schema),
-      object: safeName(meta.name),
-      type: (ADVISOR_OBJECT_TYPES as readonly unknown[]).includes(meta.type) ? (meta.type as string) : null,
+      schema: safeName(meta[F.schema]),
+      object: safeName(meta[F.object]),
+      type: (ADVISOR_OBJECT_TYPES as readonly unknown[]).includes(meta[F.type]) ? (meta[F.type] as string) : null,
     });
   }
   return out;

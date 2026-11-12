@@ -64,6 +64,18 @@ export const MAX_CATALOG_ROWS = 10_000;
 // The Advisor answer is cut at this many lints; more fail the same way.
 export const MAX_ADVISOR_LINTS = 2_000;
 
+// The Advisor response fields Supahound reads. Nothing else in a lint is read.
+export const ADVISOR_FIELDS = {
+  lints: "lints",
+  name: "name",
+  level: "level",
+  categories: "categories",
+  metadata: "metadata",
+  schema: "schema",
+  object: "name",
+  type: "type",
+} as const;
+
 export type AdvisorLevel = "ERROR" | "WARN" | "INFO";
 export const ADVISOR_LEVELS: readonly AdvisorLevel[] = ["ERROR", "WARN", "INFO"];
 
