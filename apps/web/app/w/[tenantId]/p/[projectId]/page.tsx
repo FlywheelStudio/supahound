@@ -1,10 +1,11 @@
 import { needsEnterprise, PRICE_LABEL } from "@supahound/core/billing/policy";
 import { listOpenIncidents } from "@supahound/core/db/repo";
 import Link from "next/link";
-import { SeverityBadge, Shell } from "../../../../../components/Shell";
+import { Notice, SeverityBadge, Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
 import { crossTenantNote } from "../../../../../lib/coverage";
 import { incidentPath, projectPath, utc } from "../../../../../lib/nav";
+import { ROLE_LABEL } from "../../../../../lib/people";
 import { loadProjectPage } from "../../../../../lib/projectPage";
 
 // The project dashboard (issue #98): status, usage and plan, detector coverage, open incidents.
@@ -19,8 +20,15 @@ function Stat({ label, value, detail }: { label: string; value: string; detail?:
   );
 }
 
-export default async function ProjectDashboard({ params }: { params: Promise<{ tenantId: string; projectId: string }> }) {
+export default async function ProjectDashboard({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ tenantId: string; projectId: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const d = await loadProjectPage(params, (tx, p) => listOpenIncidents(tx, 5, p.id));
+  const joined = (await searchParams).joined === "1";
   const { tenant, project: p } = d;
   const billingOn = mode() !== "off";
   const tier = d.tiers.find((t) => t.id === p.id);
@@ -33,6 +41,7 @@ export default async function ProjectDashboard({ params }: { params: Promise<{ t
         <h1 className="text-2xl font-semibold">{p.name}</h1>
         <p className="font-mono text-xs text-slate-500">{p.supabaseRef}</p>
       </header>
+      {joined && <Notice tone="ok">You joined {p.name} as {ROLE_LABEL[d.projectRole]}.</Notice>}
 
       <section aria-label="Project status" className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Status" value={status} detail={p.lastPolledAt ? `Last poll ${utc(p.lastPolledAt)}` : undefined} />

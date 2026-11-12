@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { adminQuery, pollAttack, pollPickedProject, userIdFor } from "../support/seed";
+import { addViewer, adminQuery, pollAttack, pollPickedProject, userIdFor } from "../support/seed";
 import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // UAT for project navigation (issue #98, decision 031): the project dropdown, the project pages and
@@ -89,14 +89,15 @@ test.describe("UAT: project navigation", () => {
     await expect(page.getByRole("region", { name: "Current plan" })).toContainText("Starter $19.99 per month");
     await expect(page.getByRole("link", { name: "workspace billing" })).toHaveAttribute("href", `/w/${tenant}/billing`);
 
+    // People shipped with issue #24 (people.uat.spec.ts covers it in full).
     await page.goto(`${base}/settings/people`);
-    await expect(page.getByRole("main")).toContainText("People and roles for each projectComing soon");
+    await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send invite" })).toBeVisible();
+    await expect(nav(page).getByRole("link", { name: "People" })).not.toContainText("Soon");
 
     await page.goto(`${base}/findings`);
     await expect(page.getByRole("main")).toContainText("Security scan findingsComing soon");
-    for (const label of ["Security scan", "People"]) {
-      await expect(nav(page).getByRole("link", { name: label })).toContainText("Soon");
-    }
+    await expect(nav(page).getByRole("link", { name: "Security scan" })).toContainText("Soon");
   });
 
   test("UAT-W21 a project ID from another workspace is a 404, and so is a made-up one", async ({ page, browser }) => {
@@ -122,12 +123,12 @@ test.describe("UAT: project navigation", () => {
     await other.close();
   });
 
-  test("UAT-W22 a member can open every page but gets no Add project, no Remove and no alert form", async ({ page, browser }) => {
+  test("UAT-W22 a viewer can open every page but gets no Add project, no Remove and no alert form", async ({ page, browser }) => {
     const { tenant, ids } = await workspaceWith(page, "w22", ["Shop"]);
     const member = await browser.newPage();
     const memberEmail = uniqueEmail("w22-member");
     await signIn(member, memberEmail);
-    await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, await userIdFor(memberEmail)]);
+    await addViewer(tenant, await userIdFor(memberEmail));
 
     const base = `/w/${tenant}/p/${ids.Shop}`;
     await member.goto(base);
@@ -137,7 +138,7 @@ test.describe("UAT: project navigation", () => {
     await expect(member.getByRole("heading", { name: "Remove project" })).toHaveCount(0);
     await member.goto(`${base}/settings/notifications`);
     await expect(member.getByLabel("Email alerts for Shop")).toHaveCount(0);
-    await expect(member.getByRole("main")).toContainText("Only workspace owners and admins can change this.");
+    await expect(member.getByRole("main")).toContainText("Only the project's owners, admins and editors can change this.");
     await member.close();
 
     // The owner gets all three.

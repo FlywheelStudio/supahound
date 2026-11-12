@@ -9,6 +9,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { withPool } from "../../../../lib/db";
 import { mode, paidTenant, toBillingIfUnpaid } from "../../../../lib/billing";
+import { canRemoveProject } from "../../../../lib/people";
 import { oauthClient, vault } from "../../../../lib/oauth";
 import { requireUser } from "../../../../lib/supabase";
 import { removeProjectAction, watchProjectsAction } from "./actions";
@@ -18,7 +19,7 @@ import { projectTiers } from "@supahound/core/db/billing";
 
 const ERRORS: Record<string, string> = {
   none: "Select at least one running project.",
-  role: "Only workspace owners and admins can change watched projects.",
+  role: "Only workspace owners and admins add projects. To remove one, you also need to be a workspace owner or admin, or the project's Owner.",
   connection: "That Supabase connection is not in this workspace.",
   reconnect: "Supabase refused the request. Reconnect Supabase from the overview, then try again.",
   supabase: "Supabase did not answer. Try again in a minute.",
@@ -93,7 +94,8 @@ export default async function Projects({
   const query = await searchParams;
   const canEdit = data.role !== "member";
   const watchedRefs = new Set(data.watched.map((p) => p.supabaseRef));
-  const removing: ProjectSummary | undefined = canEdit && query.remove ? data.watched.find((p) => p.id === query.remove) : undefined;
+  const mayRemove = (p: ProjectSummary) => canRemoveProject(p.role, data.role);
+  const removing: ProjectSummary | undefined = query.remove ? data.watched.find((p) => p.id === query.remove && mayRemove(p)) : undefined;
   const notice = query.added
     ? { tone: "ok", text: query.added === "0" ? "Those projects are already watched." : `Watching ${query.added} new project${query.added === "1" ? "" : "s"}. The first poll runs within a few minutes.` }
     : query.removed
@@ -145,7 +147,7 @@ export default async function Projects({
                   <Link href={projectPath(tenant, p.id, "general")} className="text-sm text-slate-700 hover:text-slate-950">
                     Settings<span className="sr-only"> for {p.name}</span>
                   </Link>
-                  {canEdit && (
+                  {mayRemove(p) && (
                     <Link href={`/w/${tenant}/projects?remove=${p.id}`} className="text-sm text-red-700 hover:text-red-900" aria-label={`Remove ${p.name}`}>
                       Remove
                     </Link>

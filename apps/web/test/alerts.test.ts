@@ -6,30 +6,31 @@ const T = tenantId("aaaaaaaa-0000-4000-8000-000000000001");
 const P = projectId("bbbbbbbb-0000-4000-8000-000000000002");
 const SETTINGS = `/w/${T}/p/${P}/settings/notifications`;
 
-function deps(role: "owner" | "admin" | "member", updated = true) {
+function deps(role: "owner" | "admin" | "editor" | "viewer", updated = true) {
   const applied: string[] = [];
   return {
     applied,
     deps: {
       apply: async (level: string) => {
         applied.push(level);
-        return { role, updated: role === "member" ? false : updated };
+        const allowed = role !== "viewer";
+        return { allowed, updated: allowed ? updated : false };
       },
     },
   };
 }
 
 describe("email alert threshold setting", () => {
-  it("saves a valid level for owners and admins", async () => {
-    for (const role of ["owner", "admin"] as const) {
+  it("saves a valid level for owners, admins and editors", async () => {
+    for (const role of ["owner", "admin", "editor"] as const) {
       const d = deps(role);
       expect(await handleAlertSetting(T, P, "high", d.deps)).toBe(`${SETTINGS}?alerts=high`);
       expect(d.applied).toEqual(["high"]);
     }
   });
 
-  it("refuses members", async () => {
-    const d = deps("member");
+  it("refuses viewers", async () => {
+    const d = deps("viewer");
     expect(await handleAlertSetting(T, P, "off", d.deps)).toBe(`${SETTINGS}?error=alerts_role`);
   });
 
