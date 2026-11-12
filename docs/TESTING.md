@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 663 core (unit + Postgres + detection UAT), 137 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 182, within the 663 |
-| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 663 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 725 core (unit + Postgres + detection UAT), 145 web |
+| Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 227, within the 725 |
+| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 725 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 44 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 51 |
 
-Totals on `feature/posture-scan` (2026-11-12): core 663, web 137, poller 12, E2E 55.
+Totals on `feature/data-controls` (2026-11-12): core 725, web 145, poller 15, E2E 62.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
