@@ -5,12 +5,13 @@ import type { ProjectId, TenantId } from "@supahound/core/tenancy/scope";
 // project, so a link is the whole state: nothing is remembered in a cookie or browser storage.
 // Pure functions, so every branch is testable without a browser.
 
-export type ProjectPage = "dashboard" | "incidents" | "findings" | "general" | "notifications" | "plan" | "people";
+export type ProjectPage = "dashboard" | "incidents" | "posture" | "findings" | "general" | "notifications" | "plan" | "people";
 export type WorkspacePage = "overview" | "projects" | "billing" | "settings";
 
 const PROJECT_SUFFIX: Record<ProjectPage, string> = {
   dashboard: "",
   incidents: "/incidents",
+  posture: "/posture",
   findings: "/findings",
   general: "/settings",
   notifications: "/settings/notifications",
@@ -52,7 +53,7 @@ const item = (label: string, href: string, current: boolean, soon = false): NavI
 export function projectNav(tenant: TenantId, project: ProjectId, active: ProjectPage): NavGroup[] {
   const p = (page: ProjectPage, label: string) => item(label, projectPath(tenant, project, page), page === active, SOON.has(page));
   return [
-    { label: null, items: [p("dashboard", "Dashboard"), p("incidents", "Incidents"), p("findings", "Security scan")] },
+    { label: null, items: [p("dashboard", "Dashboard"), p("incidents", "Incidents"), p("posture", "Posture"), p("findings", "Security scan")] },
     { label: "Settings", items: [p("general", "General"), p("notifications", "Notifications"), p("plan", "Plan & billing"), p("people", "People")] },
   ];
 }

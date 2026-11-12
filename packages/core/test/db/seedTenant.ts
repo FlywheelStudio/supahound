@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect } from "vitest";
 import * as billing from "../../src/db/billing.js";
+import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { tenantId, type ConnectionId, type ProjectId, type TenantId } from "../../src/tenancy/scope.js";
@@ -84,6 +85,12 @@ export async function seedFullTenant(db: Db, name: string, token: string): Promi
     }, new Date());
     expect(await billing.claimStripeEvent(tx, `evt_${slug}1`, "checkout.session.completed")).toBe(true);
     await billing.saveDailyUsage(tx, project, "2026-11-09", 1234);
+    // Posture scan (decision 038): one scan with one finding.
+    const scanId = (await posture.claimPostureScan(tx, project, new Date(), { refreshSeconds: 1, retrySeconds: 1 }))!;
+    await posture.savePostureScan(tx, project, scanId, {
+      catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },
+      advisor: null,
+    }, new Date());
     return { tenant, connection, project, run, incident };
   });
 }

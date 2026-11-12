@@ -67,5 +67,6 @@ describe("supahound CLI errors", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("FROM pg_catalog.pg_policies");
     expect(r.stdout).toContain("mapKeys(log_attributes)");
+    expect(r.stdout).toContain("has_table_privilege");
   });
 });

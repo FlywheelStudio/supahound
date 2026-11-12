@@ -12,6 +12,7 @@ const TABLES = [
   "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
   "billing_accounts", "stripe_events", "project_usage",
   "project_members", "project_invites",
+  "posture_scans", "posture_findings",
   "account_closures",
 ] as const;
 

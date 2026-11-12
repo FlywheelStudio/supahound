@@ -89,7 +89,7 @@ const tokenLength = async (connection: string) =>
   (await adminQuery<{ n: number }>("SELECT length(sealed_token) AS n FROM supahound.connections WHERE id = $1", [connection]))[0]?.n;
 
 test.describe("UAT: data controls", () => {
-  test("UAT-W29 an owner disconnects Supabase: token gone, polling stops, history kept for 30 days, everyone on the project is emailed", async ({ page, browser }) => {
+  test("UAT-W31 an owner disconnects Supabase: token gone, polling stops, history kept for 30 days, everyone on the project is emailed", async ({ page, browser }) => {
     const { tenant, email } = await owner(page, "w29");
     await pollAttack(tenant, "Shop");
     const conn = await seedOAuthConnection(tenant, `e2e-w29-${tenant}`, `refresh-w29-${tenant}`);
@@ -133,7 +133,7 @@ test.describe("UAT: data controls", () => {
     await expect(page.getByRole("listitem").filter({ hasText: "Shop" }).last()).toContainText("Supabase disconnected");
   });
 
-  test("UAT-W30 a member cannot disconnect, even by a replayed form; an admin can; a refused revoke is reported", async ({ page, browser }) => {
+  test("UAT-W32 a member cannot disconnect, even by a replayed form; an admin can; a refused revoke is reported", async ({ page, browser }) => {
     const { tenant } = await owner(page, "w30");
     const refresh = `refresh-w30-${tenant}`;
     const conn = await seedOAuthConnection(tenant, `e2e-w30-${tenant}`, refresh);
@@ -165,7 +165,7 @@ test.describe("UAT: data controls", () => {
     expect(await adminQuery("SELECT 1 FROM supahound.connections WHERE id = $1", [conn])).toHaveLength(0);
   });
 
-  test("UAT-W31 a grant revoked outside Supahound stops polling, emails the project's people once, and shows on settings", async ({ page }) => {
+  test("UAT-W33 a grant revoked outside Supahound stops polling, emails the project's people once, and shows on settings", async ({ page }) => {
     const { tenant, email } = await owner(page, "w31");
     await pollAttack(tenant, "Shop");
     const conn = await seedConnection(tenant, JSON.stringify({ accessToken: "old", refreshToken: `refresh-w31-${tenant}`, expiresAt: "2000-01-01T00:00:00Z" }));
@@ -198,7 +198,7 @@ test.describe("UAT: data controls", () => {
     await expect(page.getByRole("button", { name: "Reconnect Supabase" })).toBeVisible();
   });
 
-  test("UAT-W32 the owner closes: exact name, Stripe cancels at the period end, the workspace works until then, then every page goes to the closed page", async ({ page, browser }) => {
+  test("UAT-W34 the owner closes: exact name, Stripe cancels at the period end, the workspace works until then, then every page goes to the closed page", async ({ page, browser }) => {
     const { tenant, subscription } = await subscribedOwner(page, "w32");
     await pollAttack(tenant, "Shop");
     const { page: member } = await asMember(browser, tenant, "member", "w32m");
@@ -231,7 +231,7 @@ test.describe("UAT: data controls", () => {
     await expect(member.getByText("Only a workspace owner can reopen it.")).toBeVisible();
   });
 
-  test("UAT-W33 an admin cannot close, even by a replayed form; the owner keeps it open, later reopens, and gets no second free trial", async ({ page, browser }) => {
+  test("UAT-W35 an admin cannot close, even by a replayed form; the owner keeps it open, later reopens, and gets no second free trial", async ({ page, browser }) => {
     const { tenant, subscription } = await subscribedOwner(page, "w33");
     await page.goto(`/w/${tenant}/settings`);
     const ownerForm = await page.locator("form", { has: page.getByRole("button", { name: "Close workspace" }) }).evaluate((f) => f.outerHTML);
@@ -270,7 +270,7 @@ test.describe("UAT: data controls", () => {
     expect(await stripeSubscription(second)).toMatchObject({ status: "active", trial_period_days: null });
   });
 
-  test("UAT-W34 an owner who had a free trial gets none in a second workspace", async ({ page }) => {
+  test("UAT-W36 an owner who had a free trial gets none in a second workspace", async ({ page }) => {
     const { email } = await subscribedOwner(page, "w34");
     // The app creates one workspace per sign-in; the second comes straight from core.
     const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 1 });
@@ -288,7 +288,7 @@ test.describe("UAT: data controls", () => {
     await expect(page.locator("#terms")).toContainText("No free trial");
   });
 
-  test("UAT-W35 once the workspace stops paying, the data job deletes its logs and history and keeps its record; members still see the closed page", async ({ page, browser }) => {
+  test("UAT-W37 once the workspace stops paying, the data job deletes its logs and history and keeps its record; members still see the closed page", async ({ page, browser }) => {
     const { tenant, subscription } = await subscribedOwner(page, "w35");
     await pollAttack(tenant, "Shop");
     const { page: member } = await asMember(browser, tenant, "member", "w35m");

@@ -38,6 +38,8 @@ export interface IncidentFeatures {
 const SIGNALS = new Set([
   "other_owner", "all_but_self", "excludes_other", "pattern", "range", "any_owner",
   "browser_caller", "mobile_app_caller", "non_hosting_network", "manual_tool", "new_network",
+  // The table's posture is exposed (decision 038): RLS off, or a policy that opens writes.
+  "posture_exposed",
 ]);
 const METHODS = new Set(["GET", "HEAD", "PATCH", "PUT", "DELETE", "POST"]);
 const OUTCOMES = new Set(["rejected", "empty", "rows_returned", "unknown"]);

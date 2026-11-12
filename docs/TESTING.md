@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 628 core (unit + Postgres + detection UAT), 133 web |
-| Postgres | RLS, isolation, repositories, retention and purge, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 186, within the 628 |
-| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 628 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 663 core (unit + Postgres + detection UAT), 137 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 182, within the 663 |
+| workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 663 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → data controls, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 47 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 44 |
 
-Totals on `feature/data-controls` (2026-11-12): core 628, web 133, poller 15, E2E 58.
+Totals on `feature/posture-scan` (2026-11-12): core 663, web 137, poller 12, E2E 55.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -38,7 +38,9 @@ fails if any suite reports skipped tests.
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.
 3. **A fake Supabase Management API** (`support/fakeManagement.ts`). It serves `GET /v1/projects`
-   per bearer token; an unknown token gets 401. The Worker reaches it through `SUPABASE_API_URL`,
+   per bearer token; an unknown token gets 401. For the posture scan (#11) it also serves the
+   read-only SQL endpoint and `GET .../advisors/security` per project ref, set through `/__test/posture`;
+   the E2E poll reaches them through core's real clients. The Worker reaches it through `SUPABASE_API_URL`,
    because `page.route` cannot see server-side calls.
 4. **The built Worker** under `wrangler dev`, with test-only secrets in a temp env file.
 
@@ -140,11 +142,15 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W26 | An owner invites a colleague by email; signed out, they open the link, sign in, accept, and see only that project; the other project is a 404; the link works once (`people.uat.spec.ts`) |
 | UAT-W27 | A viewer gets no invite form and a replayed owner form is refused; an admin cannot invite an Owner, even by a forged form |
 | UAT-W28 | An invite is bound to its address; a resend kills the old link; an expired or canceled invite is refused; a non-member gets a 404 |
-| UAT-W29 | An owner disconnects Supabase after typing its name: the token and its project go, audit rows stay, Supabase gets the revoke (`dataControls.uat.spec.ts`) |
-| UAT-W30 | A member gets no Disconnect and a replayed owner form is refused; an admin disconnects; a refused revoke tells the owner what to do |
-| UAT-W31 | The owner closes after typing the exact name: Stripe cancels at once without proration, projects pause, every page (billing too) goes to the closed page; a member cannot reopen |
-| UAT-W32 | An admin cannot close, even by a replayed form; the owner reopens, polling resumes, and billing asks for a card |
-| UAT-W33 | 30 days after closing, the data job deletes the workspace and keeps only the billing record; another workspace is untouched; the old URL is a 404 |
+| UAT-W29 | The first poll after a pick shows posture findings on the overview, the dashboard and the Posture tab, with fix SQL; Advisor duplicates show once; no Advisor free text; a refused project reads "unable to assess" (`posture.uat.spec.ts`) |
+| UAT-W30 | Scan now queues a scan the next poll runs within the 24 hours; a viewer gets no button and a replayed owner form is refused |
+| UAT-W31 | An owner disconnects Supabase after typing its name: token emptied, polling stops, history kept, the owner and the project's viewer get the email, Supabase gets the revoke (`dataControls.uat.spec.ts`) |
+| UAT-W32 | A member gets no Disconnect and a replayed owner form is refused; an admin disconnects; a refused revoke tells the owner what to do; a connection with no project goes at once |
+| UAT-W33 | A grant revoked at Supabase (`invalid_grant` on refresh) stops polling, emails the project's people once, and shows "Access revoked" with Reconnect on settings |
+| UAT-W34 | The owner closes after typing the exact name: Stripe gets `cancel_at_period_end`, the workspace works until the period ends, then every page (billing too) goes to the closed page; a member cannot reopen |
+| UAT-W35 | An admin cannot close, even by a replayed form; the owner keeps it open (the Stripe cancel is undone), later reopens after the period, and gets no second free trial |
+| UAT-W36 | An owner who had a free trial gets none in a second workspace (our page and Checkout both say so) |
+| UAT-W37 | Once the closed workspace stops paying, the data job deletes its logs and history and keeps its record, members, billing, Stripe events and audit log; another workspace is untouched; members still see the closed page |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -240,30 +246,30 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Nobody manages their own role (#24) | `canManagePerson` drops the self check | 1 unit test fails |
 | Admins never grant Owner (#24) | `assignableRoles("admin")` includes Owner | 2 unit tests fail |
 | Invite email HTML is escaped (#24) | `renderInviteEmail` drops `escapeHtml` on the lead | 1 unit test fails |
+| RLS off is rated by the API grants (#11) | `rls_disabled` ignores grants | 1 unit test fails |
+| `USING (true)` is detected (#11) | `isTrueExpr` never matches | 9 unit tests fail |
+| A restrictive policy still filters (#11) | Restrictive policies ignored | 1 unit test fails |
+| `security_invoker` views pass (#11) | The invoker check removed | 2 tests fail (unit and Postgres) |
+| FORCE is not required (#11) | RLS counts only when forced | 2 unit tests fail |
+| The Advisor's "unavailable" lint is not clean (#11) | The lint ignored | 2 tests fail (unit and Postgres) |
+| An Advisor body without lints is an error (#11) | Read as no lints | 1 unit test fails |
+| No Advisor free text is kept (#11) | `parseLints` keeps `title` | 2 unit tests fail |
+| Names with control characters are dropped (#11) | `safeName` allows them | 3 unit tests fail |
+| Advisor duplicates show once (#11) | `dedupePosture` keeps all | 2 tests fail (unit and Postgres) |
+| Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
+| The raise agrees with the Posture page (#11) | `postureExposedTables` filters by severity before dedupe | 1 Postgres test fails |
+| Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |
+| Scan now runs within the 24 hours (#11) | The claim ignores a pending request | 1 Postgres test fails |
+| Daily refresh (#11) | Refresh wait set to 10^9 s | 3 Postgres tests fail |
+| A failed scan retries after an hour (#11) | Retry wait 0 | 1 Postgres test fails |
+| A failed source keeps its findings (#11) | Failed sources wipe their rows | 3 Postgres tests fail |
+| Posture audit row precedes the calls (#11) | Audit row not written | 1 Postgres test fails |
+| Posture rows hidden without a project role (#11) | `project_access` passes every row | 3 Postgres tests fail |
+| Only owners, admins and editors ask for a scan (#11) | INSERT policy passes every role / UPDATE policy passes every role | 1 Postgres test fails each |
+| Signed-in users never write findings (#11) | Findings INSERT policy passes every role | 1 Postgres test fails |
+| The overview never calls a failed scan clean (#11) | `postureLine` drops the unable state / hides the Advisor gap | 1 web unit test fails each |
+| The server checks the role before Scan now (#11) | `scanNowAction` skips `canScan` | UAT-W30 fails (no role notice) |
+| The Posture tab shows the fix SQL (#11) | The page hides the SQL | UAT-W29 fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
-| Open incidents are resolved before delete (#43) | The resolve step matches nothing | 7 Postgres tests fail |
-| The retention window is 30 days (#43) | `RETENTION_DAYS` set to 3650 | 4 Postgres tests fail |
-| Old findings go even with a live incident (#43) | Findings delete keeps rows with an incident | 1 Postgres test fails |
-| The latest good poll run stays (#43) | Retention drops the latest-ok exclusion | 1 Postgres test fails |
-| The purge keeps the tax record (#43) | `purgeTenant` copies no Stripe customer | 1 Postgres test fails |
-| The purge waits 30 days (#43) | `purgeTenant` ignores `purge_after`; separately, `runDataJob` ignores it | 1 Postgres test fails each |
-| The gate stops closed workspaces (#43) | `withPaidTenantForUser` skips the closure check | 1 Postgres test fails |
-| Closed workspaces reach the closed page (#43) | `toBillingIfUnpaid` drops the closed redirect | UAT-W31 fails |
-| Only owners and admins delete a connection (#43) | `connection_remove` passes every role | 1 Postgres test fails |
-| Only an owner writes a closure (#43) | `closure_insert` passes every role | 1 Postgres test fails |
-| No signed-in request deletes a tenant (#43) | `tenant_purge` passes every row | 1 Postgres test fails |
-| Kept records live 7 years (#43) | `closure_delete` drops its date rule | 1 Postgres test fails |
-| The scheduler skips closed workspaces (#43) | `dueProjects` drops its closure check | `isolation.test.ts` fails |
-| The notifier reads owners only (#43) | `notifier_read` passes every row | `isolation.test.ts` fails |
-| Close cancels Stripe (#43) | Core skips the cancel; separately, the web action passes no gateway | 2 Postgres tests fail; UAT-W31 and UAT-W32 fail |
-| A closed workspace starts no checkout (#43) | `startCheckout` skips the closure check; separately, `completeVerification` does | 1 Postgres test fails each |
-| Disconnect revokes at Supabase (#43) | Core never revokes; separately, the web action passes no revoke | 2 Postgres tests fail; UAT-W29 fails |
-| Disconnect and close check the role (#43) | Core drops the member check (disconnect) or the owner check (close) | 1 and 2 Postgres tests fail |
-| A notice comes 30 days ahead (#43) | The period check set to 0 days | 2 unit tests fail |
-| The notice CLI only counts by default (#43) | The dry-run branch removed | 1 unit test fails |
-| Each owner gets one notice (#43) | Recipients not deduplicated; separately, the journal ignored | 1 Postgres test; 2 unit tests fail |
-| Forms return only to known pages (#43) | `parseBack` returns its input | 1 web unit test fails |
-| `data` messages reach the data job (#43) | The consumer never parses them | 1 workerd test fails |
-| The production migration keeps the old code working (#43) | — (a check, not a mutation): `develop`'s unchanged suites on the new schema | Core 588 of 589 (the 1 is the table-list check), web 127, poller 12, E2E 53 of 53 |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

@@ -13,6 +13,7 @@ import {
   type OwnershipMap,
   type PolicyRow,
 } from "./ownership/ownership.js";
+import { POSTURE_SQL } from "./config/posture.js";
 import { ServiceRoleNetworks } from "./detectors/serviceRole.js";
 import { scan } from "./scan.js";
 import { projectScope } from "./tenancy/scope.js";
@@ -246,7 +247,8 @@ async function main(argv: string[]): Promise<void> {
     case "print-sql":
       process.stdout.write(`-- Edge rollup (Management API logs endpoint)\n${edgeRollupSql({ env: process.env })}\n\n`);
       process.stdout.write(`-- Key discovery (PRD task 1)\n${discoverKeysSql(process.env)}\n\n`);
-      process.stdout.write(`-- Ownership from RLS policies (read-only SQL)\n${POLICIES_SQL}\n`);
+      process.stdout.write(`-- Ownership from RLS policies (read-only SQL)\n${POLICIES_SQL}\n\n`);
+      process.stdout.write(`-- Posture scan catalog checks (read-only SQL, decision 038)\n${POSTURE_SQL}\n`);
       return;
     case "master-key": {
       const { values } = parseArgs({ args: rest, options: { rotate: { type: "boolean" } } });
