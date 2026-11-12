@@ -1,6 +1,6 @@
 import { actorAlias, detectorLabel } from "@supahound/core/alerts/email";
 import { INCIDENT_HISTORY_DAYS, listIncidentHistory } from "@supahound/core/db/repo";
-import Link from "next/link";
+import Link from "../../../../../../components/NavLink";
 import { notFound } from "next/navigation";
 import { SeverityBadge, Shell } from "../../../../../../components/Shell";
 import { StatusBadge } from "../../../../../../components/StatusBadge";

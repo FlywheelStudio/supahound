@@ -7,6 +7,19 @@ import type { TenantId } from "../tenancy/scope.js";
 //
 // Keep these transactions short: never call Supabase or a model from inside one.
 
+// Opens a transaction and sets its GUCs in ONE round trip. The web Worker can sit far from
+// Postgres, so every round trip counts. A multi-statement query cannot take $n parameters, so
+// keys must match a fixed pattern and values go through the driver's literal escaping.
+const GUC_KEY = /^app\.[a-z_]+$/;
+
+export async function begin(client: PoolClient, settings: Record<string, string>): Promise<void> {
+  const sets = Object.entries(settings).map(([key, value]) => {
+    if (!GUC_KEY.test(key)) throw new Error(`Invalid setting name: ${key}`);
+    return `set_config('${key}', ${client.escapeLiteral(value)}, true)`;
+  });
+  await client.query(sets.length ? `BEGIN; SELECT ${sets.join(", ")}` : "BEGIN");
+}
+
 export class TenantTx {
   private open = true;
 
@@ -30,8 +43,7 @@ export async function withTenant<T>(pool: Pool, tenant: TenantId, fn: (tx: Tenan
   const client = await pool.connect();
   const tx = new TenantTx(client, tenant);
   try {
-    await client.query("BEGIN");
-    await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenant]);
+    await begin(client, { "app.tenant_id": tenant });
     const result = await fn(tx);
     await client.query("COMMIT");
     return result;

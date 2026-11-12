@@ -1,5 +1,5 @@
 import { ENTERPRISE_FROM_REQUESTS, needsEnterprise, PRICE_LABEL, PRO_FROM_REQUESTS, USAGE_WINDOW_DAYS } from "@supahound/core/billing/policy";
-import Link from "next/link";
+import Link from "../../../../../../../components/NavLink";
 import { ComingSoon, Shell } from "../../../../../../../components/Shell";
 import { mode } from "../../../../../../../lib/billing";
 import { workspacePath } from "../../../../../../../lib/nav";

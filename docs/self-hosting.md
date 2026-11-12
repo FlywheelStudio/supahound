@@ -203,6 +203,15 @@ In the Supahound Supabase project: Auth → Hooks → Send Email Hook → HTTPS,
 Open `APP_URL`, sign in with a magic link, create a workspace, connect your Supabase org and pick
 the projects to watch. The poller reads them on the next minute.
 
+### 11. Speed: run the web Worker next to your database
+
+A signed-in page makes about ten Postgres round trips in a row. Without a placement hint the Worker
+runs next to the visitor, and each trip crosses to your database region. Add your Supabase region
+to `apps/web/wrangler.jsonc` before you deploy, for example
+`"placement": { "region": "aws:eu-west-1" }`. Turn on asymmetric JWT signing keys in the Supabase
+dashboard (Project Settings → JWT Keys) so `getClaims()` verifies sign-ins without a call to Auth.
+Decision 039.
+
 ## Never do these
 
 - Never enable Hyperdrive query caching, or page caching for the app.

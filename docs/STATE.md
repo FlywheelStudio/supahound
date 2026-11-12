@@ -20,6 +20,7 @@ This file tracks only what is in progress and what is done.
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
+| Web latency: Worker placed next to Postgres, one round trip to open a transaction, pending bar on links | #115 | 2026-11-12, into `develop` | [features/web-latency.md](features/web-latency.md), decision 039 |
 | Security scan domains per project: a verified domain belongs to one project; Owners and Admins attach it; the Security scan tab lists the newest finished scan's findings with the fix | #100 | 2026-11-12, PR #111 into `develop`; waits for the production migration (Erik) before merge | [features/scan-domains.md](features/scan-domains.md), decision 040 |
 | Data controls: retention (nothing deleted while a workspace pays), close at the period end with the record kept, disconnect with email and 30-day keep, revoked-grant alert, one free trial ever, subprocessor notice CLI | #43 | 2026-11-12, PR #107 into `develop`; waits for the production migration `20261112030000_data_controls.sql` (Erik) before merge | [features/data-controls.md](features/data-controls.md), decision 037 |
 | Posture scan V1: tables without RLS, open policies, views without `security_invoker`, Security Advisor; daily, first poll and Scan now; raises detections on exposed tables | #11 | 2026-11-12, PR #109 into `develop`; waits for the production migration (Erik) before merge | [features/posture-scan.md](features/posture-scan.md), decision 038 |
