@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 556 core (unit + Postgres + detection UAT), 104 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 128, within the 556 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 588 core (unit + Postgres + detection UAT), 127 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 160, within the 588 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 556 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 588 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 39 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 42 |
 
-Totals on `feature/incident-history` (2026-11-12): core 556, web 104, poller 12, E2E 50.
+Totals on `feature/project-people` (2026-11-12): core 588, web 127, poller 12, E2E 53.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -220,6 +220,20 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Bad IDs and cursors never reach Postgres (#44) | `parseIncidentId` returns its input; `parseCursor` skips the digit check | 1 unit test fails each |
 | Stored explanation text is cleaned (#44) | `explanationOf` skips `cleanText` | 2 unit tests fail |
 | The detail hides the raw actor (#44) | The page prints `actor` next to the alias | UAT-W24 fails |
+| Project rows hidden without a role (#24) | `project_access` policies pass every row | 5 Postgres tests fail; UAT-W26 fails (the other project shows) |
+| Settings writes need Editor (#24) | `project_settings` policy passes every role | 1 Postgres test fails |
+| Only an Owner grants Owner (#24) | `people_*` policies drop `role <> 'owner'` | 3 Postgres tests fail |
+| `project_role` stays in the tenant (#24) | The function drops its join on `projects` | 3 Postgres tests fail (Owner on another tenant's project ID) |
+| An invite needs the invited address (#24) | `acceptInvite` skips the email check | 1 Postgres test fails |
+| An invite expires (#24) | `acceptInvite` ignores `expires_at` | 1 Postgres test fails |
+| An invite works once (#24) | `acceptInvite` ignores `accepted_at` | 1 Postgres test fails |
+| Alerts go to the project's people (#24) | `alertRecipients` drops its project filter | 1 Postgres test fails |
+| The backfill keeps members' access (#24) | The backfill statement removed | 3 Postgres tests fail |
+| The server checks the role before an invite (#24) | `inviteAction` skips `canInviteAs` (RLS still refuses) | UAT-W27 fails (500, not the role notice) |
+| An invite link survives sign-in (#24) | `/auth/confirm` ignores the `supahound_next` cookie | UAT-W26 fails (lands on onboarding) |
+| Nobody manages their own role (#24) | `canManagePerson` drops the self check | 1 unit test fails |
+| Admins never grant Owner (#24) | `assignableRoles("admin")` includes Owner | 2 unit tests fail |
+| Invite email HTML is escaped (#24) | `renderInviteEmail` drops `escapeHtml` on the lead | 1 unit test fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

@@ -78,13 +78,17 @@ None new. The invite email uses the web Worker's Cloudflare Email binding and `E
   033 promised, a second run changes nothing, a re-run covers a project added in between.
 - `isolation.test.ts` lists both new tables; `alerts.test.ts` and `users.test.ts` fixtures give
   members a project role.
-- Web unit, `apps/web/test/people.test.ts` (21): the matrix, parsing, paths, `handleInvite`, the email.
+- Web unit, `apps/web/test/people.test.ts` (20): the matrix, parsing, paths, `handleInvite`, the email.
 - E2E, `apps/web/e2e/specs/people.uat.spec.ts`: UAT-W26 (invite → signed-out link → sign in →
   accept → only that project; other project 404; link works once), UAT-W27 (a viewer and a
   replayed owner form refused; an admin cannot invite an Owner), UAT-W28 (wrong address, resend
   kills the old link, expiry, cancel; a non-member 404). The spec reads the real invite email from
   the wrangler log (`e2e/support/mail.ts`).
-- Mutation checks: docs/TESTING.md.
+- Mutation checks (14, all red, then restored): docs/TESTING.md.
+- Old code on the new schema (the migration alone, before any app change): core 553 of 556 and
+  E2E 47 of 50 green. The six reds were the isolation test's table list and fixtures that add a
+  workspace `member` after the migration (`users.test.ts` 2, UAT-W13, W18, W22). The old code
+  writes no such row in production: only `createWorkspace` writes memberships, always `owner`.
 
 ## Gotchas
 
