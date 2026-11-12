@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as billing from "../../src/db/billing.js";
 import * as people from "../../src/db/people.js";
+import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { createWorkspace, NotAMemberError, withTenantForUser } from "../../src/db/user.js";
@@ -11,7 +12,10 @@ import { pgInfo, useDb } from "./harness.js";
 // People and roles per project (issue #24, decision 036): RLS by project inside the tenant, the
 // write rules per role, and invites (expiry, single use, email binding, tenant binding).
 
-const PROJECT_TABLES = ["projects", "service_role_networks", "poll_runs", "incidents", "findings", "project_usage", "audit_log"] as const;
+const PROJECT_TABLES = [
+  "projects", "service_role_networks", "poll_runs", "incidents", "findings", "project_usage", "audit_log",
+  "posture_scans", "posture_findings",
+] as const;
 const NOW = new Date("2026-11-12T12:00:00Z");
 const user = () => verifiedUserId(randomUUID());
 
@@ -43,6 +47,11 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
       await repo.saveNetworks(tx, p, [16509]);
       await repo.appendAudit(tx, { projectId: p, action: "logs_query", detail: { rows: 1 } });
       await billing.saveDailyUsage(tx, p, "2026-11-11", 10);
+      const scanId = (await posture.claimPostureScan(tx, p, NOW, { refreshSeconds: 1, retrySeconds: 1 }))!;
+      await posture.savePostureScan(tx, p, scanId, {
+        catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },
+        advisor: null,
+      }, NOW);
       return p;
     });
   }

@@ -89,6 +89,7 @@ const SIGNAL_LABEL: Record<string, string> = {
   non_hosting_network: "Called from a non-hosting network",
   manual_tool: "Called from a manual tool (curl, scripts)",
   new_network: "Called from a network not seen before",
+  posture_exposed: "The table's posture is exposed (RLS off or an open policy)",
 };
 
 const MAX_SUMMARY = 600;

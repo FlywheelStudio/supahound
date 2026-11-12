@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as billing from "../../src/db/billing.js";
+import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
 import { TenantTx, withTenant } from "../../src/db/tenant.js";
 import { tenantId, type ConnectionId, type ProjectId, type TenantId } from "../../src/tenancy/scope.js";
@@ -16,6 +17,7 @@ const TABLES = [
   "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
   "billing_accounts", "stripe_events", "project_usage",
   "project_members", "project_invites",
+  "posture_scans", "posture_findings",
 ] as const;
 
 interface Seeded {
@@ -94,6 +96,12 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       }, new Date());
       expect(await billing.claimStripeEvent(tx, `evt_${slug}1`, "checkout.session.completed")).toBe(true);
       await billing.saveDailyUsage(tx, project, "2026-11-09", 1234);
+      // Posture scan (decision 038): one scan with one finding.
+      const scanId = (await posture.claimPostureScan(tx, project, new Date(), { refreshSeconds: 1, retrySeconds: 1 }))!;
+      await posture.savePostureScan(tx, project, scanId, {
+        catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },
+        advisor: null,
+      }, new Date());
       return { tenant, connection, project, run, incident };
     });
   }
