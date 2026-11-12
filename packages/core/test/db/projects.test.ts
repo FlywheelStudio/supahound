@@ -75,6 +75,32 @@ describe.skipIf(pgInfo === null)("Project picker storage (issue #9)", () => {
     expect(left.rows[0]).toEqual({ runs: 0, orphaned_audit: 1, bobs: 1 });
   });
 
+  it("lists open incidents for one project only, and never another tenant's (issue #98)", async () => {
+    const pick = [{ ref: "incidentsrefaaaaaaa1", name: "Inc A" }, { ref: "incidentsrefbbbbbbb2", name: "Inc B" }];
+    await withTenantForUser(db.app, alice, a, (tx) => repo.watchProjects(tx, connA, pick));
+    const mine = await withTenantForUser(db.app, alice, a, (tx) => repo.listProjects(tx));
+    const incA = mine.find((p) => p.name === "Inc A")!;
+    const incB = mine.find((p) => p.name === "Inc B")!;
+    await withTenant(db.app, b, (tx) => repo.watchProjects(tx, connB, [{ ref: "incidentsrefccccccc3", name: "Bob Inc" }]));
+    const bobProject = (await withTenant(db.app, b, (tx) => repo.listProjects(tx))).find((p) => p.name === "Bob Inc")!;
+    const open = (actor: string) => ({
+      id: null, actor, status: "open" as const, severity: "high" as const, detectors: ["cross_tenant"], signals: [],
+      findingCount: 1, hits: 3, openedAt: NOW, lastSeenAt: NOW,
+    });
+    await withTenant(db.app, a, async (tx) => {
+      await repo.upsertIncident(tx, incA.id, open("user:a1"));
+      await repo.upsertIncident(tx, incB.id, open("user:b1"));
+    });
+    await withTenant(db.app, b, (tx) => repo.upsertIncident(tx, bobProject.id, open("user:bob")));
+
+    const onlyA = await withTenantForUser(db.app, alice, a, (tx) => repo.listOpenIncidents(tx, 50, incA.id));
+    expect(onlyA.map((i) => [i.projectId, i.projectName])).toEqual([[incA.id, "Inc A"]]);
+    // Another tenant's project ID returns nothing, not that tenant's incidents.
+    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.listOpenIncidents(tx, 50, bobProject.id))).toEqual([]);
+    const all = await withTenantForUser(db.app, alice, a, (tx) => repo.listOpenIncidents(tx));
+    expect(all.map((i) => i.projectName).sort()).toEqual(["Inc A", "Inc B"]);
+  });
+
   it("reads a connection token inside the caller's membership transaction", async () => {
     const token = await withTenantForUser(db.app, alice, a, (tx) => accessTokenInTx(tx, db.vault, connA, null, NOW));
     expect(token).toBe("tok-a");

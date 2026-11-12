@@ -128,6 +128,10 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W16 | The overview says when cross-tenant reads cannot be assessed or have nothing to cover (`ownership.uat.spec.ts`) |
 | UAT-W17 | The owner's address is on file; every incident emails by default; the owner raises the threshold (`alerts.uat.spec.ts`) |
 | UAT-W18 | A member sees the threshold but cannot change it, even by replaying the owner's form; visiting records the member's address |
+| UAT-W19 | The owner opens a project from the overview and switches projects from the dropdown (`nav.uat.spec.ts`) |
+| UAT-W20 | Project settings: General with Remove, Notifications with SMS Coming soon, Plan, People; Soon badges |
+| UAT-W21 | A project ID from another workspace, a made-up ID and a malformed ID are each a 404 |
+| UAT-W22 | A member opens every project page but gets no Add project, no Remove and no alert form |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -147,6 +151,8 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | UAT-B10 | A canceled subscription closes the workspace again |
 | UAT-B11 | A member cannot add the card and is told to ask an owner |
 | UAT-B12 | Each project shows its tier and 30-day requests; a busy project bills at Pro without proration; above 10M shows Enterprise |
+| UAT-B13 | A staff owner (exempt domain) opens a workspace with no card and no Stripe calls; the workspace needs a card once a second owner joins (decision 029) |
+| UAT-B14 | A staff admin in a customer's workspace does not make it free (decision 029) |
 
 ### Manual (needs a live service)
 
@@ -185,10 +191,16 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
+| Staff exemption ends with the owners (decision 029) | The membership trigger never fires | 4 Postgres exemption tests fail |
+| The scheduler polls exempt workspaces (decision 029) | `dueProjects` drops `OR exempt_at IS NOT NULL` | 1 Postgres exemption test fails |
+| The exempt domain must match (decision 029) | E2E exempt list set to another domain | UAT-B13 fails |
+| Only the sole owner is exempt (decision 029) | Admins may be granted it; the gate skips the sole-owner check | UAT-B13 and UAT-B14 fail |
 | Alerts send once per severity (#16) | `pendingAlerts` ignores `alerted_severity` | 4 Postgres alert tests fail |
 | A sent alert is marked (#16) | `sendPendingAlerts` never calls `markAlerted` | 5 Postgres alert tests fail |
 | Model text loses its links (#16) | `cleanText` skips `stripLinks` | 1 unit test fails |
 | Only owners and admins set the threshold (#16) | `setEmailAlertsAction` treats every role as owner | UAT-W18 fails |
+| Project pages show only this tenant's projects (#98) | `loadProjectPage` falls back to the first project for an unknown ID | UAT-W21 fails (200, not 404) |
+| The dashboard lists one project's incidents (#98) | `listOpenIncidents` ignores its project filter | `projects.test.ts` fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

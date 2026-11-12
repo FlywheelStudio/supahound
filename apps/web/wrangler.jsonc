@@ -45,7 +45,11 @@
     // A Billing Portal configuration ID; empty uses the account's default.
     "STRIPE_PORTAL_CONFIGURATION": "",
     // Only E2E points this at a fake.
-    "STRIPE_API_URL": "https://api.stripe.com"
+    "STRIPE_API_URL": "https://api.stripe.com",
+    // Staff workspaces without billing (decision 029): comma-separated email domains. A workspace
+    // whose only owner signs in with an email on one of these domains needs no card. Exact match,
+    // no subdomains. Empty: no exemptions.
+    "SUPAHOUND_BILLING_EXEMPT_DOMAINS": ""
   },
   "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET", "SUPAHOUND_MASTER_KEYS"] },
   "observability": {

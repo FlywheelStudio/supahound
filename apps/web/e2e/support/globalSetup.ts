@@ -70,6 +70,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     `STRIPE_WEBHOOK_SECRET=${stripe.webhookSecret}`,
     "STRIPE_PRICE_STARTER=price_starter_e2e",
     "STRIPE_PRICE_PRO=price_pro_e2e",
+    // Staff workspaces without billing (decision 029). Customers sign in on example.com.
+    "SUPAHOUND_BILLING_EXEMPT_DOMAINS=staff.test",
   ].join("\n"));
 
   const webDir = fileURLToPath(new URL("../../", import.meta.url));

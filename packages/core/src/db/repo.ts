@@ -318,8 +318,10 @@ export async function appendAudit(
 // project IDs and poll times and nothing else. Returns scopes only; each job then opens its own
 // tenant transaction.
 //
-// billing "stripe" skips tenants whose subscription may not be polled (decision 028); "off" is for
-// self-hosting without billing. The scheduler reads billing_accounts (tenant_id, status) only.
+// billing "stripe" skips tenants whose subscription may not be polled (decision 028), unless the
+// workspace is exempt (decision 029); "off" is for self-hosting without billing. The scheduler
+// reads billing_accounts (tenant_id, status, exempt_at) only. A membership trigger clears
+// exempt_at when the owners change, so the scheduler needs no access to memberships.
 export async function dueProjects(
   schedulerPool: Pool,
   olderThanSeconds: number,
@@ -333,7 +335,7 @@ export async function dueProjects(
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`
       : `SELECT p.tenant_id, p.id FROM supahound.projects p
-         JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND b.status = ANY($3::text[])
+         JOIN supahound.billing_accounts b ON b.tenant_id = p.tenant_id AND (b.status = ANY($3::text[]) OR b.exempt_at IS NOT NULL)
          WHERE NOT p.paused AND (p.last_polled_at IS NULL OR p.last_polled_at < now() - make_interval(secs => $1))
          ORDER BY p.last_polled_at NULLS FIRST
          LIMIT $2`,
@@ -403,6 +405,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
 
 export interface IncidentSummary {
   id: string;
+  projectId: ProjectId;
   projectName: string;
   severity: Severity;
   detectors: string[];
@@ -411,22 +414,23 @@ export interface IncidentSummary {
   summary: { summary?: string } | null;
 }
 
-export async function listOpenIncidents(tx: TenantTx, limit = 50): Promise<IncidentSummary[]> {
+// Open incidents, worst first. With `project`, only that project's (the project dashboard).
+export async function listOpenIncidents(tx: TenantTx, limit = 50, project?: ProjectId): Promise<IncidentSummary[]> {
   const rows = await tx.query<{
-    id: string; project_name: string; severity: Severity; detectors: string[]; hits: number;
+    id: string; project_id: string; project_name: string; severity: Severity; detectors: string[]; hits: number;
     last_seen_at: Date; summary: { summary?: string } | null;
   }>(
-    `SELECT i.id, p.name AS project_name, i.severity, i.detectors, i.hits, i.last_seen_at, i.summary
+    `SELECT i.id, i.project_id, p.name AS project_name, i.severity, i.detectors, i.hits, i.last_seen_at, i.summary
      FROM supahound.incidents i
      JOIN supahound.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
-     WHERE i.tenant_id = $1 AND i.status = 'open'
+     WHERE i.tenant_id = $1 AND i.status = 'open' AND ($3::uuid IS NULL OR i.project_id = $3::uuid)
      ORDER BY CASE i.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
               i.last_seen_at DESC
      LIMIT $2`,
-    [tx.tenantId, limit],
+    [tx.tenantId, limit, project ?? null],
   );
   return rows.map((r) => ({
-    id: r.id, projectName: r.project_name, severity: r.severity, detectors: r.detectors, hits: r.hits,
+    id: r.id, projectId: projectId(r.project_id), projectName: r.project_name, severity: r.severity, detectors: r.detectors, hits: r.hits,
     lastSeenAt: r.last_seen_at, summary: r.summary,
   }));
 }

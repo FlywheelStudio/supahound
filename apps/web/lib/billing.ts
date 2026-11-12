@@ -1,4 +1,4 @@
-import type { Access } from "@supahound/core/billing/policy";
+import { parseExemptDomains, type Access } from "@supahound/core/billing/policy";
 import { billingPath, syncSeats, type FlowDeps } from "@supahound/core/billing/flow";
 import { billingMode, PaymentRequiredError, withPaidTenantForUser, type BillingMode } from "@supahound/core/db/billing";
 import type { TenantTx } from "@supahound/core/db/tenant";
@@ -14,6 +14,11 @@ import { stripeGateway } from "./stripe";
 
 export function mode(): BillingMode {
   return billingMode(env.SUPAHOUND_BILLING);
+}
+
+// Decision 029: the email domains whose sole owners get a workspace without billing.
+export function exemptDomains(): readonly string[] {
+  return parseExemptDomains(env.SUPAHOUND_BILLING_EXEMPT_DOMAINS);
 }
 
 export function paidTenant<T>(
