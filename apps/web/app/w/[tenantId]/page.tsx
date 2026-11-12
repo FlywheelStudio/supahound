@@ -53,7 +53,9 @@ export default async function Workspace({
       incidents: await listOpenIncidents(tx, 20),
       connections: await countConnections(tx),
     })).then(async (d) => {
-      // The picker syncs seats; this catches a sync that failed after the picker committed.
+      // The picker syncs seats; this catches a sync that failed after the picker committed. Only
+      // workspace owners and admins see every project (decision 036), so only they can spot drift.
+      if (d.role === "member") return d;
       const want = seatsFor(d.tiers.map((t) => t.tier));
       if (d.billing.seats && (d.billing.seats.starter !== want.starter || d.billing.seats.pro !== want.pro)) {
         await syncSeatsAfterChange(pool, tenant, false);

@@ -102,13 +102,20 @@ describe("submittedRefs", () => {
 });
 
 describe("removalOutcome", () => {
-  const shop = { name: "Shop" };
-  it("removes only for owners and admins who type the exact name", () => {
-    expect(removalOutcome("owner", shop, "Shop")).toBe("removed");
+  const shop = { name: "Shop", role: "admin" as const };
+  const viewer = { name: "Shop", role: "viewer" as const };
+  const editor = { name: "Shop", role: "editor" as const };
+  const owned = { name: "Shop", role: "owner" as const };
+  it("removes for workspace owners and admins, and for the project's Owner, who type the exact name", () => {
+    expect(removalOutcome("owner", { name: "Shop", role: "owner" }, "Shop")).toBe("removed");
     expect(removalOutcome("admin", shop, "  Shop ")).toBe("removed");
+    expect(removalOutcome("member", owned, "Shop")).toBe("removed");
   });
   it.each([
     ["member", shop, "Shop", "role"],
+    ["member", editor, "Shop", "role"],
+    ["member", viewer, "Shop", "role"],
+    ["member", null, "Shop", "role"],
     ["owner", null, "Shop", "missing"],
     ["owner", shop, "shop", "mismatch"],
     ["owner", shop, "", "mismatch"],

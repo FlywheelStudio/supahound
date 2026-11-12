@@ -15,6 +15,7 @@ const TABLES = [
   "memberships", "oauth_states",
   "scan_domains", "scan_authorizations", "scans", "scan_findings", "scan_jobs",
   "billing_accounts", "stripe_events", "project_usage",
+  "project_members", "project_invites",
 ] as const;
 
 interface Seeded {
@@ -48,6 +49,15 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
       await repo.saveNetworks(tx, project, [16509]);
       await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
       await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
+      // People per project (decision 036): a viewer and an open invite.
+      const viewer = randomUUID();
+      await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, viewer]);
+      await tx.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')", [tenant, project, viewer]);
+      await tx.query(
+        `INSERT INTO supahound.project_invites (tenant_id, project_id, email, role, token_hash, invited_by, expires_at)
+         VALUES ($1, $2, $3, 'editor', $4, $5, now() + interval '7 days')`,
+        [tenant, project, `invitee@${name.toLowerCase()}.test`, randomUUID().replace(/-/g, "").padEnd(64, "0"), viewer],
+      );
       await repo.createOAuthState(tx, {
         userId: randomUUID(), stateHash: randomUUID().replace(/-/g, "").padEnd(64, "0"),
         codeVerifier: "v".repeat(64), expiresAt: new Date(Date.now() + 600_000),
@@ -115,6 +125,21 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     for (const r of res.rows) {
       expect([r.relname, r.relrowsecurity, r.relforcerowsecurity, r.policies > 0]).toEqual([r.relname, true, true, true]);
     }
+  });
+
+  it("puts the project_access policy on every table with project data, including ones added later (decision 036)", async () => {
+    // project_members and project_invites have their own per-role policies; a policy on
+    // project_members that read it would recurse.
+    const OWN_RULES = ["project_invites", "project_members"];
+    const res = await db.admin.query(`
+      SELECT c.relname,
+             EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'project_access' AND NOT p.polpermissive) AS covered
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'supahound' AND c.relkind = 'r'
+        AND (c.relname = 'projects' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'project_id' AND NOT a.attisdropped))`);
+    const tables = res.rows.map((r) => r.relname).sort();
+    expect(tables).toEqual(expect.arrayContaining(["projects", "incidents", "findings", ...OWN_RULES]));
+    for (const r of res.rows.filter((x) => !OWN_RULES.includes(x.relname))) expect([r.relname, r.covered]).toEqual([r.relname, true]);
   });
 
   it("shows each tenant only its own rows in every table", async () => {

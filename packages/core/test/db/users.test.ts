@@ -22,7 +22,9 @@ describe.skipIf(pgInfo === null)("users and memberships", () => {
     );
     await withTenantForUser(db.app, bob, client, async (tx) => {
       const conn = await repo.createConnection(tx, db.vault, { label: "Client org", token: "client-token" });
-      await repo.createProject(tx, { connectionId: conn, supabaseRef: "abcdefghijklmnopqrst", name: "Client app" });
+      const project = await repo.createProject(tx, { connectionId: conn, supabaseRef: "abcdefghijklmnopqrst", name: "Client app" });
+      // A workspace member sees a project only with a role on it (decision 036), as an invite gives.
+      await tx.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')", [client, project, alice]);
     });
   });
 

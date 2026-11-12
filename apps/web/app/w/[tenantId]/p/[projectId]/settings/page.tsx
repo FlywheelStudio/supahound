@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Shell } from "../../../../../../components/Shell";
 import { mode } from "../../../../../../lib/billing";
 import { utc, workspacePath } from "../../../../../../lib/nav";
+import { canRemoveProject } from "../../../../../../lib/people";
 import { loadProjectPage } from "../../../../../../lib/projectPage";
 
 // Project settings → General (issue #98): what Supahound watches and how to stop.
@@ -18,7 +19,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export default async function ProjectGeneral({ params }: { params: Promise<{ tenantId: string; projectId: string }> }) {
   const d = await loadProjectPage(params);
   const { tenant, project: p } = d;
-  const canEdit = d.role !== "member";
+  const canEdit = canRemoveProject(d.projectRole, d.role);
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={mode() !== "off"} active={{ kind: "project", project: p, page: "general" }}>
       <h1 className="mb-6 text-2xl font-semibold">General</h1>

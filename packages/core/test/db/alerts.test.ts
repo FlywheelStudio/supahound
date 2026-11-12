@@ -7,7 +7,7 @@ import { createWorkspace, withTenantForUser } from "../../src/db/user.js";
 import { templateExplanation } from "../../src/explainer/template.js";
 import { ownershipFromColumns } from "../../src/ownership/ownership.js";
 import { pollProject, sendPendingAlerts, type OutgoingEmail, type PollDeps } from "../../src/poller/pollProject.js";
-import { projectScope, tenantId, verifiedUserId as userId, type ProjectScope } from "../../src/tenancy/scope.js";
+import { projectId, projectScope, tenantId, verifiedUserId as userId, type ProjectScope } from "../../src/tenancy/scope.js";
 import { ALICE, BOB } from "../helpers.js";
 import { pgInfo, useDb } from "./harness.js";
 
@@ -23,6 +23,9 @@ const attackRows = [
   },
 ];
 
+// Workspace owners get every project's alerts, so any project ID will do for owner-only checks.
+const ANY_PROJECT = projectId(randomUUID());
+
 describe.skipIf(pgInfo === null)("incident alert email", () => {
   const db = useDb();
   let scope: ProjectScope;
@@ -37,8 +40,11 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
       const conn = await repo.createConnection(tx, db.vault, { label: name, token: `token-${randomUUID()}` });
       const p = await repo.createProject(tx, { connectionId: conn, supabaseRef: "abcdefghijklmnopqrst", name });
       await repo.setOwnership(tx, p, ownershipFromColumns({ notes: ["user_id"] }));
+      // Members with a role on this project (decision 036): the people its alerts go to.
       for (const email of members) {
-        await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role, email) VALUES ($1, $2, 'member', $3)", [t, randomUUID(), email]);
+        const u = randomUUID();
+        await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role, email) VALUES ($1, $2, 'member', $3)", [t, u, email]);
+        await tx.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')", [t, p, u]);
       }
       return projectScope(t, p);
     });
@@ -208,7 +214,7 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
     it("records the owner's address at workspace creation", async () => {
       const user = userId(randomUUID());
       const t = await createWorkspace(db.app, user, "Initech", "owner@initech.test");
-      const rows = await withTenant(db.app, t, (tx) => repo.alertRecipients(tx));
+      const rows = await withTenant(db.app, t, (tx) => repo.alertRecipients(tx, ANY_PROJECT));
       expect(rows).toEqual(["owner@initech.test"]);
     });
 
@@ -219,7 +225,7 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
       expect(await withTenantForUser(db.app, user, t, (tx) => repo.recordMemberEmail(tx, user, "new@initech.test"))).toBe(false);
       expect(await withTenantForUser(db.app, user, t, (tx) => repo.recordMemberEmail(tx, user, "not an email"))).toBe(false);
       expect(await withTenantForUser(db.app, user, t, (tx) => repo.recordMemberEmail(tx, user, "a@b\r\nBcc: c@d"))).toBe(false);
-      expect(await withTenant(db.app, t, (tx) => repo.alertRecipients(tx))).toEqual(["new@initech.test"]);
+      expect(await withTenant(db.app, t, (tx) => repo.alertRecipients(tx, ANY_PROJECT))).toEqual(["new@initech.test"]);
     });
 
     it("cannot write another tenant's membership", async () => {
@@ -228,7 +234,7 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
       // Same user ID, wrong tenant: RLS hides the row, so nothing changes.
       const wrote = await withTenant(db.app, other.tenantId, (tx) => repo.recordMemberEmail(tx, user, "evil@x.test"));
       expect(wrote).toBe(false);
-      expect(await withTenant(db.app, t, (tx) => repo.alertRecipients(tx))).toEqual(["owner@initech.test"]);
+      expect(await withTenant(db.app, t, (tx) => repo.alertRecipients(tx, ANY_PROJECT))).toEqual(["owner@initech.test"]);
     });
 
     it("rejects malformed addresses in the database too", async () => {

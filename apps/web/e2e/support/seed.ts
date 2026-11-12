@@ -124,3 +124,14 @@ export async function userIdFor(email: string): Promise<string> {
   if (!res.ok) throw new Error(`No fake Auth user for ${email}`);
   return ((await res.json()) as { id: string }).id;
 }
+
+// A workspace member with the Viewer role on every project the workspace has now: what the
+// backfill gives an existing member, or an invite per project (decision 036).
+export async function addViewer(tenant: string, userId: string): Promise<void> {
+  await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, userId]);
+  await adminQuery(
+    `INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role)
+     SELECT tenant_id, id, $2, 'viewer' FROM supahound.projects WHERE tenant_id = $1`,
+    [tenant, userId],
+  );
+}

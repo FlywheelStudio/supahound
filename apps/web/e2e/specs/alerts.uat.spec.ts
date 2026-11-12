@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { adminQuery, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
+import { addViewer, adminQuery, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
 import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // UAT for incident alert email settings (issue #16, decision 030). The poller's sending is covered
@@ -44,7 +44,7 @@ test.describe("UAT: incident alert email", () => {
     expect(level).toEqual([{ email_alerts: "high" }]);
   });
 
-  test("UAT-W18 a member sees the threshold but cannot change it, even by replaying the owner's form", async ({ page, browser }) => {
+  test("UAT-W18 a viewer sees the threshold but cannot change it, even by replaying the owner's form", async ({ page, browser }) => {
     const email = uniqueEmail("w18");
     await signIn(page, email);
     await page.getByLabel("Workspace name").fill("w18 Co");
@@ -66,7 +66,7 @@ test.describe("UAT: incident alert email", () => {
     const member = await browser.newPage();
     const memberEmail = uniqueEmail("w18-member");
     await signIn(member, memberEmail);
-    await adminQuery("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, await userIdFor(memberEmail)]);
+    await addViewer(tenant, await userIdFor(memberEmail));
     await member.goto(settings);
     await expect(member.getByText("Email alerts: Every incident")).toBeVisible();
     await expect(member.getByLabel("Email alerts for Shop")).toHaveCount(0);
@@ -87,7 +87,7 @@ test.describe("UAT: incident alert email", () => {
       form.requestSubmit();
     }, ownerForm);
     await expect(member).toHaveURL(/error=alerts_role/);
-    await expect(member.getByRole("status")).toHaveText(/Only workspace owners and admins can change email alerts/);
+    await expect(member.getByRole("status")).toHaveText(/Only the project's owners, admins and editors can change email alerts/);
     const level = await adminQuery<{ email_alerts: string }>("SELECT email_alerts FROM supahound.projects WHERE tenant_id = $1", [tenant]);
     expect(level).toEqual([{ email_alerts: "low" }]);
     await member.close();

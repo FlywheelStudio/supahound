@@ -7,6 +7,7 @@ import type { OwnershipMap } from "../ownership/ownership.js";
 import { connectionId, projectId, projectScope, tenantId, type ConnectionId, type ProjectId, type ProjectScope, type TenantId } from "../tenancy/scope.js";
 import type { TokenVault } from "../vault/vault.js";
 import type { BillingMode } from "./billing.js";
+import type { ProjectRole } from "./people.js";
 import type { TenantTx } from "./tenant.js";
 
 // Repositories. Each takes a TenantTx and repeats `tenant_id = tx.tenantId` in every statement,
@@ -368,6 +369,8 @@ export interface ProjectSummary {
   // unassessed; "no_owned_tables" when the policies loaded but scope no table to an owner.
   crossTenant: "assessed" | "unable_to_assess" | "no_owned_tables" | null;
   emailAlerts: AlertLevel;
+  // The signed-in user's role on this project (decision 036); null outside a user transaction.
+  role: ProjectRole | null;
 }
 
 function crossTenantCoverage(lastUnassessed: string[] | null, loaded: boolean, empty: boolean): ProjectSummary["crossTenant"] {
@@ -381,8 +384,10 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
     last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean; email_alerts: AlertLevel;
+    role: ProjectRole | null;
   }>(
     `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts,
+            supahound.project_role(p.id) AS role,
             p.ownership_refreshed_at IS NOT NULL AS ownership_loaded,
             p.ownership = '{}'::jsonb AS ownership_empty,
             (SELECT r.unassessed_detectors FROM supahound.poll_runs r
@@ -400,6 +405,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     lastPolledAt: r.last_polled_at, openIncidents: r.open_incidents, lastRunStatus: r.last_run_status,
     crossTenant: crossTenantCoverage(r.last_unassessed, r.ownership_loaded, r.ownership_empty),
     emailAlerts: r.email_alerts,
+    role: r.role,
   }));
 }
 
@@ -645,12 +651,18 @@ export async function markAlerted(tx: TenantTx, incidentId: string, severity: Se
   );
 }
 
-// Every member of the tenant with a known address, deduplicated.
-export async function alertRecipients(tx: TenantTx): Promise<string[]> {
+// Everyone with a role on the project and a known address, deduplicated (decision 036):
+// workspace owners and admins, and the project's own people. A person invited to one project
+// gets no email about another.
+export async function alertRecipients(tx: TenantTx, project: ProjectId): Promise<string[]> {
   const rows = await tx.query<{ email: string }>(
-    `SELECT DISTINCT lower(email) AS email FROM supahound.memberships
-     WHERE tenant_id = $1 AND email IS NOT NULL ORDER BY 1`,
-    [tx.tenantId],
+    `SELECT DISTINCT lower(m.email) AS email FROM supahound.memberships m
+     WHERE m.tenant_id = $1 AND m.email IS NOT NULL
+       AND (m.role IN ('owner', 'admin')
+            OR EXISTS (SELECT 1 FROM supahound.project_members pm
+                       WHERE pm.tenant_id = m.tenant_id AND pm.project_id = $2 AND pm.user_id = m.user_id))
+     ORDER BY 1`,
+    [tx.tenantId, project],
   );
   return rows.map((r) => r.email);
 }
