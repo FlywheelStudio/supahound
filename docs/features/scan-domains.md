@@ -49,6 +49,18 @@ Who sees what (signed in):
 | Workspace member with no role on P | No | No |
 | Another workspace | No | No |
 
+## Deploy order
+
+1. Apply the pending migrations in timestamp order: `20261112000000_project_people.sql` (this
+   migration calls its `project_role()` and `current_workspace_role()` and reads
+   `project_members`), `20261112020000_posture_scan.sql`, `20261112030000_data_controls.sql`, then
+   `20261112040000_scan_domains_per_project.sql`. Without the first, this one fails inside its
+   transaction and changes nothing.
+2. Deploy the web app. The poller does not change.
+
+`supabase db push` applies a migration older than the newest one already applied only with
+`--include-all`, so keep the order.
+
 ## External services
 
 None. The scan funnel writes the domains and scans; this feature only reads them and writes links.
