@@ -1,4 +1,7 @@
+import { runDataJob } from "@supahound/core/datacontrols/flow";
+import { tenantId } from "@supahound/core/tenancy/scope";
 import { expect, test, type Page } from "@playwright/test";
+import pg from "pg";
 import { addViewer, adminQuery, managementCalls, pollAttack, seedConnection, setSupabaseProjects, userIdFor } from "../support/seed";
 import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
@@ -106,7 +109,7 @@ test.describe("UAT: choose the projects Supahound watches", () => {
     await member.close();
   });
 
-  test("UAT-W14 removing a project needs its name, deletes its incidents and keeps its audit log", async ({ page }) => {
+  test("UAT-W14 removing a project needs its name, schedules its deletion 7 days after it stops, then deletes its incidents and keeps its audit log", async ({ page }) => {
     const { tenant } = await ownerWithConnection(page, "w14");
     await pollAttack(tenant, "Client app");
     const id = (await adminQuery<{ id: string }>("SELECT id FROM supahound.projects WHERE tenant_id = $1", [tenant]))[0]!.id;
@@ -122,6 +125,8 @@ test.describe("UAT: choose the projects Supahound watches", () => {
     await expect(page).toHaveURL(new RegExp(`/w/${tenant}/projects\\?remove=${id}$`));
     await expect(page.getByRole("heading", { name: "Remove Client app?" })).toBeVisible();
     await expect(page.getByText(/permanently deletes its incidents, findings and poll history/)).toBeVisible();
+    // Billing is on but this workspace has no project subscription row: the project stops now.
+    await expect(page.getByTestId("removal-preview")).toHaveText(/^Supahound stops watching the project now\. It is deleted on \d{4}-\d{2}-\d{2} unless you keep it\.$/);
 
     await page.getByLabel(/to confirm/).fill("client app");
     await page.getByRole("button", { name: "Remove project" }).click();
@@ -130,7 +135,19 @@ test.describe("UAT: choose the projects Supahound watches", () => {
 
     await page.getByLabel(/to confirm/).fill("Client app");
     await page.getByRole("button", { name: "Remove project" }).click();
-    await expect(page.getByRole("status")).toHaveText(/Project removed/);
+    await expect(page.getByRole("status")).toHaveText(/Removal scheduled/);
+    await expect(page.getByTestId("removal-scheduled")).toContainText(/It is deleted on \d{4}-\d{2}-\d{2} unless you keep it\./);
+    // Nothing is deleted yet (decision 042).
+    const [row] = await adminQuery<{ delete_after: Date }>("SELECT delete_after FROM supahound.projects WHERE id = $1", [id]);
+    expect(await adminQuery("SELECT 1 FROM supahound.incidents WHERE project_id = $1", [id])).not.toHaveLength(0);
+
+    const app = new pg.Pool({ connectionString: process.env.E2E_APP_DB_URL, max: 1 });
+    try {
+      expect(await runDataJob(app, tenantId(tenant), new Date(row!.delete_after.getTime() - 1))).toMatchObject({ projectsDeleted: 0 });
+      expect(await runDataJob(app, tenantId(tenant), row!.delete_after)).toMatchObject({ projectsDeleted: 1 });
+    } finally {
+      await app.end();
+    }
     expect(await adminQuery("SELECT 1 FROM supahound.projects WHERE id = $1", [id])).toHaveLength(0);
     expect(await adminQuery("SELECT 1 FROM supahound.incidents WHERE project_id = $1", [id])).toHaveLength(0);
     expect(await audit()).toBe(auditBefore);

@@ -31,7 +31,9 @@ A workspace **pays** when its Stripe status is `active` or `past_due`, or it has
   exemption (the owner said they are done).
 - A trial that never paid does not count. A self-hosted copy with billing off does not count.
 
-**While a workspace pays, Supahound deletes none of its data.** The daily job resolves idle
+**While a workspace pays, Supahound deletes none of its data.** (One exception since
+[042](042-project-removal-grace.md): a removed project is deleted 7 days after its own paid period
+ends, even while the workspace pays.) The daily job resolves idle
 incidents (that deletes nothing) and deletes expired OAuth states (PKCE verifiers, not customer
 data), and nothing else. Every pending delete (a purge, a disconnected connection's history) moves
 to 30 days after the day the job runs, so it happens 30 days after the last paid day.

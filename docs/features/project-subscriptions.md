@@ -12,8 +12,10 @@ rollout waits for Erik: see "Rollout" below.
   edge requests in 30 days) or Pro $99 (above; above 10M it stays Pro and we contact the customer).
 - A project added during the trial is free until the trial ends; one added after it is billed
   from the day it is added. A tier change applies at the next renewal.
-- Removing a project cancels its subscription at its period end. Adding the same Supabase project
-  back within that period resumes the same subscription. Pausing (disconnect, revoked grant)
+- Removing a project cancels its subscription at its period end. The project stays active until
+  then and is deleted 7 days later unless someone keeps it (decision 042,
+  [project-removal-grace.md](project-removal-grace.md)). Keeping it, or picking the same Supabase
+  project again, within that period resumes the same subscription. Pausing (disconnect, revoked grant)
   cancels at the period end; reconnecting resumes.
 - Closing the workspace cancels every subscription at its period end; reopening resumes the ones
   whose projects are still watched.

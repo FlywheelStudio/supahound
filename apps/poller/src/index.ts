@@ -207,6 +207,7 @@ export default {
         const outcome = await runDataJob(app, tenant, new Date());
         log("data_job", {
           tenant_id: tenant, paying: outcome.paying, purged: outcome.purged, connections_deleted: outcome.connectionsDeleted,
+          projects_deleted: outcome.projectsDeleted,
           ...(outcome.retention ?? {}),
         });
       };

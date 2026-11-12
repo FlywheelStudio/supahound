@@ -77,7 +77,7 @@ export const MAX_ALERTS_PER_POLL = 10;
 export type PollOutcome =
   | { status: "ok"; findings: number; notified: number; emailed: number }
   | { status: "unable_to_assess"; errorCode: string }
-  | { status: "skipped"; reason: "not_found" | "paused" | "claimed_elsewhere" | "nothing_new" };
+  | { status: "skipped"; reason: "not_found" | "paused" | "removed" | "claimed_elsewhere" | "nothing_new" };
 
 // Logs land late, so a window ends this far behind now. A log that lands later still is missed:
 // the cost of never counting a request twice.
@@ -260,6 +260,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     const project = await repo.getProject(tx, scope.projectId);
     if (!project) return { skip: "not_found" as const };
     if (project.paused) return { skip: "paused" as const };
+    // Decision 042: a removed project's active period has ended; it waits for the data job.
+    if (project.activeUntil && project.activeUntil <= now) return { skip: "removed" as const };
     await repo.failStaleRuns(tx, scope.projectId, now, STALE_RUN_SECONDS);
     const window = nextWindow(await repo.lastAssessedUntil(tx, scope.projectId), now);
     if (!window) return { skip: "nothing_new" as const };

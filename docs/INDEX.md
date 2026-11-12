@@ -10,6 +10,7 @@
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
 | [features/scan-domains.md](features/scan-domains.md) | Security scan domains per project (#100): one project per verified domain, attach and detach by Owners and Admins, the Security scan tab, RLS on the scan tables, tests |
+| [features/project-removal-grace.md](features/project-removal-grace.md) | Project removal with a grace period (decision 042): active until the period ends, deleted 7 days later unless kept; Keep project, re-pick, portal cancel by webhook, the data job, tests |
 | [features/project-subscriptions.md](features/project-subscriptions.md) | One Stripe subscription per project (#99): shared workspace trial, reconcile, removal at the period end, Plan & billing, conversion CLI, rollout steps, tests |
 | [features/data-controls.md](features/data-controls.md) | Data controls (#43): "paying" keeps all data; retention job; close at the period end, purge keeps the record; disconnect and revoked-grant emails; one trial ever; subprocessor notice CLI; tests |
 | [features/posture-scan.md](features/posture-scan.md) | Posture scan (#11): RLS coverage, open policies, views, Security Advisor; first poll, daily and Scan now; severity raise; fix prompts; tests |
@@ -48,7 +49,7 @@
 | [decisions/019-github-issues-and-three-branches.md](decisions/019-github-issues-and-three-branches.md) | GitHub issues hold the work; feature / develop / main; CI gates merges |
 | [decisions/020-e2e-with-fake-supabase-auth.md](decisions/020-e2e-with-fake-supabase-auth.md) | E2E runs the built Worker, Postgres and a fake Supabase Auth |
 | [decisions/021-coming-soon-features.md](decisions/021-coming-soon-features.md) | Unbuilt features show Coming soon via one registry tied to issues; hello@ only |
-| [decisions/022-remove-project-keeps-audit-log.md](decisions/022-remove-project-keeps-audit-log.md) | Removing a project deletes its history, keeps its audit rows; typed-name confirm |
+| [decisions/022-remove-project-keeps-audit-log.md](decisions/022-remove-project-keeps-audit-log.md) | Removing a project deletes its history, keeps its audit rows; typed-name confirm (point 3 superseded by 042) |
 | [decisions/023-oauth-scope-projects-read.md](decisions/023-oauth-scope-projects-read.md) | OAuth adds read-only `projects:read` for the project picker (amends 012) |
 | [decisions/024-ownership-refresh-and-detector-coverage.md](decisions/024-ownership-refresh-and-detector-coverage.md) | Ownership refreshes in the poll every 24 h; detector 2 coverage has three states |
 | [decisions/025-public-release-fsl.md](decisions/025-public-release-fsl.md) | Public repo under FSL-1.1-ALv2 (fair source), short CLA, marketing site to a private repo |
@@ -68,3 +69,4 @@
 | [decisions/035-incident-history-window.md](decisions/035-incident-history-window.md) | Incident history: last seen in 30 days or still open; keyset pages; actor alias; the suggested fix is the explainer's next steps, no generated SQL |
 | [decisions/039-web-latency.md](decisions/039-web-latency.md) | Web latency: placement region next to Postgres, `begin()` in one round trip, asymmetric JWT keys, why not loading.tsx |
 | [decisions/041-project-subscriptions-build.md](decisions/041-project-subscriptions-build.md) | How per-project billing is built: billing model column, card check makes no subscription, standing, reconcile, no minimum charge, removal keeps payment history, "paying" per project, conversion with `billing_cycle_anchor` at the seat period end (amends 028, 037) |
+| [decisions/042-project-removal-grace.md](decisions/042-project-removal-grace.md) | A removed project stays active until its paid period ends and is deleted 7 days later unless an Owner or Admin keeps it; portal cancel by webhook; supersedes 022 point 3 and 041 point 7 |

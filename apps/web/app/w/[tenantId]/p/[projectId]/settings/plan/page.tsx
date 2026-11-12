@@ -10,6 +10,9 @@ import { loadProjectPage } from "../../../../../../../lib/projectPage";
 import { canManageBilling, canSeeInvoices, dollars, STATUS_LABEL, subscriptionLine, tierLabel } from "../../../../../../../lib/projectBilling";
 import { stripeGateway } from "../../../../../../../lib/stripe";
 import { openProjectPortalAction } from "./actions";
+import { keepProjectAction } from "../../../../projects/actions";
+import { canRemoveProject } from "../../../../../../../lib/people";
+import { keepNote, removalSentence } from "../../../../../../../lib/removal";
 
 // Project settings → Plan & billing (issues #98 and #99). Each project has its own Stripe
 // subscription (decisions 032 and 041): this page shows its plan, status, next charge and
@@ -50,6 +53,25 @@ export default async function ProjectPlan({
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={billingOn} active={{ kind: "project", project: p, page: "plan" }}>
       <h1 className="mb-6 text-2xl font-semibold">Plan &amp; billing</h1>
+      {query.kept && (
+        <p role="status" className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">Project kept. Its removal is canceled.</p>
+      )}
+      {p.removal && (
+        <section aria-label="Removal scheduled" data-testid="removal-scheduled" className="mb-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <p><strong>Removal scheduled.</strong> {removalSentence(p.removal, now)}</p>
+          {canRemoveProject(d.projectRole, d.role) && (
+            <form action={keepProjectAction} className="mt-3 flex flex-wrap items-center gap-3">
+              <input type="hidden" name="tenantId" value={tenant} />
+              <input type="hidden" name="projectId" value={p.id} />
+              <input type="hidden" name="from" value="plan" />
+              <button className="rounded-md bg-slate-950 px-4 py-2 font-medium text-white hover:bg-slate-800">Keep project</button>
+              {keepNote(p.removal, now, billingOn && billing.model === "project" && !billing.exempt) && (
+                <span>{keepNote(p.removal, now, true)}</span>
+              )}
+            </form>
+          )}
+        </section>
+      )}
       {query.error === "role" && (
         <p role="alert" className="mb-6 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
           Only workspace owners and admins can manage billing.
@@ -147,7 +169,7 @@ export default async function ProjectPlan({
             <p>
               Traffic sets the plan. Up to {millions(PRO_FROM_REQUESTS)} requests in {USAGE_WINDOW_DAYS} days is Starter ({PRICE_LABEL.starter}).
               Above that is Pro ({PRICE_LABEL.pro}). A change takes effect at the next renewal. Removing the project stops its
-              charges at the end of its paid month.
+              charges at the end of its paid period: it stays active until then and is deleted 7 days later unless you keep it.
             </p>
             {sub && sub.status !== "active" && sub.status !== "trialing" && (
               <p className="mt-2">Status now: {STATUS_LABEL[sub.status]}.</p>

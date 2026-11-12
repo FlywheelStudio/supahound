@@ -11,6 +11,7 @@ import {
   saveSubscription, setStripeCustomer, withPaidTenantForUser,
 } from "../../src/db/billing.js";
 import * as repo from "../../src/db/repo.js";
+import * as removal from "../../src/db/removal.js";
 import { withTenant } from "../../src/db/tenant.js";
 import { createWorkspace, withTenantForUser } from "../../src/db/user.js";
 import { verifiedUserId, type ProjectId, type TenantId, type UserId } from "../../src/tenancy/scope.js";
@@ -91,7 +92,7 @@ describe.skipIf(pgInfo === null)("one subscription per project", () => {
       const p = await addProject(tenant, "Gone");
       await reconcileProjects(deps, tenant);
       const subId = stripe.projectSubs(tenant)[0]!.id;
-      await withTenant(db.app, tenant, (tx) => repo.removeProject(tx, p));
+      await withTenant(db.app, tenant, (tx) => removal.deleteProject(tx, p));
       await reconcileProjects(deps, tenant);
       expect(stripe.subscriptions.get(subId)!.cancelAtPeriodEnd).toBe(true);
       expect((await rows(tenant)).map((r) => [r.subscriptionId, r.projectId, r.cancelAtPeriodEnd])).toEqual([[subId, null, true]]);
@@ -112,7 +113,7 @@ describe.skipIf(pgInfo === null)("one subscription per project", () => {
       const first = await addProject(tenant, "Again", ref);
       await reconcileProjects(deps, tenant);
       const subId = stripe.projectSubs(tenant)[0]!.id;
-      await withTenant(db.app, tenant, (tx) => repo.removeProject(tx, first));
+      await withTenant(db.app, tenant, (tx) => removal.deleteProject(tx, first));
       await reconcileProjects(deps, tenant);
       const creates = stripe.creates.length;
       const second = await addProject(tenant, "Again", ref);
@@ -234,7 +235,7 @@ describe.skipIf(pgInfo === null)("one subscription per project", () => {
       // A removed project's subscription (no project link).
       const gone = await addProject(A, "Gone");
       await reconcileProjects(deps, A);
-      await withTenant(db.app, A, (tx) => repo.removeProject(tx, gone));
+      await withTenant(db.app, A, (tx) => removal.deleteProject(tx, gone));
       await reconcileProjects(deps, A);
       await db.admin.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin'), ($1, $3, 'member'), ($1, $4, 'member')", [A, admin, viewer, outsider]);
       await db.admin.query("INSERT INTO supahound.project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')", [A, pShop, viewer]);
@@ -362,7 +363,7 @@ describe.skipIf(pgInfo === null)("one subscription per project", () => {
       // Later than any other period here (the fake's default is 30 days).
       const later = new Date(Date.now() + 40 * DAY);
       stripe.set(subs[0]!.id, { currentPeriodEnd: later });
-      await withTenant(db.app, tenant, (tx) => repo.removeProject(tx, gone));
+      await withTenant(db.app, tenant, (tx) => removal.deleteProject(tx, gone));
       await reconcileProjects(deps, tenant);
       const name = (await db.admin.query<{ n: string }>("SELECT name AS n FROM supahound.tenants WHERE id = $1", [tenant])).rows[0]!.n;
       expect(await closeWorkspace({ pool: db.app, stripe, now: () => new Date() }, { user: owner, tenant, typedName: name })).toBe("closed");

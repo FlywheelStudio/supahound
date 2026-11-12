@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { notFound, redirect } from "next/navigation";
 import { exemptDomains, mode } from "../../../../lib/billing";
 import { dollars, monthlyTotalCents, subscriptionLine, summaryRows, tierLabel } from "../../../../lib/projectBilling";
+import { removalSentence } from "../../../../lib/removal";
 import { brandFrom } from "../../../../lib/brand";
 import { withPool } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/supabase";
@@ -92,6 +93,8 @@ export default async function Billing({
   const now = new Date();
   const trialEnd = trialEndsAt(billing, now);
   const rows = summaryRows(data.subs, new Map(tiers.map((t) => [t.id, t.name])));
+  // Decision 042: projects whose removal is scheduled, with their dates.
+  const removals = data.projects.filter((p) => p.removal);
   const portal = (
     <form action={openPortalAction} className="mt-6">
       <input type="hidden" name="tenantId" value={tenant} />
@@ -147,7 +150,8 @@ export default async function Billing({
           </dl>
           <p className="mt-4 text-sm text-slate-600">
             Each project has its own subscription. A project added after the trial is billed from the day you add it. Removing a
-            project stops its charges at the end of its paid month.
+            project stops its charges at the end of its paid period: it stays active until then and is deleted 7 days later
+            unless you keep it.
           </p>
           {rows.length === 0 ? (
             <p className="mt-6 text-sm text-slate-600">No project is billed yet. Add a project to start watching it.</p>
@@ -251,6 +255,20 @@ export default async function Billing({
               To disconnect Supabase or close this workspace instead, open <a href={`/w/${tenant}/settings`} className="underline">Workspace settings</a>.
             </p>
           )}
+        </section>
+      )}
+
+      {access !== "blocked" && removals.length > 0 && (
+        <section aria-label="Removals scheduled" className="mt-6 rounded-md border border-amber-300 bg-amber-50 p-6 text-sm text-amber-950">
+          <h2 className="mb-2 font-semibold">Removals scheduled</h2>
+          <ul className="space-y-2">
+            {removals.map((p) => (
+              <li key={p.id} data-testid="removal-scheduled">
+                <a href={`/w/${tenant}/p/${p.id}/settings/plan`} className="font-medium underline">{p.name}</a>: {removalSentence(p.removal!, now)}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3">To keep a project, open it or the Projects page and choose Keep project.</p>
         </section>
       )}
     </>

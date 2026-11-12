@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BillingStatus } from "../../src/billing/policy.js";
 import {
-  CONVERSION_MIN_LEAD_MS, createKey, currentSubFor, planConversion, planReconcile, trialEndForNewProject, trialEndsAt, workspaceStanding,
+  CONVERSION_MIN_LEAD_MS, createKey, currentSubFor, planConversion, planReconcile, removalActiveUntil, removalDates, REMOVAL_GRACE_DAYS, trialEndForNewProject, trialEndsAt, workspaceStanding,
   type ConversionInput, type LegacySub, type ProjectSub,
 } from "../../src/billing/projects.js";
 
@@ -180,5 +180,27 @@ describe("the conversion planner (decision 041)", () => {
 
   it("with --include-empty, cancels the seat subscription of a workspace with no watched projects: nothing is charged after it", () => {
     expect(planConversion(input({ watched: [], includeEmpty: true }))).toMatchObject({ action: "convert", creates: [], kept: [], cancelLegacy: true });
+  });
+});
+
+describe("removal dates (decision 042)", () => {
+  it("keeps a paid project active until its period end, and deletes it 7 days later", () => {
+    expect(REMOVAL_GRACE_DAYS).toBe(7);
+    expect(removalDates(sub({ subscriptionId: "sub_1", currentPeriodEnd: at(20) }), NOW)).toEqual({ activeUntil: at(20), deleteAfter: at(27) });
+    expect(removalActiveUntil(sub({ subscriptionId: "sub_1", status: "past_due", currentPeriodEnd: at(3) }), NOW)).toEqual(at(3));
+  });
+
+  it("uses the trial end during the trial", () => {
+    expect(removalActiveUntil(sub({ subscriptionId: "sub_1", status: "trialing", trialEnd: at(4), currentPeriodEnd: at(9) }), NOW)).toEqual(at(4));
+    expect(removalActiveUntil(sub({ subscriptionId: "sub_1", status: "trialing", trialEnd: null, currentPeriodEnd: at(9) }), NOW)).toEqual(at(9));
+  });
+
+  it("stops at once with no subscription, an ended or blocked one, or a period end in the past", () => {
+    expect(removalDates(null, NOW)).toEqual({ activeUntil: NOW, deleteAfter: at(7) });
+    for (const status of ["canceled", "unpaid", "incomplete", "incomplete_expired", "paused"] as BillingStatus[]) {
+      expect(removalActiveUntil(sub({ subscriptionId: "sub_1", status, currentPeriodEnd: at(20) }), NOW), status).toEqual(NOW);
+    }
+    expect(removalActiveUntil(sub({ subscriptionId: "sub_1", currentPeriodEnd: at(-1) }), NOW)).toEqual(NOW);
+    expect(removalActiveUntil(sub({ subscriptionId: "sub_1", currentPeriodEnd: null }), NOW)).toEqual(NOW);
   });
 });

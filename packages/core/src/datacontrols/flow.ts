@@ -10,6 +10,7 @@ import {
 import { deferPurge, getClosure, purgeHistory, recordClosure, reopenWorkspace, type ReopenResult } from "../db/closure.js";
 import { deferConnectionDeletes, deleteExpiredConnections, markDisconnected, type Disconnected } from "../db/connections.js";
 import { appendAudit } from "../db/repo.js";
+import { deleteRemovedProjects } from "../db/removal.js";
 import { applyRetention, type RetentionResult } from "../db/retention.js";
 import { withTenant, type TenantTx } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
@@ -74,6 +75,7 @@ async function saveProjectSnapshots(tx: TenantTx, subs: readonly StripeSubscript
 // members see the closed page.
 export async function closeWorkspace(deps: CloseDeps, input: { user: UserId; tenant: TenantId; typedName: string }): Promise<CloseResult> {
   const { user, tenant } = input;
+  const started = deps.now();
   const pre = await withTenantForUser(deps.pool, user, tenant, async (tx, role) => {
     if (role !== "owner") return { stop: "role" as const };
     if (await getClosure(tx)) return { stop: "already_closed" as const };
@@ -113,6 +115,13 @@ export async function closeWorkspace(deps: CloseDeps, input: { user: UserId; ten
       until = paidUntil(b);
     }
     await recordClosure(tx, user, now, (b.exempt ? null : until) ?? now);
+    // Decision 042: the cancels above echo back by webhook. One that arrived before the closure
+    // was recorded may have read as a Billing Portal cancel and scheduled a removal; undo those.
+    await tx.query(
+      `UPDATE supahound.projects SET removal_requested_at = NULL, active_until = NULL, delete_after = NULL, removal_source = NULL
+       WHERE tenant_id = $1 AND removal_source = 'billing' AND removal_requested_at >= $2`,
+      [tx.tenantId, started],
+    );
     return "closed";
   });
 }
@@ -278,25 +287,30 @@ export interface DataJobOutcome {
   purged: boolean;
   retention: RetentionResult | null;
   connectionsDeleted: number;
+  // Removed projects deleted because their delete_after came (decision 042).
+  projectsDeleted: number;
 }
 
 // The daily data job for one tenant (decision 037), in one tenant transaction. It asks once, at
 // the start, whether the workspace pays; while it does, nothing is deleted and every pending
-// delete moves to 30 days after today.
+// delete moves to 30 days after today. One exception (decision 042): a removed project whose
+// delete_after has come is deleted even while the workspace pays, because that project's own
+// payment has ended. It goes first, so `paying` below no longer counts its subscription's past.
 export async function runDataJob(pool: Pool, tenant: TenantId, now: Date): Promise<DataJobOutcome> {
   return withTenant(pool, tenant, async (tx) => {
-    const paying = await isPaying(tx);
     const closure = await getClosure(tx);
-    if (closure?.purgedAt) return { paying, purged: false, retention: null, connectionsDeleted: 0 };
+    if (closure?.purgedAt) return { paying: await isPaying(tx), purged: false, retention: null, connectionsDeleted: 0, projectsDeleted: 0 };
+    const projectsDeleted = await deleteRemovedProjects(tx, now);
+    const paying = await isPaying(tx);
     // purgeHistory checks purge_after itself, in the UPDATE that claims the purge.
     if (closure && paying) await deferPurge(tx, now);
     else if (closure && (await purgeHistory(tx, now))) {
-      return { paying, purged: true, retention: null, connectionsDeleted: 0 };
+      return { paying, purged: true, retention: null, connectionsDeleted: 0, projectsDeleted };
     }
     let connectionsDeleted = 0;
     if (paying) await deferConnectionDeletes(tx, now);
     else connectionsDeleted = await deleteExpiredConnections(tx, now);
     const retention = await applyRetention(tx, now, { deleteHistory: !paying });
-    return { paying, purged: false, retention, connectionsDeleted };
+    return { paying, purged: false, retention, connectionsDeleted, projectsDeleted };
   });
 }

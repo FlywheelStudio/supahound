@@ -5,6 +5,7 @@ import {
   saveSubscription, setStripeCustomer, startProjectBilling, trialAvailable, watchedProjects,
 } from "../db/billing.js";
 import { getClosure } from "../db/closure.js";
+import { applyPortalCancel } from "../db/removal.js";
 import { withTenant } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
 import { tenantId as parseTenantId, type TenantId, type UserId } from "../tenancy/scope.js";
@@ -183,7 +184,13 @@ export async function refreshSubscription(deps: FlowDeps, subscriptionId: string
     const billing = await getBilling(tx);
     if (billing.customerId !== sub.customerId) return false;
     if (project) {
+      const [before] = await tx.query<{ cancel_at_period_end: boolean }>(
+        "SELECT cancel_at_period_end FROM supahound.project_subscriptions WHERE tenant_id = $1 AND subscription_id = $2",
+        [tx.tenantId, project.subscriptionId],
+      );
       await saveProjectSubscription(tx, project, project.projectId);
+      // Decision 042: a cancel set or cleared in the Billing Portal schedules or undoes the removal.
+      if (before) await applyPortalCancel(tx, project, before.cancel_at_period_end, deps.now());
       await refreshStanding(tx);
       return true;
     }
