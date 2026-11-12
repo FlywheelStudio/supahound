@@ -65,7 +65,9 @@ asked for the calls below to be made and recorded without a round trip.
 
 - Old code on the new schema: it never reads the scan tables, so the new SELECT policies change
   nothing it does. Develop's unchanged suites pass on the new schema, except the hard-coded table
-  list in `isolation.test.ts`, which now also sees `scan_domain_links`.
+  list in `isolation.test.ts`, which now also sees `scan_domain_links`, and the purge test's
+  precondition in `dataControls.test.ts`, which expects every table to hold seeded rows (develop's
+  seed has no link). The purge itself deletes projects, so links go by cascade.
 - #51 (the funnel) must write domains and scans with a workspace Owner's or Admin's transaction,
   or without `app.user_id`. A plain member would not see an unlinked domain it just created.
 - A detach leaves no record. If the audit log ever needs it, a later migration adds the action.

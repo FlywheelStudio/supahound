@@ -80,3 +80,5 @@ None. The scan funnel writes the domains and scans; this feature only reads them
 - **The funnel (#51) must write as a workspace Owner or Admin, or with no user.** A member's
   `INSERT ... RETURNING` on `scan_domains` would fail the SELECT policy.
 - **No audit row on attach or detach** (decision 040, item 9).
+- **A purged workspace loses its links** (decision 037). The purge deletes `projects`, and the
+  link cascades; `scan_domains` and `scan_authorizations` are kept. Tested in `dataControls.test.ts`.
