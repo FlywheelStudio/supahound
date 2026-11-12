@@ -18,4 +18,5 @@ for a "hack.me findings" tab on each project and chose on 2026-11-11 to link dom
 
 ## Status
 
-Accepted; not built. The tab is a Coming soon placeholder until #100 ships.
+Accepted; built 2026-11-12 (#100). How it works: [decision 040](040-scan-domain-links.md) and
+[features/scan-domains.md](../features/scan-domains.md).

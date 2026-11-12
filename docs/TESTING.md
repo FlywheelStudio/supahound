@@ -7,14 +7,14 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 
 | Tier | What it proves | Where | Command | Count |
 | --- | --- | --- | --- | --- |
-| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 663 core (unit + Postgres + detection UAT), 137 web |
-| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 182, within the 663 |
+| Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 678 core (unit + Postgres + detection UAT), 149 web |
+| Postgres | RLS, isolation, repositories, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 197, within the 678 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR) | `apps/poller/test/` | `pnpm -r test` | 12 |
-| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 663 |
+| UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 678 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 44 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → security scan, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 47 |
 
-Totals on `feature/posture-scan` (2026-11-12): core 663, web 137, poller 12, E2E 55.
+Totals on `feature/scan-domains` (2026-11-12): core 678, web 149, poller 12, E2E 58.
 
 `pnpm -r test` and `pnpm e2e` stay separate. E2E needs a build and a browser.
 
@@ -144,6 +144,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W28 | An invite is bound to its address; a resend kills the old link; an expired or canceled invite is refused; a non-member gets a 404 |
 | UAT-W29 | The first poll after a pick shows posture findings on the overview, the dashboard and the Posture tab, with fix SQL; Advisor duplicates show once; no Advisor free text; a refused project reads "unable to assess" (`posture.uat.spec.ts`) |
 | UAT-W30 | Scan now queues a scan the next poll runs within the 24 hours; a viewer gets no button and a replayed owner form is refused |
+| UAT-W34 | An owner attaches a verified domain (an unverified one is not offered) and sees the newest finished scan's findings, most severe first, with the fix and allowlisted evidence; a planted secret never reaches the page; the domain belongs to one project; detaching hides the findings (`scanDomains.uat.spec.ts`) |
+| UAT-W35 | A viewer sees the findings and the attached domain but no Attach or Detach, never sees an unattached domain, and replayed owner forms are refused |
+| UAT-W36 | Another workspace's project is a 404 on the Security scan tab and its settings; my own project shows nothing of its domain |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts`, decision 028)
 
@@ -263,6 +266,17 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | The overview never calls a failed scan clean (#11) | `postureLine` drops the unable state / hides the Advisor gap | 1 web unit test fails each |
 | The server checks the role before Scan now (#11) | `scanNowAction` skips `canScan` | UAT-W30 fails (no role notice) |
 | The Posture tab shows the fix SQL (#11) | The page hides the SQL | UAT-W29 fails |
+| One project per scan domain (#100) | Primary key widened to `(tenant_id, domain_id, project_id)` | 2 Postgres tests fail |
+| Only verified domains link, for every writer (#100) | The trigger drops `verified_at IS NOT NULL` | 2 Postgres tests fail |
+| Only Owners and Admins attach, in RLS (#100) | `scan_link_insert` passes every role | 1 Postgres test fails |
+| Only Owners and Admins detach, in RLS (#100) | `scan_link_delete` passes every role | 1 Postgres test fails |
+| Links hidden without a project role (#100) | `project_access` on `scan_domain_links` passes every row | 3 Postgres tests fail |
+| Scan data follows the link (#100) | `scan_link_access` passes every row | 4 Postgres tests fail |
+| The tab shows the newest finished scan (#100) | The lateral join picks the oldest | 1 Postgres test fails |
+| Attach needs Owner or Admin (#100) | `canLinkDomains` uses `edit_settings` | 1 web unit test fails |
+| The server checks the role before attach and detach (#100) | Both actions skip `canLinkDomains` (RLS still refuses) | UAT-W35 fails (`missing`, not the role notice) |
+| Evidence is an allowlist (#100) | `evidenceItems` also shows unknown keys | 2 web unit tests fail; UAT-W34 fails (the planted secret shows) |
+| At most the last four characters (#100) | `last4` shape check removed | 1 web unit test fails |
 | A Supabase-shaped hook answer (#87) | Hook answers 200 with no JSON content type | 15 of 27 E2E tests fail (the fake Auth rolls back) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.
