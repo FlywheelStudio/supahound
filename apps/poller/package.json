@@ -16,11 +16,11 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.6.0",
+    "@cloudflare/vitest-plugin": "^1.8.2",
     "@types/pg": "^8.23.1",
-    "ai": "^7.0.164",
+    "ai": "^7.0.172",
     "typescript": "~5.9.3",
     "vitest": "^5.1.0",
-    "wrangler": "^4.158.0"
+    "wrangler": "^4.162.0"
   }
 }
