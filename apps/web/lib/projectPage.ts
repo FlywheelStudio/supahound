@@ -1,5 +1,6 @@
 import type { Access } from "@supahound/core/billing/policy";
 import { projectRole, type ProjectRole } from "@supahound/core/db/people";
+import { logSecurityEvent } from "@supahound/core/db/securityEvents";
 import { projectTiers, type ProjectTier } from "@supahound/core/db/billing";
 import { listProjects, type ProjectSummary } from "@supahound/core/db/repo";
 import type { TenantTx } from "@supahound/core/db/tenant";
@@ -48,7 +49,10 @@ export async function loadProjectPage<T = null>(
       const projects = await listProjects(tx);
       // RLS already hides a project the user has no role on; the role check makes the 404 explicit.
       const project = projects.find((p) => p.id === id);
-      if (!project || !project.role) return null;
+      if (!project || !project.role) {
+        logSecurityEvent("no_project_role");
+        return null;
+      }
       return {
         tenant, role, projectRole: project.role, access, projects, project,
         tiers: await projectTiers(tx),
@@ -76,7 +80,10 @@ export function paidProject<T>(
 ): Promise<T> {
   return paidTenant(pool, user, tenant, async (tx, workspaceRole) => {
     const role = await projectRole(tx, project);
-    if (!role) throw new NotAMemberError();
+    if (!role) {
+      logSecurityEvent("no_project_role");
+      throw new NotAMemberError();
+    }
     return fn(tx, role, workspaceRole);
   });
 }

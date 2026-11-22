@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Pool } from "pg";
 import { tenantId, type ProjectId, type TenantId, type UserId } from "../tenancy/scope.js";
 import { isStorableEmail } from "./repo.js";
+import { logSecurityEvent, recordSecurityEvent } from "./securityEvents.js";
 import { withTenant, type TenantTx } from "./tenant.js";
 import type { Role } from "./user.js";
 
@@ -268,7 +269,10 @@ export async function acceptInvite(
   input: { token: string; user: UserId; email: string | null; now: Date },
 ): Promise<AcceptResult> {
   const tenant = tenantFromInviteToken(input.token);
-  if (!tenant) return { status: "invalid" };
+  if (!tenant) {
+    logSecurityEvent("invite_token_invalid");
+    return { status: "invalid" };
+  }
   return withTenant(pool, tenant, async (tx) => {
     const [r] = await tx.query<{
       id: string; project_id: ProjectId; email: string; role: ProjectRole;
@@ -278,11 +282,21 @@ export async function acceptInvite(
        WHERE tenant_id = $1 AND token_hash = $2 FOR UPDATE`,
       [tenant, inviteTokenHash(input.token)],
     );
-    if (!r) return { status: "invalid" };
+    if (!r) {
+      // The tenant part of a made-up token may name no workspace: Workers logs, not the table.
+      logSecurityEvent("invite_token_invalid");
+      return { status: "invalid" };
+    }
+    // Decision 044: every outcome on a real invite is a security event in its workspace.
+    const event = { action: "invite_accepted", actor: input.user, project: r.project_id, target: r.id } as const;
+    const refuse = async (status: "used" | "expired" | "canceled" | "wrong_email") => {
+      await recordSecurityEvent(tx, { ...event, result: "denied", detail: { role: r.role, reason: status } });
+      return { status };
+    };
     const state = stateOf(r, input.now);
-    if (state === "accepted") return { status: "used" };
-    if (state !== "open") return { status: state };
-    if (input.email === null || normalizeEmail(input.email) !== r.email) return { status: "wrong_email" };
+    if (state === "accepted") return refuse("used");
+    if (state !== "open") return refuse(state);
+    if (input.email === null || normalizeEmail(input.email) !== r.email) return refuse("wrong_email");
 
     await tx.query(
       `INSERT INTO supahound.memberships (tenant_id, user_id, role, email) VALUES ($1, $2, 'member', $3)
@@ -301,6 +315,7 @@ export async function acceptInvite(
       "UPDATE supahound.project_invites SET accepted_at = $3, accepted_by = $4 WHERE tenant_id = $1 AND id = $2",
       [tenant, r.id, input.now, input.user],
     );
+    await recordSecurityEvent(tx, { ...event, detail: { role: r.role } });
     return { status: "accepted", tenant, project: r.project_id, role: r.role };
   });
 }

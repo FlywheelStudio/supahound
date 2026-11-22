@@ -12,7 +12,7 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache and security headers (CSP nonce, hydration with no violation), hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 12 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period → security log, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 62 |
 
 Totals on `feature/project-removal-grace` (2026-11-12): core 820, web 182, poller 15, E2E 72.
 
@@ -209,6 +209,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W50 | Remove → the projects page, project dashboard, workspace billing and Plan & billing all say "stays active until <period end> and is deleted on <+7 days> unless you keep it"; Keep project on the plan page cancels the removal and resumes the same subscription (decision 042) |
 | UAT-W51 | An owner marks a table intentionally public on the Posture page: its read finding reads "Accepted (intentionally public)" and leaves the counts, the change is audited, a viewer gets no buttons and a replayed owner form is refused; Unmark restores the open finding (`posture.uat.spec.ts`, decision 045) |
 | UAT-W52 | The owner sets the RPC burst threshold next to email alerts; it is audited; an out-of-range value and a viewer's replayed form are refused by the server (`alerts.uat.spec.ts`, decision 045) |
+| UAT-W53 | The owner reads a member's sign-in and an invite on Settings → Security log; the member gets no log and no link; the rows hold no address (`securityLog.uat.spec.ts`, decision 044) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
@@ -463,5 +464,13 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | GraphQL gate hides without traffic (#157) | `gateGraphql` shows every finding | 3 unit tests, 1 Postgres test and UAT-D17 fail |
 | GraphQL gate: the poll stores its counts (#157) | `pollProject` saves `graphqlCalls: null` | UAT-D17 fails |
 | GraphQL gate: the overview counts what the page shows (#157) | `postureSummaries` counts ungated findings | 1 Postgres test and UAT-D17 fail |
+| Security events: owners only read them (#138) | `owner_read` allows admins | `securityEvents.test.ts` fails |
+| Security events: append-only for signed-in users (#138) | `system_delete` passes every row | `securityEvents.test.ts` fails |
+| Security events: sign-in policy allows one row shape (#138) | `own_sign_in` drops its result and project checks | `securityEvents.test.ts` fails |
+| Security events: kept while paying (#138) | The data job deletes old events while paying | `securityEvents.test.ts` fails |
+| Security events: the purge empties them (#138) | `purgeHistory` keeps them | `dataControls.test.ts` purge test fails |
+| Security events: the disconnect records its outcome (#138) | The event drops `revoked` | `securityEvents.test.ts` fails |
+| Security events: only owners get the page (#138) | `canReadSecurityLog` allows admins | `apps/web/test/securityLog.test.ts` fails |
+| Security events: a bad hook signature is logged (#138) | The log call removed | `apps/web/test/securityLog.test.ts` fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

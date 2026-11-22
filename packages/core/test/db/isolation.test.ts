@@ -15,6 +15,7 @@ const TABLES = [
   "posture_scans", "posture_findings",
   "scan_domain_links",
   "account_closures",
+  "security_events",
   "public_tables",
 ] as const;
 
