@@ -18,3 +18,13 @@ export function crossTenantNote(coverage: ProjectSummary["crossTenant"]): { tone
       return null;
   }
 }
+
+// Log gap (issue #133): the newest polls counted no edge-log request after earlier traffic. Either
+// the app went quiet or its logs stopped reaching Supahound; detections need logs, so say so.
+export function logGapNote(p: Pick<ProjectSummary, "logGap" | "paused">): { tone: "warn"; text: string } | null {
+  if (!p.logGap || p.paused) return null;
+  return {
+    tone: "warn",
+    text: "Log gap: no requests to this project for about an hour, after earlier traffic. If your app should be busy, its logs may have stopped reaching Supahound, and nothing can be detected until they return.",
+  };
+}

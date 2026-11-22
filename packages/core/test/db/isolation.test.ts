@@ -178,7 +178,14 @@ describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {
     for (const col of ["removal_requested_at", "delete_after", "removal_source"]) {
       await expect(db.scheduler.query(`SELECT ${col} FROM supahound.projects`), col).rejects.toThrow(/permission denied/);
     }
-    for (const table of TABLES.filter((t) => t !== "projects" && t !== "billing_accounts" && t !== "account_closures")) {
+    // Heartbeat (issue #133): when runs finished and whether they assessed, and no other column,
+    // so the scheduler can only aggregate them.
+    const runs = await db.scheduler.query("SELECT status, finished_at FROM supahound.poll_runs");
+    expect(runs.rows.length).toBeGreaterThan(0);
+    for (const col of ["tenant_id", "project_id", "id", "error_code", "edge_requests", "window_start", "*"]) {
+      await expect(db.scheduler.query(`SELECT ${col} FROM supahound.poll_runs`), col).rejects.toThrow(/permission denied/);
+    }
+    for (const table of TABLES.filter((t) => !["projects", "billing_accounts", "account_closures", "poll_runs"].includes(t))) {
       await expect(db.scheduler.query(`SELECT 1 FROM supahound.${table}`), table).rejects.toThrow(/permission denied/);
     }
     // Billing: the status per tenant, to skip tenants that have not paid, and no other column.

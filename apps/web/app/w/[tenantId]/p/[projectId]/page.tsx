@@ -6,7 +6,7 @@ import { checkTitle } from "@supahound/core/posture/fix";
 import Link from "../../../../../components/NavLink";
 import { Notice, SeverityBadge, Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
-import { crossTenantNote } from "../../../../../lib/coverage";
+import { crossTenantNote, logGapNote } from "../../../../../lib/coverage";
 import { incidentPath, projectPath, utc } from "../../../../../lib/nav";
 import { ROLE_LABEL } from "../../../../../lib/people";
 import { countsText, postureState, sourceNotes, stateText } from "../../../../../lib/posture";
@@ -46,7 +46,8 @@ export default async function ProjectDashboard({
   const note = crossTenantNote(p.crossTenant);
   const now = new Date();
   const stopped = p.removal !== null && p.removal.activeUntil <= now;
-  const status = stopped ? "Stopped (removal scheduled)" : p.paused ? "Paused" : p.lastRunStatus === "unable_to_assess" ? "Unable to assess" : p.lastRunStatus === "ok" ? "Watching" : p.lastRunStatus === "running" ? "Polling" : "Waiting for first poll";
+  const gap = stopped ? null : logGapNote(p);
+  const status = stopped ? "Stopped (removal scheduled)" : p.paused ? "Paused" : p.lastRunStatus === "unable_to_assess" ? "Unable to assess" : gap ? "Log gap" : p.lastRunStatus === "ok" ? "Watching" : p.lastRunStatus === "running" ? "Polling" : "Waiting for first poll";
 
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={billingOn} active={{ kind: "project", project: p, page: "dashboard" }}>
@@ -78,6 +79,11 @@ export default async function ProjectDashboard({
       {tier && needsEnterprise(tier.requests30d) && (
         <p className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           This project sends more than 10 million requests a month. It stays on Pro, and we will contact you about Enterprise.
+        </p>
+      )}
+      {gap && (
+        <p data-testid="log-gap" className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {gap.text}
         </p>
       )}
       {note && (

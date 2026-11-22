@@ -8,6 +8,7 @@ import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
 import { querySecurityAdvisor } from "@supahound/core/posture/advisor";
+import { runHeartbeat } from "@supahound/core/poller/heartbeat";
 import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
 import { projectScope, tenantId as parseTenantId, type ProjectScope, type TenantId } from "@supahound/core/tenancy/scope";
 import { TokenVault } from "@supahound/core/vault/vault";
@@ -161,6 +162,20 @@ export default {
         log("data_jobs_enqueued", { count: await enqueueUsage(tenants, env.POLL_QUEUE, "data") });
       }
     } finally {
+      // Staff heartbeat (issue #133): runs even when enqueueing failed. Never fails the cron.
+      try {
+        const outcome = await runHeartbeat({
+          scheduler,
+          billing: billingMode(env.SUPAHOUND_BILLING),
+          staffEmail: env.SUPAHOUND_STAFF_ALERT_EMAIL,
+          send: (m) => env.EMAIL.send(m),
+          from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
+          appUrl: env.APP_URL,
+        }, new Date(_controller.scheduledTime));
+        if (outcome.status !== "off" && outcome.status !== "healthy") log("heartbeat", { ...outcome });
+      } catch {
+        log("heartbeat_crashed");
+      }
       await scheduler.end();
     }
   },
@@ -182,6 +197,8 @@ export default {
       env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
       // Posture scan (decision 038): catalog SQL on the read-only endpoint and the Security Advisor.
       posture: { querySql: queryReadOnly, queryAdvisor: querySecurityAdvisor },
+      // Log gap (issue #133): one request count per poll window, beside the rollup.
+      countRequests: true,
       // Incident alert email (decision 030): one email per incident per member.
       alerts: {
         send: (m) => env.EMAIL.send(m),

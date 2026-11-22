@@ -187,7 +187,7 @@ export default async function Workspace({
                         const usage = t.requests30d === null ? "usage counted daily" : `${t.requests30d.toLocaleString("en-US")} requests in 30 days`;
                         return `${t.tier === "pro" ? "Pro" : "Starter"} ${PRICE_LABEL[t.tier]}/mo · ${usage} · `;
                       })()}
-                      {p.paused ? "Supabase disconnected" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.lastRunStatus ?? "waiting for first poll"}
+                      {p.paused ? "Supabase disconnected" : p.lastRunStatus === "unable_to_assess" ? "unable to assess" : p.logGap ? "log gap" : p.lastRunStatus ?? "waiting for first poll"}
                       {" · "}{p.openIncidents} open
                     </span>
                   </div>

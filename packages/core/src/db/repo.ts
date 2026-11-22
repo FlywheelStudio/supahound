@@ -208,17 +208,19 @@ export async function finishPollRun(
     status: "ok" | "unable_to_assess"; errorCode?: string; templates?: number; findings?: number;
     // Detectors this run could not check (decision 024). Meaningful on "ok" runs only.
     unassessedDetectors?: Finding["detector"][];
+    // Edge-log requests in the window (issue #133); null or absent when not counted.
+    edgeRequests?: number | null;
     // The end of the span actually assessed, when a saturated rollup cut the window short (#129).
     windowEnd?: Date;
   },
 ): Promise<void> {
   await tx.query(
     `UPDATE supahound.poll_runs
-     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7,
-         window_end = coalesce($8, window_end), finished_at = now()
+     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, edge_requests = $8,
+         window_end = coalesce($9, window_end), finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null,
-      result.unassessedDetectors ?? [], result.windowEnd ?? null],
+      result.unassessedDetectors ?? [], result.edgeRequests ?? null, result.windowEnd ?? null],
   );
 }
 
@@ -400,7 +402,13 @@ export interface ProjectSummary {
   role: ProjectRole | null;
   // Decision 042: the scheduled removal, or null.
   removal: { activeUntil: Date; deleteAfter: Date } | null;
+  // Log gap (issue #133): the newest LOG_GAP_WINDOWS counted windows saw no edge-log request, after
+  // an earlier window saw some. Logging may have stopped, or the app went quiet.
+  logGap: boolean;
 }
+
+// About an hour of one-minute polls.
+export const LOG_GAP_WINDOWS = 60;
 
 function crossTenantCoverage(lastUnassessed: string[] | null, loaded: boolean, empty: boolean): ProjectSummary["crossTenant"] {
   if (lastUnassessed?.includes("cross_tenant")) return "unable_to_assess";
@@ -413,7 +421,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
     last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean; email_alerts: AlertLevel;
-    role: ProjectRole | null; active_until: Date | null; delete_after: Date | null;
+    role: ProjectRole | null; active_until: Date | null; delete_after: Date | null; log_gap: boolean;
   }>(
     `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts, p.active_until, p.delete_after,
             supahound.project_role(p.id) AS role,
@@ -425,7 +433,13 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
             (SELECT count(*)::int FROM supahound.incidents i
               WHERE i.tenant_id = p.tenant_id AND i.project_id = p.id AND i.status = 'open') AS open_incidents,
             (SELECT r.status FROM supahound.poll_runs r
-              WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id ORDER BY r.started_at DESC LIMIT 1) AS last_run_status
+              WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id ORDER BY r.started_at DESC LIMIT 1) AS last_run_status,
+            coalesce((SELECT count(*) = ${LOG_GAP_WINDOWS} AND bool_and(g.edge_requests = 0)
+                      FROM (SELECT r.edge_requests FROM supahound.poll_runs r
+                            WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id AND r.status = 'ok' AND r.edge_requests IS NOT NULL
+                            ORDER BY r.started_at DESC LIMIT ${LOG_GAP_WINDOWS}) g)
+                     AND EXISTS (SELECT 1 FROM supahound.poll_runs r
+                                 WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id AND r.edge_requests > 0), false) AS log_gap
      FROM supahound.projects p WHERE p.tenant_id = $1 ORDER BY p.name`,
     [tx.tenantId],
   );
@@ -436,6 +450,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     emailAlerts: r.email_alerts,
     role: r.role,
     removal: r.active_until && r.delete_after ? { activeUntil: r.active_until, deleteAfter: r.delete_after } : null,
+    logGap: r.log_gap,
   }));
 }
 
