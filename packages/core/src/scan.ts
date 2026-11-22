@@ -14,6 +14,8 @@ export interface ScanContext extends ServiceRoleContext {
   // SECURITY DEFINER functions posture shows anon-executable (issue #131). Absent or empty: no
   // RPC findings.
   anonDefiners?: ReadonlyMap<string, DefinerExposure>;
+  // Detector 12's paging threshold for this project (decision 045). Absent: RPC_BURST_HITS.
+  rpcBurstHits?: number;
 }
 
 // Runs the baseline-free detectors over one poll. Scoring, deduplication across polls and
@@ -25,7 +27,7 @@ export function scan(events: EdgeEvent[], ctx: ScanContext): Finding[] {
     if (f) findings.push(f);
   }
   findings.push(...detectServiceRoleMisuse(events, ctx));
-  findings.push(...detectRpcExposure(events, ctx.anonDefiners ?? new Map()));
+  findings.push(...detectRpcExposure(events, ctx.anonDefiners ?? new Map(), ctx.rpcBurstHits));
   findings.push(...detectExposedReads(events, ctx.anonReadable ?? new Map()));
   return findings.sort(
     (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || b.hits - a.hits,

@@ -29,6 +29,7 @@ const ERRORS: Record<string, string> = {
   mismatch: "The name did not match. Nothing was removed.",
   missing: "That project is not watched in this workspace, or its removal is no longer scheduled.",
   alerts_missing: "That project is not watched in this workspace.",
+  burst_missing: "That project is not watched in this workspace.",
 };
 
 type Listing =

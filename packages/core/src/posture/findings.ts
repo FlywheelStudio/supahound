@@ -50,9 +50,11 @@ export function dedupePosture<T extends PostureFinding>(findings: T[]): T[] {
 
 export type SeverityCounts = Record<Severity, number>;
 
-export function countBySeverity(findings: PostureFinding[]): SeverityCounts {
+// Open findings only: a finding accepted by an intentionally public mark (decision 045) is not
+// counted.
+export function countBySeverity(findings: PostureFinding[], publicTables: ReadonlySet<string> = new Set()): SeverityCounts {
   const counts: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const f of dedupePosture(findings)) counts[f.severity] += 1;
+  for (const f of dedupePosture(findings)) if (!acceptedAsPublic(f, publicTables)) counts[f.severity] += 1;
   return counts;
 }
 
@@ -129,6 +131,35 @@ export function anonReadableTables(findings: PostureFinding[]): Map<string, Anon
     if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
   }
   return out;
+}
+
+// Intentionally public tables (issue #160, decision 045): an Owner or Admin marks a table in
+// `public` whose rows are meant to be readable by anyone (a price list, a country lookup).
+
+// The anon-read watch list without the marked tables, so the rollup SQL never fetches their reads
+// and detector 11 raises nothing for them. Unmarking puts the table back from the next poll.
+export function withoutPublicTables<T>(tables: ReadonlyMap<string, T>, publicTables: ReadonlySet<string>): Map<string, T> {
+  return new Map([...tables].filter(([table]) => !publicTables.has(table)));
+}
+
+const READ_ONLY = (privileges: string[]) => privileges.every((p) => p === "SELECT");
+
+// Does the mark accept this finding? Only a finding on a marked table in `public` that says the
+// table can be read, and nothing more: RLS off where the API roles hold no grant but SELECT; a
+// policy that opens SELECT only; the Advisor's RLS-off lint, which carries no grants (the catalog
+// check replaces it whenever the catalog read worked). A finding that also lets the API roles
+// write stays open: the mark is about reads.
+export function acceptedAsPublic(f: PostureFinding, publicTables: ReadonlySet<string>): boolean {
+  if (f.schema !== "public" || f.object === null || f.objectType !== "table" || !publicTables.has(f.object)) return false;
+  const e = f.evidence;
+  if (f.source === "catalog" && f.check === "rls_disabled") {
+    return READ_ONLY([...listOf(e.anonPrivileges), ...listOf(e.authenticatedPrivileges)]);
+  }
+  if (f.source === "catalog" && f.check === "permissive_policy") {
+    const open = listOf(e.openCommands);
+    return open.length > 0 && READ_ONLY(open);
+  }
+  return f.source === "advisor" && f.check === "rls_disabled_in_public";
 }
 
 const RAISED: Record<Severity, Severity> = { low: "medium", medium: "high", high: "critical", critical: "critical" };

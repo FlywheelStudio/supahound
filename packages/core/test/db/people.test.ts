@@ -15,7 +15,7 @@ import { pgInfo, useDb } from "./harness.js";
 
 const PROJECT_TABLES = [
   "projects", "service_role_networks", "poll_runs", "incidents", "findings", "project_usage", "audit_log",
-  "posture_scans", "posture_findings", "project_subscriptions",
+  "posture_scans", "posture_findings", "project_subscriptions", "public_tables",
 ] as const;
 const NOW = new Date("2026-11-12T12:00:00Z");
 const user = () => verifiedUserId(randomUUID());
@@ -57,6 +57,7 @@ describe.skipIf(pgInfo === null)("people and roles per project", () => {
         catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },
         advisor: null,
       }, NOW);
+      await tx.query("INSERT INTO supahound.public_tables (tenant_id, project_id, table_name) VALUES ($1, $2, 'notes')", [t, p]);
       return p;
     });
   }
