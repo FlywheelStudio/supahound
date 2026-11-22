@@ -78,11 +78,17 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    that succeeds replaces its findings (decision 038). It never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
+   Anon traffic is left out, except anon GET/HEAD on the tables the stored posture shows readable by
+   anon (at most 200 plain identifiers, issue #132). The SQL is fixed before that poll's posture scan, so
+   a new scan's tables are watched from the next poll.
    The rollup keeps the busiest `ROLLUP_LIMIT` (5000) templates and the poller asks for one more. A
    full answer has dropped its quietest templates, so the poller halves the window, keeping its start,
    and asks again (at most `MAX_ROLLUP_QUERIES`, 4, queries a poll). The run then covers that shorter
    window and the next poll continues from its end. If no half fits, or one minute alone is full, the
    run is `unable_to_assess` with `rollup_saturated` (issue #129).
+   Anon calls to `/rest/v1/rpc/<fn>` are kept too, for the functions the stored posture shows as
+   SECURITY DEFINER and anon-executable (at most 200 plain identifiers, issue #131), on the same
+   next-poll basis.
    A second query counts the window's edge-log requests (`edgeRequestCountSql`, one number) into
    `poll_runs.edge_requests`; its hash is in the same audit row. A failed count leaves it NULL. The
    project page shows a **log gap** when the newest 60 counted windows are all zero after earlier
@@ -93,6 +99,11 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    An empty rollup is checked with one count query: REST traffic with no subject or role filled
    lists both detectors in `unassessed_detectors`, not zero findings (issue #130).
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
+   `detectors/exposedRead.ts` (#132) flags anon reads of those anon-readable tables, one finding per
+   table, ASN and caller class (actor `anon:asn:<n>`): rows from a critical-posture table rate high,
+   1,000 rows or more in one poll critical; elsewhere low, or medium for 1,000 rows or more.
+   `detectors/rpcExposure.ts` (#131) flags anon calls to those functions, one finding per function,
+   ASN and caller class (actor `anon:asn:<n>`): medium, or high at 100 calls or more in one poll.
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
@@ -133,6 +144,11 @@ known false positives. Rule IDs are derived from a finding's or incident's detec
 | SH-D4-003 | service_role_misuse / non_hosting_network | T1078.004, T1552 | API2 | medium |
 | SH-D4-004 | service_role_misuse / manual_tool | T1078.004 | API2 | low |
 | SH-D4-005 | service_role_misuse / new_network | T1078.004 | API2 | low |
+| SH-D11-001 | exposed_read / exposed_table_read | T1190, T1213 | API8, API1 | medium |
+| SH-D11-002 | exposed_read / rows_returned | T1190, T1213 | API8, API1 | medium |
+| SH-D11-003 | exposed_read / bulk_read | T1190, T1213 | API8, API1 | high |
+| SH-D12-001 | rpc_exposure / definer_rpc_call | T1190 | API5, API8 | medium |
+| SH-D12-002 | rpc_exposure / rpc_burst | T1190 | API5, API8 | high |
 
 A new signal or detector needs an entry: the registry's type fails the typecheck without one, and
 `rules.test.ts` checks every signal at runtime. `incidents/ocsf.ts` turns an incident into an OCSF

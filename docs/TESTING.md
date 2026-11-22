@@ -131,6 +131,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D10 | A lone probe in a window too busy to read whole still raises its incident (#129) |
 | UAT-D11 | A minute with more traffic than one poll can read is "unable to assess", never an all-clear (#129) |
 | UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
+| UAT-D13 | Anon-key reads of a table the posture scan shows open raise a paging incident from the next poll (#132) |
+| UAT-D14 | A burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll (#131) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -401,5 +403,15 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Removal: the words before and after the period (042) | `removalSentence` ignores the date | `apps/web/test/removal.test.ts` fails |
 | A saturated rollup is never clean (#129) | The poller asks for `ROLLUP_LIMIT` rows and never checks the count | 5 tests fail, including UAT-D10 and UAT-D11 |
 | A saturated poll spends a bounded budget (#129) | `queryRollup` drops the `MAX_ROLLUP_QUERIES` check | 1 Postgres test fails |
+| Anon reads: rejected requests raise nothing (#132) | `detectExposedReads` drops the status check | 1 unit test fails |
+| Anon reads: only plain identifiers reach the SQL (#132) | `anonReadTables` drops `safeIdentifier` | 1 unit test fails |
+| Anon reads: a policy's own read exposure counts (#132) | `anonCanRead` ignores `readExposure` | 1 unit test fails |
+| Anon reads: the poller passes posture to the detector (#132) | `pollProject` drops `anonReadable` from the scan | UAT-D13 fails |
+| Anon reads: findings may name the new detector (#132) | Migration `20261122010000` left out | UAT-D13 fails |
+| RPC: rejected calls raise nothing (#131) | `detectRpcExposure` drops the status check | 1 unit test fails |
+| RPC: only plain identifiers reach the SQL (#131) | `anonRpcFunctions` drops `safeIdentifier` | 1 unit test fails |
+| RPC: authenticated-only definers are not watched (#131) | `anonDefinerFunctions` ignores the stored exposure | 1 unit test fails |
+| RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D14 fails |
+| RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D14 fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.
