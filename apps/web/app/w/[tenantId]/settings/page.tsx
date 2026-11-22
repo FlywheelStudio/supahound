@@ -2,8 +2,8 @@ import { accessForAccount, payingAccount } from "@supahound/core/billing/policy"
 import { getBilling, projectTiers } from "@supahound/core/db/billing";
 import { getClosure, isClosedNow, PURGE_AFTER_DAYS } from "@supahound/core/db/closure";
 import { listConnectionsWithProjects, listProjects } from "@supahound/core/db/repo";
+import { historyWindowFor } from "@supahound/core/billing/history";
 import { RETENTION_DAYS } from "@supahound/core/db/retention";
-import { SECURITY_EVENT_DAYS } from "@supahound/core/db/securityEvents";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
@@ -15,6 +15,7 @@ import { mode } from "../../../../lib/billing";
 import { brandFrom } from "../../../../lib/brand";
 import { canClose, canDisconnect, closedPath, disconnectedNotice, MESSAGES, ymd } from "../../../../lib/dataControls";
 import { withPool } from "../../../../lib/db";
+import { windowPhrase } from "../../../../lib/history";
 import { securityLogPath } from "../../../../lib/securityLog";
 import { requireUser } from "../../../../lib/supabase";
 import { reopenAction } from "../closed/actions";
@@ -48,7 +49,7 @@ export default async function WorkspaceSettings({
       const access = mode() === "off" ? "full" : accessForAccount(billing);
       const [t] = await tx.query<{ name: string }>("SELECT name FROM supahound.tenants WHERE id = $1", [tenant]);
       return {
-        closed: false as const, role, access, closure, name: t!.name, paying: payingAccount(billing),
+        closed: false as const, role, access, closure, name: t!.name, paying: payingAccount(billing), window: historyWindowFor(billing),
         connections: await listConnectionsWithProjects(tx),
         projects: access === "blocked" ? [] : await listProjects(tx),
         tiers: access === "blocked" ? [] : await projectTiers(tx),
@@ -88,7 +89,7 @@ export default async function WorkspaceSettings({
         <section aria-labelledby="security-heading" className="mb-10">
           <h2 id="security-heading" className="mb-2 font-semibold">Security log</h2>
           <p className="text-sm text-slate-700">
-            Sign-ins, invites, role changes, Supabase connections and data deletion from the last {SECURITY_EVENT_DAYS} days.{" "}
+            Sign-ins, invites, role changes, Supabase connections and data deletion from the last {windowPhrase(data.window.securityEventDays)}.{" "}
             <Link href={securityLogPath(tenant)} className="underline">Open the security log</Link>
           </p>
         </section>
@@ -99,10 +100,15 @@ export default async function WorkspaceSettings({
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
           <li>While the workspace pays, Supahound deletes none of its data.</li>
           <li>
-            Otherwise: incidents and findings {RETENTION_DAYS} days after an incident&apos;s last activity, and poll history after{" "}
-            {RETENTION_DAYS} days (the latest poll of each project stays). An incident that stays quiet for {RETENTION_DAYS} days is resolved.
+            Otherwise: incidents and findings {data.window.incidentDays} days after an incident&apos;s last activity, and poll history after{" "}
+            {data.window.incidentDays} days (the latest poll of each project stays). An incident that stays quiet for {RETENTION_DAYS} days is resolved.
           </li>
-          <li>Security log events: {SECURITY_EVENT_DAYS} days, and all of them when a closed workspace is deleted.</li>
+          <li>Security log events: {data.window.securityEventDays} days, and all of them when a closed workspace is deleted.</li>
+          <li data-testid="history-plan">
+            {data.window.plan === "enterprise"
+              ? "This workspace has Enterprise history: the pages show a year, and the windows above are a year."
+              : "The pages show the same windows. Enterprise workspaces see and keep a year."}
+          </li>
           <li>A disconnected Supabase organization: its projects&apos; history {PURGE_AFTER_DAYS} days after the disconnect, or after the workspace stops paying.</li>
           <li>A closed workspace: its logs and history {PURGE_AFTER_DAYS} days after it stops paying. Its record, billing and payment history and audit log are never deleted.</li>
         </ul>

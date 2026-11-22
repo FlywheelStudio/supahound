@@ -174,7 +174,7 @@ describe.skipIf(pgInfo === null)("incident retention (decision 037)", () => {
   it("resolves an open incident idle past 30 days and deletes it; keeps one inside the window", async () => {
     const stale = await incident(db, a, "open", ago(31));
     const fresh = await incident(db, a, "open", ago(29));
-    const result = await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true }));
+    const result = await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true, historyDays: 30 }));
     expect(result.resolved).toBe(1);
     expect(await exists(db, "incidents", stale)).toBe(false);
     expect((await db.admin.query("SELECT status FROM supahound.incidents WHERE id = $1", [fresh])).rows).toEqual([{ status: "open" }]);
@@ -183,7 +183,7 @@ describe.skipIf(pgInfo === null)("incident retention (decision 037)", () => {
   it("deletes a resolved incident last seen more than 30 days ago, to the second", async () => {
     const edge = await incident(db, a, "resolved", ago(30));
     const past = await incident(db, a, "resolved", ago(30, 1000));
-    await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true }));
+    await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true, historyDays: 30 }));
     expect(await exists(db, "incidents", edge)).toBe(true);
     expect(await exists(db, "incidents", past)).toBe(false);
   });
@@ -192,7 +192,7 @@ describe.skipIf(pgInfo === null)("incident retention (decision 037)", () => {
     const live = await incident(db, a, "open", ago(1));
     await run(db, a, ago(31), { finding: live });
     await run(db, a, ago(2), { finding: live });
-    await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true }));
+    await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true, historyDays: 30 }));
     const f = await db.admin.query<{ created_at: Date }>("SELECT created_at FROM supahound.findings WHERE tenant_id = $1", [a.tenant]);
     expect(f.rows.map((r) => r.created_at)).toEqual([ago(2)]);
   });
@@ -203,7 +203,7 @@ describe.skipIf(pgInfo === null)("incident retention (decision 037)", () => {
     const lastOk = await run(db, w, ago(45));
     const lastRun = await run(db, w, ago(40), { status: "unable_to_assess" });
     const stillRunning = await run(db, w, ago(50), { status: "running" });
-    const result = await withTenant(db.app, w.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true }));
+    const result = await withTenant(db.app, w.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true, historyDays: 30 }));
     expect(result.pollRuns).toBe(1);
     expect(await exists(db, "poll_runs", oldOk)).toBe(false);
     expect([await exists(db, "poll_runs", lastOk), await exists(db, "poll_runs", lastRun), await exists(db, "poll_runs", stillRunning)])
@@ -217,7 +217,7 @@ describe.skipIf(pgInfo === null)("incident retention (decision 037)", () => {
       await repo.createOAuthState(tx, { userId: a.owner, stateHash: hash("a"), codeVerifier: "v".repeat(64), expiresAt: ago(0, 1000) });
       await repo.createOAuthState(tx, { userId: a.owner, stateHash: hash("b"), codeVerifier: "v".repeat(64), expiresAt: later(NOW, 1) });
     });
-    await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true }));
+    await withTenant(db.app, a.tenant, (tx) => applyRetention(tx, NOW, { deleteHistory: true, historyDays: 30 }));
     const left = await db.admin.query<{ state_hash: string }>("SELECT state_hash FROM supahound.oauth_states WHERE tenant_id = $1", [a.tenant]);
     expect(left.rows.map((r) => r.state_hash)).toEqual([hash("b")]);
   });

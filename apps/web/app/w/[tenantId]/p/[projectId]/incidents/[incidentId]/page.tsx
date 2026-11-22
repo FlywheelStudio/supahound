@@ -1,4 +1,5 @@
 import { actorAlias, detectorLabel, signalLabel } from "@supahound/core/alerts/email";
+import { historyWindow } from "@supahound/core/db/billing";
 import { getIncident } from "@supahound/core/db/repo";
 import Link from "../../../../../../../components/NavLink";
 import { notFound } from "next/navigation";
@@ -36,7 +37,8 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 export default async function IncidentDetail({ params }: { params: Promise<{ tenantId: string; projectId: string; incidentId: string }> }) {
   const id = parseIncidentId((await params).incidentId);
   if (!id) notFound();
-  const d = await loadProjectPage(params, (tx, p) => getIncident(tx, p.id, id, new Date()));
+  const d = await loadProjectPage(params, async (tx, p) =>
+    getIncident(tx, p.id, id, { now: new Date(), days: (await historyWindow(tx)).incidentDays }));
   const i = d.extra;
   if (!i) notFound();
   const { tenant, project: p } = d;

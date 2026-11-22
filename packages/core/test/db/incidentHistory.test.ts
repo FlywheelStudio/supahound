@@ -46,7 +46,7 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
     let pages = 0;
     do {
       const page: Awaited<ReturnType<typeof repo.listIncidentHistory>> = await withTenantForUser(db.app, alice, a, (tx) =>
-        repo.listIncidentHistory(tx, project, { now: NOW, limit, after }));
+        repo.listIncidentHistory(tx, project, { now: NOW, days: 30, limit, after }));
       ids.push(...page.incidents.map((i) => i.id));
       after = page.next;
       pages += 1;
@@ -74,13 +74,13 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
     const staleOpen = await insert(a, shop, { lastSeen: ago(40), status: "open" });
     const tooOld = await insert(a, shop, { lastSeen: ago(30, 1) });
 
-    const page = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, shop, { now: NOW, limit: 25 }));
+    const page = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, shop, { now: NOW, days: 30, limit: 25 }));
     expect(page.incidents.map((i) => i.id)).toEqual([recentOpen, resolved, boundary, staleOpen]);
     expect(page.incidents.map((i) => i.status)).toEqual(["open", "resolved", "resolved", "open"]);
     expect(page.next).toBeNull();
 
     // The detail follows the same window: the stale open incident opens, the old resolved one does not.
-    const get = (id: string) => withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, shop, id, NOW));
+    const get = (id: string) => withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, shop, id, { now: NOW, days: 30 }));
     expect((await get(staleOpen))?.status).toBe("open");
     expect((await get(boundary))?.id).toBe(boundary);
     expect(await get(tooOld)).toBeNull();
@@ -91,7 +91,7 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
       lastSeen: ago(1), summary: { summary: "A user read `notes`.", likelyImpact: "Data may be exposed.", nextSteps: ["Fix `notes`."] },
     });
     const bare = await insert(a, shop, { lastSeen: ago(1, 1000), summary: null });
-    const get = (id: string) => withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, shop, id, NOW));
+    const get = (id: string) => withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, shop, id, { now: NOW, days: 30 }));
     const e = await get(explained);
     expect(e).toMatchObject({ summarySource: "template", findingCount: 2, hits: 9, detectors: ["cross_tenant"], signals: ["other_owner"] });
     expect(e?.summary).toEqual({ summary: "A user read `notes`.", likelyImpact: "Data may be exposed.", nextSteps: ["Fix `notes`."] });
@@ -110,7 +110,7 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
     const oldest = await insert(a, blog, { lastSeen: ago(20) });
 
     const expected = [newest, microA, microB, ...[...tied].sort().reverse(), oldest];
-    const first = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, limit: 25 }));
+    const first = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, days: 30, limit: 25 }));
     expect(first.incidents.map((i) => i.id)).toEqual(expected);
 
     for (const limit of [1, 2, 3, 6]) {
@@ -121,12 +121,12 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
   });
 
   it("gives no next page when the last page is exactly full", async () => {
-    const page = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, limit: 7 }));
+    const page = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, days: 30, limit: 7 }));
     expect(page.incidents).toHaveLength(7);
     expect(page.next).toBeNull();
-    const cut = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, limit: 6 }));
+    const cut = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, days: 30, limit: 6 }));
     expect(cut.next).not.toBeNull();
-    const rest = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, limit: 6, after: cut.next }));
+    const rest = await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, blog, { now: NOW, days: 30, limit: 6, after: cut.next }));
     expect(rest.incidents).toHaveLength(1);
     expect(rest.next).toBeNull();
   });
@@ -143,14 +143,14 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
     expect(blogIds).not.toContain(bobIncident);
 
     // Another project's incident under this project's ID: null.
-    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, blog, shopIncident, NOW))).toBeNull();
+    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, blog, shopIncident, { now: NOW, days: 30 }))).toBeNull();
     // Bob's incident, asked for by Alice under Bob's project ID and under her own: null.
-    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, bobs, bobIncident, NOW))).toBeNull();
-    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, shop, bobIncident, NOW))).toBeNull();
-    expect((await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, bobs, { now: NOW, limit: 25 }))).incidents).toEqual([]);
+    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, bobs, bobIncident, { now: NOW, days: 30 }))).toBeNull();
+    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.getIncident(tx, shop, bobIncident, { now: NOW, days: 30 }))).toBeNull();
+    expect((await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, bobs, { now: NOW, days: 30, limit: 25 }))).incidents).toEqual([]);
     // Alice's incident under Bob's tenant: null. Bob still sees his own.
-    expect(await withTenantForUser(db.app, bob, b, (tx) => repo.getIncident(tx, shop, shopIncident, NOW))).toBeNull();
-    expect((await withTenantForUser(db.app, bob, b, (tx) => repo.getIncident(tx, bobs, bobIncident, NOW)))?.id).toBe(bobIncident);
+    expect(await withTenantForUser(db.app, bob, b, (tx) => repo.getIncident(tx, shop, shopIncident, { now: NOW, days: 30 }))).toBeNull();
+    expect((await withTenantForUser(db.app, bob, b, (tx) => repo.getIncident(tx, bobs, bobIncident, { now: NOW, days: 30 })))?.id).toBe(bobIncident);
   });
 
   it("returns an empty first page for a project with no incidents", async () => {
@@ -158,7 +158,7 @@ describe.skipIf(pgInfo === null)("Incident history (issue #44)", () => {
       const conn = await repo.createConnection(tx, db.vault, { label: "Supabase", token: "tok" });
       return repo.createProject(tx, { connectionId: conn, supabaseRef: "historyrefemptyaaaa4", name: "Empty" });
     });
-    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, empty, { now: NOW, limit: 25 })))
+    expect(await withTenantForUser(db.app, alice, a, (tx) => repo.listIncidentHistory(tx, empty, { now: NOW, days: 30, limit: 25 })))
       .toEqual({ incidents: [], next: null });
   });
 });

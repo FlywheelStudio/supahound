@@ -1,8 +1,9 @@
 import { accessForAccount } from "@supahound/core/billing/policy";
 import { getBilling, projectTiers } from "@supahound/core/db/billing";
+import { historyWindowFor } from "@supahound/core/billing/history";
 import { getClosure, isClosedNow } from "@supahound/core/db/closure";
 import { listProjects } from "@supahound/core/db/repo";
-import { listSecurityEvents, SECURITY_EVENT_DAYS } from "@supahound/core/db/securityEvents";
+import { listSecurityEvents } from "@supahound/core/db/securityEvents";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import Link from "../../../../../components/NavLink";
@@ -11,6 +12,7 @@ import { Shell } from "../../../../../components/Shell";
 import { mode } from "../../../../../lib/billing";
 import { closedPath } from "../../../../../lib/dataControls";
 import { withPool } from "../../../../../lib/db";
+import { windowPhrase } from "../../../../../lib/history";
 import { utc } from "../../../../../lib/nav";
 import {
   actorLabel, canReadSecurityLog, describeEvent, encodeSecurityCursor, parseSecurityCursor, resultLabel, SECURITY_LOG_PAGE_SIZE,
@@ -20,7 +22,7 @@ import { requireUser } from "../../../../../lib/supabase";
 
 // Workspace settings → Security log (issue #138, decision 044): sign-ins, invites, role changes,
 // removals, Supabase connections, project changes, closing and data deletion, newest first, 50 to
-// a page, for the last 90 days. Workspace owners only: the page says so to anyone else, and RLS
+// a page, for the last 90 days (a year on Enterprise, decision 048). Workspace owners only: the page says so to anyone else, and RLS
 // (owner_read) returns them no rows anyway. Not behind the paid gate, like the rest of settings.
 
 export default async function SecurityLog({
@@ -44,11 +46,13 @@ export default async function SecurityLog({
   const data = await withPool((pool) =>
     withTenantForUser(pool, user.id, tenant, async (tx, role) => {
       if (isClosedNow(await getClosure(tx), new Date())) return { closed: true as const };
-      const access = mode() === "off" ? "full" : accessForAccount(await getBilling(tx));
+      const billing = await getBilling(tx);
+      const access = mode() === "off" ? "full" : accessForAccount(billing);
       const owner = canReadSecurityLog(role);
+      const days = historyWindowFor(billing).securityEventDays;
       return {
-        closed: false as const, role, access,
-        log: owner ? await listSecurityEvents(tx, { now: new Date(), limit: SECURITY_LOG_PAGE_SIZE, after }) : null,
+        closed: false as const, role, access, days,
+        log: owner ? await listSecurityEvents(tx, { now: new Date(), days, limit: SECURITY_LOG_PAGE_SIZE, after }) : null,
         projects: access === "blocked" ? [] : await listProjects(tx),
         tiers: access === "blocked" ? [] : await projectTiers(tx),
       };
@@ -70,10 +74,10 @@ export default async function SecurityLog({
         <>
           <p className="mb-6 text-sm text-slate-600">
             Sign-ins, invites, role changes, Supabase connections, project changes and data deletion in this workspace from the last{" "}
-            {SECURITY_EVENT_DAYS} days, newest first. Refused attempts are listed too.
+            {windowPhrase(data.days)}, newest first. Refused attempts are listed too.
           </p>
           {data.log.events.length === 0 ? (
-            <p className="text-slate-600">{after ? "No older events." : `No events in the last ${SECURITY_EVENT_DAYS} days.`}</p>
+            <p className="text-slate-600">{after ? "No older events." : `No events in the last ${windowPhrase(data.days)}.`}</p>
           ) : (
             <ul aria-label="Security events" className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
               {data.log.events.map((e) => (

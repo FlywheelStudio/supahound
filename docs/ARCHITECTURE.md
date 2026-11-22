@@ -314,14 +314,14 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
 | `public_tables` | Tables in `public` a project's Owners or Admins marked intentionally public: detector 11 skips them, the Posture page shows their read findings as accepted (decision 045) |
 | `audit_log` | Every query and model call, append-only |
-| `security_events` | Supahound's own security events: sign-ins, invites, role changes, connections, project changes, closing, data deletion; actor, action, target, result; IDs and enums only. Workspace owners read it (RLS); append-only for signed-in users; 90 days once the workspace stops paying (decision 044) |
-| `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project); processed Stripe events; requests per project per day (decisions 028, 041) |
+| `security_events` | Supahound's own security events: sign-ins, invites, role changes, connections, project changes, closing, data deletion; actor, action, target, result; IDs and enums only. Workspace owners read it (RLS); append-only for signed-in users; 90 days (a year on Enterprise, decision 048) once the workspace stops paying (decision 044) |
+| `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project), Enterprise flag (decision 048); processed Stripe events; requests per project per day (decisions 028, 041) |
 | `project_subscriptions` | One Stripe subscription per watched project: tier, status, period end; kept as payment history when the project is removed (decision 041) |
 | `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |
 
 Data controls (decision 037): once a day at 00:40 UTC the poller enqueues a `data` message per
 tenant. For a workspace that does not pay, the job deletes incidents, findings and poll runs past
-the 30-day window, the history of a Supabase connection disconnected 30 days ago, and the logs and
+the plan's window (30 days, a year on Enterprise, decision 048), the history of a Supabase connection disconnected 30 days ago, and the logs and
 history of a workspace closed and unpaid for 30 days. It never deletes the workspace record, its
 billing and payment history or the audit log, and deletes nothing while a workspace pays.
 `supahound_notifier` is a third NOLOGIN role: it reads owners' addresses across tenants for the

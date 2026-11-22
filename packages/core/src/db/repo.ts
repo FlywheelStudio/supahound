@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { POLLABLE_STATUSES } from "../billing/policy.js";
+import { checkWindowDays, STANDARD_INCIDENT_DAYS } from "../billing/history.js";
 import type { AlertLevel } from "../alerts/email.js";
 import type { Finding, Severity } from "../detectors/finding.js";
 import type { OwnershipMap } from "../ownership/ownership.js";
@@ -496,11 +497,14 @@ export async function listOpenIncidents(tx: TenantTx, limit = 50, project?: Proj
   }));
 }
 
-// Incident history (issue #44, decision 035). The window: last seen in the last 30 days, or still
-// open. The engine resolves an incident only when its actor acts again after the 15-minute window,
-// so an actor who goes quiet leaves the incident open; it must stay reachable from the dashboard.
+// Incident history (issue #44, decision 035). The window: last seen in the last `days` days, or
+// still open. The engine resolves an incident only when its actor acts again after the 15-minute
+// window, so an actor who goes quiet leaves the incident open; it must stay reachable from the
+// dashboard. `days` comes from the workspace's plan (billing/history.ts, decision 048): 30, or
+// 365 on Enterprise. Callers read it with historyWindow (db/billing.ts) in the same transaction.
 
-export const INCIDENT_HISTORY_DAYS = 30;
+// The standard window, and the quiet time after which the data job resolves an open incident.
+export const INCIDENT_HISTORY_DAYS = STANDARD_INCIDENT_DAYS;
 
 // Keyset position: the last row of a page. `lastSeenUs` is epoch microseconds as a decimal string,
 // read from SQL. A JS Date holds milliseconds only, so a cursor built from one would skip rows
@@ -528,7 +532,8 @@ export interface IncidentDetail extends IncidentHistoryItem {
   summarySource: "model" | "template" | null;
 }
 
-const IN_WINDOW = `(i.status = 'open' OR i.last_seen_at >= $3::timestamptz - make_interval(days => ${INCIDENT_HISTORY_DAYS}))`;
+// $3 is now; `days` is the placeholder of the window's length in days.
+const IN_WINDOW = (days: string) => `(i.status = 'open' OR i.last_seen_at >= $3::timestamptz - make_interval(days => ${days}::int))`;
 const US_TO_TS = (param: string) => `(timestamptz 'epoch' + ${param}::bigint * interval '1 microsecond')`;
 
 interface IncidentRow {
@@ -551,18 +556,18 @@ const toHistoryItem = (r: IncidentRow): IncidentHistoryItem => ({
 export async function listIncidentHistory(
   tx: TenantTx,
   project: ProjectId,
-  opts: { now: Date; limit: number; after?: IncidentCursor | null },
+  opts: { now: Date; days: number; limit: number; after?: IncidentCursor | null },
 ): Promise<{ incidents: IncidentHistoryItem[]; next: IncidentCursor | null }> {
   const limit = Math.max(1, Math.min(100, Math.trunc(opts.limit)));
   const after = opts.after ?? null;
   const rows = await tx.query<IncidentRow>(
     `SELECT ${INCIDENT_COLUMNS}
      FROM supahound.incidents i
-     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW}
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW("$7")}
        AND ($4::text IS NULL OR (i.last_seen_at, i.id) < (${US_TO_TS("$4")}, $5::uuid))
      ORDER BY i.last_seen_at DESC, i.id DESC
      LIMIT $6`,
-    [tx.tenantId, project, opts.now, after?.lastSeenUs ?? null, after?.id ?? null, limit + 1],
+    [tx.tenantId, project, opts.now, after?.lastSeenUs ?? null, after?.id ?? null, limit + 1, checkWindowDays(opts.days)],
   );
   const page = rows.slice(0, limit);
   const last = page.at(-1);
@@ -572,14 +577,16 @@ export async function listIncidentHistory(
   };
 }
 
-// One incident of this project, in the window; null otherwise. Another project's or another
-// tenant's incident ID is null too, so the page answers 404 in every case.
-export async function getIncident(tx: TenantTx, project: ProjectId, incidentId: string, now: Date): Promise<IncidentDetail | null> {
+// One incident of this project, in the window of `days`; null otherwise. Another project's or
+// another tenant's incident ID is null too, so the page answers 404 in every case.
+export async function getIncident(
+  tx: TenantTx, project: ProjectId, incidentId: string, opts: { now: Date; days: number },
+): Promise<IncidentDetail | null> {
   const rows = await tx.query<IncidentRow>(
     `SELECT ${INCIDENT_COLUMNS}
      FROM supahound.incidents i
-     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW} AND i.id = $4::uuid`,
-    [tx.tenantId, project, now, incidentId],
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW("$5")} AND i.id = $4::uuid`,
+    [tx.tenantId, project, opts.now, incidentId, checkWindowDays(opts.days)],
   );
   const r = rows[0];
   return r ? { ...toHistoryItem(r), summarySource: r.summary_source } : null;

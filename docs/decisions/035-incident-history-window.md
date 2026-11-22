@@ -51,3 +51,8 @@ sells "30-day incident history". Three questions needed an answer:
 - A retention job (data controls) must not delete open incidents by `last_seen_at` alone, or the
   dashboard and the history disagree.
 - The alert email can link to the incident detail page in a later change.
+
+## Amended by 048 (2026-11-22)
+
+The window in point 1 is the workspace's plan window: 30 days, or 365 on Enterprise and on
+staff-exempt workspaces ([048](048-enterprise-history.md)). An open incident still always shows.

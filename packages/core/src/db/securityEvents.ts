@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { checkWindowDays, STANDARD_SECURITY_EVENT_DAYS } from "../billing/history.js";
 import { opsLine, opsLog } from "../logging/opsLog.js";
 import type { ProjectId, UserId } from "../tenancy/scope.js";
 import { begin, type TenantTx } from "./tenant.js";
@@ -30,9 +31,10 @@ export type SecurityAction = (typeof SECURITY_ACTIONS)[number];
 export const SECURITY_RESULTS = ["success", "denied", "failed"] as const;
 export type SecurityResult = (typeof SECURITY_RESULTS)[number];
 
-// Kept this long once the workspace stops paying (decision 044, following 037: nothing is deleted
-// while it pays). The Security log page shows the same window.
-export const SECURITY_EVENT_DAYS = 90;
+// The standard window: kept this long once the workspace stops paying (decision 044, following
+// 037: nothing is deleted while it pays). The Security log page shows the same window. Enterprise
+// workspaces get a year (decision 048): callers pass the plan's window (billing/history.ts).
+export const SECURITY_EVENT_DAYS = STANDARD_SECURITY_EVENT_DAYS;
 
 // --- Detail: allow-listed keys, enum strings, counts and flags -------------------------------------
 
@@ -108,12 +110,12 @@ export async function recordSignIn(pool: Pool, user: UserId): Promise<number> {
 }
 
 // The daily data job, for a workspace that does not pay: events older than the window go.
-export async function deleteExpiredSecurityEvents(tx: TenantTx, now: Date): Promise<number> {
+export async function deleteExpiredSecurityEvents(tx: TenantTx, now: Date, days: number): Promise<number> {
   const rows = await tx.query(
     `DELETE FROM supahound.security_events
-     WHERE tenant_id = $1 AND created_at < $2::timestamptz - make_interval(days => ${SECURITY_EVENT_DAYS})
+     WHERE tenant_id = $1 AND created_at < $2::timestamptz - make_interval(days => $3::int)
      RETURNING id`,
-    [tx.tenantId, now],
+    [tx.tenantId, now, checkWindowDays(days)],
   );
   return rows.length;
 }
@@ -168,7 +170,7 @@ function detailOf(stored: unknown): SecurityDetail {
 // The workspace's events in the window, newest first. Pass the previous page's `next` as `after`.
 export async function listSecurityEvents(
   tx: TenantTx,
-  opts: { now: Date; limit: number; after?: SecurityEventCursor | null },
+  opts: { now: Date; days: number; limit: number; after?: SecurityEventCursor | null },
 ): Promise<{ events: SecurityEventItem[]; next: SecurityEventCursor | null }> {
   const limit = Math.max(1, Math.min(100, Math.trunc(opts.limit)));
   const after = opts.after ?? null;
@@ -180,11 +182,11 @@ export async function listSecurityEvents(
      LEFT JOIN supahound.memberships a ON a.tenant_id = e.tenant_id AND a.user_id = e.actor_user_id
      LEFT JOIN supahound.memberships t ON t.tenant_id = e.tenant_id AND t.user_id = e.target_id
      LEFT JOIN supahound.projects p ON p.tenant_id = e.tenant_id AND p.id = e.project_id
-     WHERE e.tenant_id = $1 AND e.created_at >= $2::timestamptz - make_interval(days => ${SECURITY_EVENT_DAYS})
+     WHERE e.tenant_id = $1 AND e.created_at >= $2::timestamptz - make_interval(days => $6::int)
        AND ($3::text IS NULL OR (e.created_at, e.id) < (${US_TO_TS("$3")}, $4::uuid))
      ORDER BY e.created_at DESC, e.id DESC
      LIMIT $5`,
-    [tx.tenantId, opts.now, after?.createdUs ?? null, after?.id ?? null, limit + 1],
+    [tx.tenantId, opts.now, after?.createdUs ?? null, after?.id ?? null, limit + 1, checkWindowDays(opts.days)],
   );
   const page = rows.slice(0, limit);
   const last = page.at(-1);

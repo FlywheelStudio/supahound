@@ -1,10 +1,12 @@
 import { ENTERPRISE_FROM_REQUESTS, needsEnterprise, PRICE_LABEL, PRO_FROM_REQUESTS, USAGE_WINDOW_DAYS } from "@supahound/core/billing/policy";
 import { currentSubFor, trialEndsAt } from "@supahound/core/billing/projects";
 import type { InvoiceSummary } from "@supahound/core/billing/stripeMap";
+import { historyWindowFor } from "@supahound/core/billing/history";
 import { getBilling, listProjectSubscriptions } from "@supahound/core/db/billing";
 import Link from "../../../../../../../components/NavLink";
 import { Shell } from "../../../../../../../components/Shell";
 import { mode } from "../../../../../../../lib/billing";
+import { historyLine } from "../../../../../../../lib/history";
 import { workspacePath } from "../../../../../../../lib/nav";
 import { loadProjectPage } from "../../../../../../../lib/projectPage";
 import { canManageBilling, canSeeInvoices, dollars, STATUS_LABEL, subscriptionLine, tierLabel } from "../../../../../../../lib/projectBilling";
@@ -49,6 +51,7 @@ export default async function ProjectPlan({
   }
   const line = sub ? subscriptionLine(sub, now) : null;
   const trialEnd = trialEndsAt(billing, now);
+  const history = historyWindowFor(billing);
 
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={billingOn} active={{ kind: "project", project: p, page: "plan" }}>
@@ -90,6 +93,10 @@ export default async function ProjectPlan({
               {tier.requests30d === null
                 ? "Supahound counts this project's requests once a day. The first count sets the plan."
                 : `${tier.requests30d.toLocaleString("en-US")} requests in the last ${USAGE_WINDOW_DAYS} days.`}
+            </p>
+            <p className="mt-2 text-sm text-slate-700" data-testid="plan-history">
+              {history.plan === "enterprise" && <strong className="font-medium">Enterprise · </strong>}
+              {historyLine(history)}
             </p>
             {needsEnterprise(tier.requests30d) && (
               <p className="mt-2 text-sm text-amber-900">Above {millions(ENTERPRISE_FROM_REQUESTS)} requests: the project stays on Pro, and we will contact you about Enterprise.</p>

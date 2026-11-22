@@ -51,7 +51,7 @@ describe.skipIf(pgInfo === null)("security events in Postgres", () => {
     expect(await read(u.admin)).toEqual([]);
     expect(await read(u.member)).toEqual([]);
     // The core reader goes through the same policy.
-    expect((await as(u.admin, A, (tx) => listSecurityEvents(tx, { now: new Date(), limit: 10 }))).events).toEqual([]);
+    expect((await as(u.admin, A, (tx) => listSecurityEvents(tx, { now: new Date(), days: SECURITY_EVENT_DAYS, limit: 10 }))).events).toEqual([]);
     // Another tenant's owner sees only their own workspace.
     const theirs = await as(u.stranger, B, (tx) => tx.query<{ tenant_id: string }>("SELECT tenant_id FROM supahound.security_events"));
     expect(theirs.map((r) => r.tenant_id)).toEqual([B]);
@@ -140,7 +140,7 @@ describe.skipIf(pgInfo === null)("security events in Postgres", () => {
     const seen: string[] = [];
     let after: SecurityEventCursor | null = null;
     for (let i = 0; i < 5; i++) {
-      const page = await as(u.owner, T, (tx) => listSecurityEvents(tx, { now, limit: 3, after }));
+      const page = await as(u.owner, T, (tx) => listSecurityEvents(tx, { now, days: SECURITY_EVENT_DAYS, limit: 3, after }));
       seen.push(...page.events.map((e) => e.id));
       if (!page.next) break;
       after = page.next;
@@ -151,12 +151,12 @@ describe.skipIf(pgInfo === null)("security events in Postgres", () => {
     expect(seen).toEqual(ordered);
     // Outside the 90-day window: not listed.
     const later = new Date(now.getTime() + (SECURITY_EVENT_DAYS + 3) * DAY);
-    expect((await as(u.owner, T, (tx) => listSecurityEvents(tx, { now: later, limit: 10 }))).events).toEqual([]);
+    expect((await as(u.owner, T, (tx) => listSecurityEvents(tx, { now: later, days: SECURITY_EVENT_DAYS, limit: 10 }))).events).toEqual([]);
   });
 
   it("shows member addresses and project names from their own tables, never from the row", async () => {
     await as(u.owner, A, (tx) => recordSecurityEvent(tx, { action: "role_changed", actor: u.owner, project, target: u.member, detail: { role: "editor", from: "viewer" } }));
-    const { events } = await as(u.owner, A, (tx) => listSecurityEvents(tx, { now: new Date(), limit: 50 }));
+    const { events } = await as(u.owner, A, (tx) => listSecurityEvents(tx, { now: new Date(), days: SECURITY_EVENT_DAYS, limit: 50 }));
     const e = events.find((x) => x.action === "role_changed")!;
     expect(e).toMatchObject({ actorEmail: "owner@alpha.test", targetEmail: "member@alpha.test", projectName: "Shop", detail: { role: "editor", from: "viewer" } });
     const stored = (await db.admin.query("SELECT detail::text AS d FROM supahound.security_events WHERE tenant_id = $1", [A])).rows.map((r) => r.d).join(" ");
@@ -178,7 +178,7 @@ describe.skipIf(pgInfo === null)("security events in Postgres", () => {
     await db.admin.query("UPDATE supahound.billing_accounts SET status = 'canceled' WHERE tenant_id = $1", [T]);
     await runDataJob(db.app, T, now);
     expect(await count(T)).toBe(1);
-    expect(await sys(T, (tx) => deleteExpiredSecurityEvents(tx, now))).toBe(0);
+    expect(await sys(T, (tx) => deleteExpiredSecurityEvents(tx, now, SECURITY_EVENT_DAYS))).toBe(0);
   });
 
   it("records a disconnect, and an admin refused by role, in the same transaction as the change", async () => {

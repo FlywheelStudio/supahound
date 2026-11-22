@@ -162,3 +162,10 @@ service). The subprocessor list is the privacy policy in the private site repo.
   project per day for as long as it pays. A later decision may roll old runs up instead.
 - The privacy policy should state these rules. The `dataControls` flag in the site's
   `content/features.ts` flips to live when this ships.
+
+## Amended by 048 (2026-11-22)
+
+Section 2: the 30-day cutoffs (steps 2 to 4) and the 90 days of security events are the standard
+window; an Enterprise or staff-exempt workspace's is a year ([048](048-enterprise-history.md)).
+Step 1 (resolve after 30 quiet days) and the rule that nothing is deleted while a workspace pays
+are unchanged.

@@ -43,9 +43,12 @@ The consumer before this change acks a `data` message as invalid (no `projectId`
 ### Retention (`db/retention.ts`)
 
 Resolve open incidents idle 30 days; then, only when `deleteHistory`: delete resolved incidents last
-seen more than 30 days ago, findings older than 30 days, poll runs older than 30 days except the
+seen more than `historyDays` ago, findings older than that, poll runs older than that except the
 latest and latest `ok` run per project and runs findings point at. Always: delete expired OAuth
-states.
+states. `historyDays` is the plan's window (decision 048): 30 days, or 365 for an Enterprise or
+staff-exempt workspace. `runDataJob` reads it with `paying` in one read (`db/billing.ts`
+`retentionPlan`), and passes the plan's security-event window (90 days or 365) to
+`deleteExpiredSecurityEvents`.
 
 ### Closing (`db/closure.ts`, `datacontrols/flow.ts`)
 
