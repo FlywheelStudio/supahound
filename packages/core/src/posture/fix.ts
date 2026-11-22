@@ -87,6 +87,12 @@ export function checkTitle(f: Pick<PostureFinding, "source" | "check" | "evidenc
     const t = LINT_TITLE[f.check];
     return t ?? `${f.check.charAt(0).toUpperCase()}${f.check.slice(1).replace(/_/g, " ")}`;
   }
+  if (f.check === "function_definer_exposed") {
+    return f.evidence.exposure === "anon" ? "Signed-out visitors can run a SECURITY DEFINER function" : "Signed-in users can run a SECURITY DEFINER function";
+  }
+  if (f.check === "graphql_table_exposed") {
+    return f.evidence.exposure === "anon" ? "Signed-out visitors can see this object in the GraphQL schema" : "Signed-in users can see this object in the GraphQL schema";
+  }
   if (f.check === "permissive_policy") {
     return strs(f.evidence.openCommands).some((c) => c !== "SELECT") ? "A policy lets any row be changed" : "A policy lets every row be read";
   }
@@ -119,6 +125,50 @@ function permissive(f: PostureFinding, target: string, display: string): FixProm
   };
 }
 
+// Catalog checks of issue #135 (ported from splinter 0026 to 0029; remediation per splinter's docs).
+const roleList = (v: unknown): ("anon" | "authenticated")[] =>
+  strs(v).filter((r): r is "anon" | "authenticated" => r === "anon" || r === "authenticated");
+
+function definerExposed(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const roles = roleList(f.evidence.executableBy);
+  const args = str(f.evidence.arguments);
+  const sig = args === null ? target : `${target}(${args})`;
+  const exposure = str(f.evidence.exposure) ?? "none";
+  const lines = [
+    `-- ${display} is SECURITY DEFINER: it runs as its owner, past every RLS policy. ${roles.join(" and ") || "An API role"} can EXECUTE it.`,
+    ...(args === null ? ["-- Add the argument types after the name if the function is overloaded."] : []),
+    "-- If callers should not run it, revoke EXECUTE. Postgres grants it to PUBLIC by default, so revoke that too; service_role keeps its own grant.",
+    `REVOKE EXECUTE ON FUNCTION ${sig} FROM ${["PUBLIC", ...roles].join(", ")};`,
+    "",
+    "-- If it must stay callable, run it with the caller's rights so RLS applies:",
+    `-- ALTER FUNCTION ${sig} SECURITY INVOKER;`,
+  ];
+  if (f.evidence.searchPathSet === false) {
+    lines.push("", "-- It also resolves names through the caller's search_path. Pin it:", `ALTER FUNCTION ${sig} SET search_path = '';`);
+  }
+  return {
+    title,
+    explanation: `${display} runs with its owner's rights, past every RLS policy, and ${exposure === "anon" ? "anyone with the project's anon key" : "every signed-in user"} can call it at /rest/v1/rpc/${f.object}.`,
+    sql: lines.join("\n"),
+  };
+}
+
+function graphqlTable(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const roles = roleList(f.evidence.roles);
+  const who = roles.join(", ") || "anon, authenticated";
+  return {
+    title,
+    explanation: `pg_graphql is installed and ${who} can SELECT ${display}, so its name, columns and relationships show in the GraphQL schema at /graphql/v1. RLS still filters its rows.`,
+    sql: [
+      `-- Hide ${display} from GraphQL for ${who}. This also stops ${roles.length === 1 ? "that role" : "those roles"} reading it through the REST API.`,
+      `REVOKE SELECT ON ${target} FROM ${who};`,
+      "",
+      "-- If the app does not use GraphQL, block the endpoint for the API roles instead:",
+      "-- REVOKE ALL ON FUNCTION graphql.resolve FROM anon, authenticated;",
+    ].join("\n"),
+  };
+}
+
 export function fixPrompt(f: PostureFinding): FixPrompt {
   const title = checkTitle(f);
   const named = f.schema !== null && f.object !== null;
@@ -148,6 +198,10 @@ export function fixPrompt(f: PostureFinding): FixPrompt {
         };
       case "permissive_policy":
         return permissive(f, target, display);
+      case "function_definer_exposed":
+        return definerExposed(f, title, target, display);
+      case "graphql_table_exposed":
+        return graphqlTable(f, title, target, display);
     }
   }
 

@@ -266,6 +266,9 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | No Advisor free text is kept (#11) | `parseLints` keeps `title` | 2 unit tests fail |
 | Names with control characters are dropped (#11) | `safeName` allows them | 3 unit tests fail |
 | Advisor duplicates show once (#11) | `dedupePosture` keeps all | 2 tests fail (unit and Postgres) |
+| SECURITY DEFINER functions are found (#135) | The function rows lose `f.prosecdef` / the check ignores `securityDefiner` | 1 Postgres test fails / 1 unit test fails |
+| GraphQL exposure counts column grants, not partitioned roots (#135) | The relkind filter removed | 1 Postgres test fails |
+| Ported checks hide their Advisor lints (#135) | `pg_graphql_anon_table_exposed` mapping removed | 1 unit test fails |
 | Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
 | The raise agrees with the Posture page (#11) | `postureExposedTables` filters by severity before dedupe | 1 Postgres test fails |
 | Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |
