@@ -3,8 +3,8 @@ import { domainId, projectId, tenantId } from "@supahound/core/tenancy/scope";
 import { describe, expect, it, vi } from "vitest";
 import { can } from "../lib/people";
 import {
-  canLinkDomains, domainNoticeFrom, DOMAIN_NOTICES, domainsPath, evidenceItems, findingCountsText, findingTitle, handleLink,
-  handleUnlink, scanStateText,
+  ANON_EXPOSURE_TYPE, canLinkDomains, domainNoticeFrom, DOMAIN_NOTICES, domainsPath, evidenceItems, exposureFollowUp, findingCountsText,
+  findingTitle, handleLink, handleUnlink, scanStateText,
 } from "../lib/scanDomains";
 
 // Scan domains per project and the Security scan tab (issue #100, decision 040).
@@ -135,5 +135,47 @@ describe("evidence on the page", () => {
       { label: "Has a remote", value: "Yes" },
       { label: "Profiles", value: "2" },
     ]);
+  });
+
+  it("shows what an anon key exposes: names and counts (#139)", () => {
+    expect(evidenceItems({
+      rule: "supabase-anon-openapi", projectRef: "abcdefghijklmnopqrst", relationCount: 2, relationNames: ["orders", "profiles"],
+      functionCount: 1, functionNames: ["get_stats"], unsafeNames: 0, capped: false,
+    })).toEqual([
+      { label: "Rule", value: "supabase-anon-openapi" },
+      { label: "Supabase project", value: "abcdefghijklmnopqrst" },
+      { label: "Tables and views", value: "2" },
+      { label: "Table and view names", value: "orders, profiles" },
+      { label: "Functions", value: "1" },
+      { label: "Function names", value: "get_stats" },
+    ]);
+    expect(evidenceItems({ unsafeNames: 3 })).toEqual([{ label: "Names not shown", value: "3" }]);
+  });
+
+  it("drops a name list with a control character, an overlong name or too many names", () => {
+    expect(evidenceItems({ relationNames: ["ok", "bad\nname"] })).toEqual([]);
+    expect(evidenceItems({ relationNames: ["x".repeat(64)] })).toEqual([]);
+    expect(evidenceItems({ functionNames: Array.from({ length: 101 }, (_, i) => `f${i}`) })).toEqual([]);
+    expect(evidenceItems({ functionNames: [] })).toEqual([]);
+    expect(evidenceItems({ functionNames: "get_stats" })).toEqual([]);
+  });
+});
+
+describe("anon-key exposure follow-up (#139)", () => {
+  const REF = "abcdefghijklmnopqrst";
+  const exposure = (ref: unknown) => finding({ type: ANON_EXPOSURE_TYPE, evidence: { projectRef: ref } });
+  const projects = [{ id: P, name: "Shop", supabaseRef: REF }];
+
+  it("links to the Posture tab of the watched project with the same ref", () => {
+    expect(exposureFollowUp(T, exposure(REF), projects)).toEqual({ kind: "posture", href: `/w/${T}/p/${P}/posture`, projectName: "Shop" });
+  });
+
+  it("suggests connecting a project Supahound does not watch", () => {
+    expect(exposureFollowUp(T, exposure("zyxwvutsrqponmlkjihg"), projects)).toEqual({ kind: "connect", href: `/w/${T}/projects` });
+    expect(exposureFollowUp(T, exposure(42), projects)).toEqual({ kind: "connect", href: `/w/${T}/projects` });
+  });
+
+  it("adds nothing to other findings", () => {
+    expect(exposureFollowUp(T, finding({ evidence: { projectRef: REF } }), projects)).toBeNull();
   });
 });

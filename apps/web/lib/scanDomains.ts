@@ -1,7 +1,7 @@
 import type { DomainScanResult, LinkOutcome, ScanFindingRecord } from "@supahound/core/db/scanDomains";
 import type { ProjectRole } from "@supahound/core/db/people";
 import { domainId, type DomainId, type ProjectId, type TenantId } from "@supahound/core/tenancy/scope";
-import { projectPath, utc } from "./nav";
+import { projectPath, utc, workspacePath } from "./nav";
 import { can, parseUuid } from "./people";
 
 // Scan domains per project and the Security scan tab (issue #100, decision 040) as pure
@@ -110,7 +110,22 @@ const EVIDENCE: Record<string, Rule> = {
   },
   hasRemote: { label: "Has a remote", show: (v) => (typeof v === "boolean" ? (v ? "Yes" : "No") : null) },
   profiles: { label: "Profiles", show: count },
+  // What the anon key exposes (issue #139, decision 046): names from the project's OpenAPI root.
+  relationCount: { label: "Tables and views", show: count },
+  relationNames: { label: "Table and view names", show: names },
+  functionCount: { label: "Functions", show: count },
+  functionNames: { label: "Function names", show: names },
+  unsafeNames: { label: "Names not shown", show: (v) => (v === 0 ? null : count(v)) },
 };
+
+// Postgres identifiers as the scanner stored them through safeName: 1 to 63 characters, no control
+// characters, at most 100 of them. React escapes the text; the shape check keeps a list that a later
+// writer filled with anything else off the page.
+function names(v: unknown): string | null {
+  // eslint-disable-next-line no-control-regex
+  const ok = (n: unknown) => typeof n === "string" && n.length >= 1 && n.length <= 63 && !/[\u0000-\u001f\u007f]/.test(n);
+  return Array.isArray(v) && v.length > 0 && v.length <= 100 && v.every(ok) ? v.join(", ") : null;
+}
 
 export function evidenceItems(evidence: Record<string, unknown>): { label: string; value: string }[] {
   const out: { label: string; value: string }[] = [];
@@ -120,6 +135,25 @@ export function evidenceItems(evidence: Record<string, unknown>): { label: strin
     if (value !== null) out.push({ label: rule.label, value });
   }
   return out;
+}
+
+export const ANON_EXPOSURE_TYPE = "anon-key-exposure:openapi";
+
+// Where to look next for an anon-key exposure finding (decision 046). When the Supabase project the
+// site names is one of this workspace's watched projects (and the user can see it), the posture scan
+// has the grants, RLS state and fix SQL for each table: link to its Posture tab. Otherwise, suggest
+// connecting it on the Projects page. Null for every other finding.
+export function exposureFollowUp(
+  tenant: TenantId,
+  f: Pick<ScanFindingRecord, "type" | "evidence">,
+  projects: readonly { id: ProjectId; name: string; supabaseRef: string }[],
+): { kind: "posture"; href: string; projectName: string } | { kind: "connect"; href: string } | null {
+  if (f.type !== ANON_EXPOSURE_TYPE) return null;
+  const ref = f.evidence.projectRef;
+  const match = typeof ref === "string" && /^[a-z0-9]{20}$/.test(ref) ? projects.find((p) => p.supabaseRef === ref) : undefined;
+  return match
+    ? { kind: "posture", href: projectPath(tenant, match.id, "posture"), projectName: match.name }
+    : { kind: "connect", href: workspacePath(tenant, "projects") };
 }
 
 // The finding's title: the rule's name when it is plain text, else its type.

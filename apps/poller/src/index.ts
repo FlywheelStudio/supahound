@@ -163,6 +163,8 @@ export default {
       }
     } finally {
       // Staff heartbeat (issue #133): runs even when enqueueing failed. Never fails the cron.
+      // This cron owns the "failing" check; the web Worker's cron owns "stale", so a dead poller
+      // cron is still reported and no slot gets two emails (issue #159).
       try {
         const outcome = await runHeartbeat({
           scheduler,
@@ -171,6 +173,7 @@ export default {
           send: (m) => env.EMAIL.send(m),
           from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
           appUrl: env.APP_URL,
+          checks: "failing",
         }, new Date(_controller.scheduledTime));
         if (outcome.status !== "off" && outcome.status !== "healthy") log("heartbeat", { ...outcome });
       } catch {

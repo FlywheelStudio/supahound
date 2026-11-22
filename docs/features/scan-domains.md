@@ -28,6 +28,10 @@ says how to attach one. Starting a scan from the app is #51; until then, scans c
    and up to 200 findings per scan ranked by severity. Text comes from `lib/scanDomains.ts`:
    `scanStateText`, `findingCountsText`, `findingTitle` (the rule name when it is plain text, else
    the type) and `evidenceItems` (the evidence allowlist).
+5. **Anon-key exposure findings** (#139, decision 046). The allowlist also shows table, view and
+   function counts and names (1 to 63 characters, no control characters, at most 100 per list).
+   `exposureFollowUp` adds a link under the fix: to the Posture tab of the watched project whose
+   Supabase ref matches the finding's `projectRef`, or to Projects to connect it.
 
 ## Data model and RLS
 
@@ -72,8 +76,8 @@ None. The scan funnel writes the domains and scans; this feature only reads them
   refuses editors and viewers (and passes a project Admin), unlinked domains hidden from members,
   reads for the project's people, a member with no role and another tenant, the latest finished
   scan, detach rules, project removal, no UPDATE grant. `isolation.test.ts` covers the new table.
-- Web unit: `apps/web/test/scanDomains.test.ts` (12). Role rule, outcomes, malformed IDs, notices,
-  tab text, the evidence allowlist with a planted secret.
+- Web unit: `apps/web/test/scanDomains.test.ts` (17). Role rule, outcomes, malformed IDs, notices,
+  tab text, the evidence allowlist with a planted secret, exposure names and the Posture link (#139).
 - UAT: UAT-W38 to UAT-W40 (`apps/web/e2e/specs/scanDomains.uat.spec.ts`), see `docs/TESTING.md`.
 - Mutation checks: `docs/TESTING.md`, rows marked #100.
 

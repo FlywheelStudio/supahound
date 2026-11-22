@@ -51,3 +51,5 @@ decisions fix the shape:
   Open questions). This decision covers the funnel and passive checks only.
 - [Decision 026](026-scan-secrets-leak-paths.md) amends point 3: the secrets scanner also probes a
   fixed list of leak paths (`/.env`, `/.git/config`, ...). Legal review should cover that probe too.
+- [Decision 046](046-scan-anon-key-exposure.md) amends point 2: one GET to the PostgREST root of the
+  Supabase project the verified site's own code names is also in scope. Legal review should cover it.

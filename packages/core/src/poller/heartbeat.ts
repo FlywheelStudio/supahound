@@ -13,11 +13,15 @@ import type { OutgoingEmail } from "./pollProject.js";
 // epoch). The check re-evaluates every minute of the current slot from poll_runs, and emails only in
 // the first minute of the slot that is over a threshold. So there is at most one email per slot,
 // the first one goes out the minute a problem starts, and a problem that lasts gets one reminder at
-// the start of each later slot. Two limits follow, both documented in docs/self-hosting.md:
-//   * a cron run that fails in that first minute (or an email that fails to send) is not retried
-//     until the next slot;
-//   * the check runs inside the poller's cron, so if the cron itself stops, nothing emails. An
-//     external uptime check is the only cover for that.
+// the start of each later slot. A cron run that fails in that first minute (or an email that fails
+// to send) is not retried until the next slot (docs/self-hosting.md).
+//
+// Two crons, one owner per check (issue #159). The poller's cron cannot report its own death, so
+// the web Worker's cron runs the same heartbeat. Neither cron can see whether the other one has
+// emailed without stored state, so each check has exactly one owner and no slot gets the same
+// email twice: the web cron owns "stale" (no poll run finished for 15 minutes), the poller's cron
+// owns "failing" (most runs could not assess). A dead poller cron is then still reported, by the
+// web cron; a dead web cron leaves staleness unreported, which an external uptime check covers.
 
 export interface HeartbeatConfig {
   // Stale: no poll run has finished for longer than this while projects are due.
@@ -30,6 +34,10 @@ export interface HeartbeatConfig {
 }
 
 export const HEARTBEAT_DEFAULTS: HeartbeatConfig = { maxAgeMinutes: 15, unableShare: 0.5, minRuns: 10, throttleHours: 6 };
+
+// Which thresholds a cron checks. "stale" belongs to the web Worker's cron, "failing" to the
+// poller's (see above); "all" is for a deployment with a single cron, and for tests.
+export type HeartbeatChecks = "all" | "stale" | "failing";
 
 const MINUTE_MS = 60_000;
 const WINDOW_MINUTES = 60;
@@ -58,7 +66,10 @@ export function heartbeatRange(now: Date, cfg: HeartbeatConfig = HEARTBEAT_DEFAU
 
 // Pure: evaluates every minute of the current slot up to `now` from the per-minute buckets.
 // `pollable` is false when no project is due to be polled at all; then nothing is stale.
-export function evaluateHeartbeat(health: PollHealth, now: Date, pollable: boolean, cfg: HeartbeatConfig = HEARTBEAT_DEFAULTS): HeartbeatVerdict {
+// `checks` limits the verdict, and so the throttle, to the thresholds this cron owns.
+export function evaluateHeartbeat(
+  health: PollHealth, now: Date, pollable: boolean, cfg: HeartbeatConfig = HEARTBEAT_DEFAULTS, checks: HeartbeatChecks = "all",
+): HeartbeatVerdict {
   const { slotStart } = heartbeatRange(now, cfg);
   const first = slotStart.getTime() / MINUTE_MS;
   const current = Math.floor(now.getTime() / MINUTE_MS);
@@ -78,9 +89,9 @@ export function evaluateHeartbeat(health: PollHealth, now: Date, pollable: boole
       }
     }
     const ageMinutes = last === null ? null : (k * MINUTE_MS - last) / MINUTE_MS;
-    const stale = pollable && ageMinutes !== null && ageMinutes > cfg.maxAgeMinutes ? { ageMinutes: Math.floor(ageMinutes) } : null;
+    const stale = checks !== "failing" && pollable && ageMinutes !== null && ageMinutes > cfg.maxAgeMinutes ? { ageMinutes: Math.floor(ageMinutes) } : null;
     const share = runs > 0 ? unable / runs : 0;
-    const failing = runs >= cfg.minRuns && share >= cfg.unableShare ? { runs, unable, share } : null;
+    const failing = checks !== "stale" && runs >= cfg.minRuns && share >= cfg.unableShare ? { runs, unable, share } : null;
     return { stale, failing };
   };
 
@@ -111,6 +122,8 @@ export interface HeartbeatDeps {
   from: { email: string; name: string };
   appUrl: string;
   config?: HeartbeatConfig;
+  // Default "all". The poller passes "failing", the web Worker "stale" (issue #159).
+  checks?: HeartbeatChecks;
 }
 
 export type HeartbeatOutcome =
@@ -122,10 +135,12 @@ export async function runHeartbeat(deps: HeartbeatDeps, now: Date): Promise<Hear
   const to = staffRecipients(deps.staffEmail);
   if (to.length === 0) return { status: "off" };
   const cfg = deps.config ?? HEARTBEAT_DEFAULTS;
+  const checks = deps.checks ?? "all";
   const { since, until } = heartbeatRange(now, cfg);
-  // Any project the cron would poll at all; with none, a quiet poll_runs is expected.
-  const pollable = (await dueProjects(deps.scheduler, 0, 1, deps.billing)).length > 0;
-  const verdict = evaluateHeartbeat(await pollHealth(deps.scheduler, since, until), now, pollable, cfg);
+  // Any project the cron would poll at all; with none, a quiet poll_runs is expected. Only the
+  // stale check needs it.
+  const pollable = checks !== "failing" && (await dueProjects(deps.scheduler, 0, 1, deps.billing)).length > 0;
+  const verdict = evaluateHeartbeat(await pollHealth(deps.scheduler, since, until), now, pollable, cfg, checks);
   if (!verdict.stale && !verdict.failing) return { status: "healthy" };
   if (!verdict.send) return { status: "throttled" };
   const rendered = renderHeartbeatEmail({ ...verdict, now, config: cfg, appUrl: deps.appUrl });

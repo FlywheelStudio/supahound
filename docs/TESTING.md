@@ -32,8 +32,9 @@ fails if any suite reports skipped tests.
 
 `pnpm e2e` runs `vite build`, then Playwright. The global setup (`apps/web/e2e/support/globalSetup.ts`) starts:
 
-1. **Postgres 17 on TCP.** The Worker reaches it through the local Hyperdrive binding
-   (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP`).
+1. **Postgres 17 on TCP.** The Worker reaches it through the local Hyperdrive bindings
+   (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP`, and `_HYPERDRIVE_SCHEDULER` for
+   the cron's heartbeat, which E2E does not fire; issue #159).
 2. **A fake Supabase Auth** (`support/fakeAuth.ts`). It issues ES256 tokens, and `getClaims()` verifies
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.
@@ -73,17 +74,34 @@ each of the three byte alignments. On 2026-11-22, with `gitleaks dir` over nine 
 `service_role` keys only (the default `jwt` rule fired on all nine); with one alignment removed it
 missed one key; the real history had no findings.
 
+`supabase-personal-access-token` also matches scoped `sbp_fc` tokens (#161), with the same pattern
+as the scanner (`packages/core/src/scan/secrets.ts`). On 2026-11-22, with `gitleaks dir` over
+random planted tokens generated in a scratch directory (never committed): it fired on a scoped,
+a classic and an OAuth token, and not on a too-short `sbp_fc` body; with the previous rule a scoped
+token in a string literal had no finding at all (in a `TOKEN=` line only the default
+`generic-api-key` rule caught it); the real history had no findings.
+
 ### Workflow lint and dependency scan
 
 - `workflows` (zizmor 1.32.0, pinned by SHA-256) audits `.github/workflows` and fails on any
   high-severity finding. Run it locally with `zizmor --min-severity high .github/workflows`
   (`pipx install zizmor`). On 2026-11-22 it passed; removing the `ignore` comments in `cla.yml`
-  failed it with two `dangerous-triggers` errors.
+  failed it with two `dangerous-triggers` errors. It passed again after `cla.yml` moved from the
+  archived CLA Assistant Lite to `actions/github-script` (#161), with the same two errors when the
+  ignores are removed.
 - `osv` (osv-scanner 2.7.1, pinned by SHA-256) scans `pnpm-lock.yaml` and fails on any known
   vulnerability that `osv-scanner.toml` does not list with a reason and an expiry. Run it locally
   with `osv-scanner scan source --lockfile pnpm-lock.yaml`. On 2026-11-22 it found two (fflate via
-  satori, minimatch via ESLint), both unreachable and listed until 2027-01-31; without the config it
-  exits non-zero.
+  satori, minimatch via ESLint); #161 fixed both (ESLint 10.15 and typescript-eslint 8.73 take
+  minimatch 11, and a pnpm override in `package.json` moves fflate to 0.7.5), so the config has no
+  entries and the scan finds nothing; the previous lockfile still fails it with both.
+- `cla.yml`'s script has no test in the repo (it runs only on GitHub). On 2026-11-22 (#161) it ran
+  against a mocked `github` client: unsigned author fails and gets one comment (updated, never
+  duplicated); allowlisted and signed authors (by user ID) pass with no comment; a sign comment
+  from a non-author records nothing; an author's sign comment writes the old Lite record shape,
+  flips the comment and re-runs the failed PR run; a write conflict retries and keeps the other
+  signature; an unlinked commit email fails. Dropping the allowlist, the signature lookup or the
+  re-run each failed it.
 - `scorecard.yml` (OpenSSF Scorecard) is a grade, not a gate: it files code scanning alerts.
 
 ### Self-hosting checks
@@ -254,6 +272,16 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Mailgun needs its name (#140) | The Mailgun rule drops the `mailgun` context | 1 unit test fails |
 | Scoped Supabase tokens match (#140) | The access-token rule drops the `sbp_fc` branch | 2 unit tests fail |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
+| Only a Supabase project the site names is in scope (#139) | `supabaseHostInScope` drops the named-refs check | 3 unit tests fail |
+| Only the PostgREST root is requested (#139) | `supabaseRestRootUrl` drops the path and query check | 4 unit tests fail |
+| The root's redirect is never followed (#139) | `supabaseRestRootGet` keeps the caller's `maxRedirects` | 1 unit test fails |
+| The key is never stored (#139) | The finding's evidence holds the key | 1 unit test fails |
+| Names pass `safeName` (#139) | `exposedNames` keeps names unchecked | 1 unit test fails |
+| The key must be for the named project (#139) | The collector pairs an anon key with every URL, ignoring its `ref` | 3 unit tests fail |
+| At most two projects per scan (#139) | The probe drops the cap | 1 unit test fails |
+| An oversized document is not parsed (#139) | The probe parses a truncated body | 1 unit test fails |
+| Exposure names on the page are shape-checked (#139) | `evidenceItems` drops the name check | 1 web unit test fails |
+| Posture link only for the same ref (#139) | `exposureFollowUp` links to any project | 1 web unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
 | Staff exemption ends with the owners (decision 029) | The membership trigger never fires | 4 Postgres exemption tests fail |

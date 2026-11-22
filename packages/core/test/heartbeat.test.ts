@@ -107,6 +107,34 @@ describe("evaluateHeartbeat throttle", () => {
   });
 });
 
+describe("evaluateHeartbeat checks (issue #159: one owner per check)", () => {
+  it("the web cron's stale check ignores failing polls, and its throttle starts at the stale breach", () => {
+    // Failing from minute 0, stopped from minute 25 (last finish 9:30).
+    const failingThenStopped = health([...runs(-60, 10, 5, 4)]);
+    expect(evaluateHeartbeat(failingThenStopped, at(0), true, HEARTBEAT_DEFAULTS, "stale")).toMatchObject({ stale: null, failing: null, send: false });
+    expect(evaluateHeartbeat(failingThenStopped, at(25), true, HEARTBEAT_DEFAULTS, "stale")).toMatchObject({ failing: null, send: true });
+    expect(evaluateHeartbeat(failingThenStopped, at(26), true, HEARTBEAT_DEFAULTS, "stale").send).toBe(false);
+  });
+
+  it("the poller cron's failing check never reports polling as stopped", () => {
+    const stopped = health(runs(-60, 10));
+    expect(evaluateHeartbeat(stopped, at(25), true, HEARTBEAT_DEFAULTS, "failing")).toMatchObject({ stale: null, failing: null, send: false });
+    const failing = health(runs(-60, 30, 5, 3));
+    expect(evaluateHeartbeat(failing, at(0), true, HEARTBEAT_DEFAULTS, "failing")).toMatchObject({ stale: null, send: true });
+  });
+
+  it("so the two crons never send for the same condition in a slot", () => {
+    // Every minute of a slot in which polls fail, then stop: each condition has exactly one sender.
+    const b = health([...runs(-60, 10, 5, 4)]);
+    const sends = { stale: 0, failing: 0 };
+    for (let m = 0; m < 360; m++) {
+      if (evaluateHeartbeat(b, at(m), true, HEARTBEAT_DEFAULTS, "stale").send) sends.stale += 1;
+      if (evaluateHeartbeat(b, at(m), true, HEARTBEAT_DEFAULTS, "failing").send) sends.failing += 1;
+    }
+    expect(sends).toEqual({ stale: 1, failing: 1 });
+  });
+});
+
 describe("staffRecipients", () => {
   it("reads one address or a comma-separated list, and is off when empty", () => {
     expect(staffRecipients("ops@example.com")).toEqual(["ops@example.com"]);
@@ -167,6 +195,14 @@ describe("runHeartbeat", () => {
   it("reports healthy when nothing is over a threshold", async () => {
     const { pool } = fakeScheduler({ due: true, lastBefore: at(-61), buckets: runs(-60, 30) });
     expect(await runHeartbeat(base({ scheduler: pool as never }), at(30))).toEqual({ status: "healthy" });
+  });
+
+  it("with the failing check only, skips the due-projects query and reports nothing stale", async () => {
+    const { pool, queries } = fakeScheduler({ due: true, lastBefore: at(-61), buckets: runs(-60, 10) });
+    expect(await runHeartbeat(base({ scheduler: pool as never, checks: "failing" }), at(25))).toEqual({ status: "healthy" });
+    expect(queries.some((q) => q.includes("FROM supahound.projects"))).toBe(false);
+    const stale = fakeScheduler({ due: true, lastBefore: at(-61), buckets: runs(-60, 10) });
+    expect(await runHeartbeat(base({ scheduler: stale.pool as never, checks: "stale" }), at(25))).toMatchObject({ status: "sent" });
   });
 
   it("counts a failed send instead of throwing", async () => {

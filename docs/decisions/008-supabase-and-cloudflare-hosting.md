@@ -25,3 +25,23 @@ Erik: Supabase hosts and runs the project's data; everything else runs on Cloudf
 ## Consequences
 
 - Deploys need Erik's Cloudflare account and Supabase project. Production deploys need approval.
+
+## Addendum: the web Worker has a cron (issue #159, 2026-11-22)
+
+The web Worker now has a Cron Trigger (every minute) beside its fetch handler, and binds the
+scheduler role's Hyperdrive config (`HYPERDRIVE_SCHEDULER`, the same config as the poller's). The
+cron runs one check of the staff heartbeat (issue #133): no poll run has finished for 15 minutes.
+The poller's cron cannot report its own death, so this check must run in a different Worker.
+
+- **Entry.** `apps/web/worker/index.ts` passes requests to vinext's fetch handler unchanged and adds
+  `scheduled`. vinext supports a custom `worker/index.ts` that imports `vinext/server/fetch-handler`.
+- **One owner per check.** The web cron owns "stale"; the poller's cron owns "failing" (half the
+  last hour's runs could not assess). Both use the stateless 6-hour slot throttle, and neither can
+  see whether the other emailed, so if both ran both checks a stopped queue consumer would get two
+  emails per slot. Splitting the checks keeps the heartbeat stateless. Rejected: a stored "last
+  sent" row (a new table and a write path for the scheduler role, which only reads), and offset
+  minutes or slots (they space the two emails out but still send both).
+- **Scope.** The web Worker reads through the scheduler role only in the cron, and only aggregates
+  (`poll_runs` status and finish time, due-project IDs). Requests still use only `HYPERDRIVE_APP`.
+- **Limit.** If the web cron and polling stop together, nothing emails; an external check on the
+  poller's `polls_enqueued` log line covers that (docs/self-hosting.md).
