@@ -32,8 +32,9 @@ fails if any suite reports skipped tests.
 
 `pnpm e2e` runs `vite build`, then Playwright. The global setup (`apps/web/e2e/support/globalSetup.ts`) starts:
 
-1. **Postgres 17 on TCP.** The Worker reaches it through the local Hyperdrive binding
-   (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP`).
+1. **Postgres 17 on TCP.** The Worker reaches it through the local Hyperdrive bindings
+   (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP`, and `_HYPERDRIVE_SCHEDULER` for
+   the cron's heartbeat, which E2E does not fire; issue #159).
 2. **A fake Supabase Auth** (`support/fakeAuth.ts`). It issues ES256 tokens, and `getClaims()` verifies
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.

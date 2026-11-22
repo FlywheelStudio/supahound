@@ -14,6 +14,8 @@ import pg from "pg";
 export interface TestPostgres {
   /** Connection string for the app role (what Hyperdrive hands the Worker). */
   appUrl: string;
+  /** Connection string for the scheduler role (the web cron's heartbeat, issue #159). */
+  schedulerUrl: string;
   /** Connection string for the superuser, for test assertions only. */
   adminUrl: string;
   stop: () => void;
@@ -48,12 +50,14 @@ export async function startPostgres(port: number): Promise<TestPostgres> {
       await db.query(readFileSync(join(migrations, file), "utf8"));
     }
     await db.query("CREATE ROLE app_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_app");
+    await db.query("CREATE ROLE scheduler_user LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE supahound_scheduler");
   } finally {
     await db.end();
   }
 
   return {
     appUrl: `postgres://app_user:e2e@127.0.0.1:${port}/supahound`,
+    schedulerUrl: `postgres://scheduler_user:e2e@127.0.0.1:${port}/supahound`,
     adminUrl: `${base}/supahound`,
     stop: () => {
       try {

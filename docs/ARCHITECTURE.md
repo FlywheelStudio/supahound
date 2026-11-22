@@ -116,12 +116,19 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    project's threshold that has not been emailed at its severity, one email per member, and marks it
    (decision 030; `alerts/email.ts` renders it). A failed send stays pending for the next poll.
 
-**Heartbeat** (issue #133, `poller/heartbeat.ts`). Each cron run also checks Supahound's own
+**Heartbeat** (issues #133 and #159, `poller/heartbeat.ts`). Two crons check Supahound's own
 polling through the scheduler role, which reads `poll_runs (status, finished_at)` and no other
-column: aggregates only. When no run has finished for 15 minutes while projects are due, or half of
-the last hour's runs (10 or more) could not assess, it emails `SUPAHOUND_STAFF_ALERT_EMAIL`. The
-throttle keeps no state: in each 6-hour slot only the first breached minute emails. A dead cron
-cannot report itself; `docs/self-hosting.md` names the external check that covers it.
+column: aggregates only. Each owns one check and emails `SUPAHOUND_STAFF_ALERT_EMAIL`:
+
+- **Stale**, on the web Worker's cron (`apps/web/worker/index.ts`, `lib/heartbeat.ts`): no run has
+  finished for 15 minutes while projects are due. It runs outside the poller, so a dead poller cron
+  is still reported.
+- **Failing**, on the poller's cron: half of the last hour's runs (10 or more) could not assess.
+
+The throttle keeps no state: in each 6-hour slot only the first breached minute emails. Neither cron
+can see whether the other has emailed, so one owner per check is what keeps a slot to one email per
+condition. A dead web cron leaves staleness unreported; `docs/self-hosting.md` names the external
+check that covers it.
 
 ## Detection rules
 
