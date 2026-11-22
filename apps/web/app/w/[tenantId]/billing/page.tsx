@@ -9,6 +9,7 @@ import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
 import { notFound, redirect } from "next/navigation";
 import { exemptDomains, mode } from "../../../../lib/billing";
+import { ENTERPRISE_DETAIL } from "../../../../lib/history";
 import { dollars, monthlyTotalCents, subscriptionLine, summaryRows, tierLabel } from "../../../../lib/projectBilling";
 import { removalSentence } from "../../../../lib/removal";
 import { brandFrom } from "../../../../lib/brand";
@@ -32,7 +33,7 @@ const ERRORS: Record<string, string> = {
 const TIER_TABLE = [
   { name: "Starter", price: `${PRICE_LABEL.starter} per project per month`, detail: "Up to 1 million requests per project in 30 days." },
   { name: "Pro", price: `${PRICE_LABEL.pro} per project per month`, detail: "1 to 10 million requests per project in 30 days. SMS alerts (coming soon)." },
-  { name: "Enterprise", price: "Contact us", detail: "Above 10 million requests per project. The project stays on Pro until we agree terms." },
+  { name: "Enterprise", price: "Contact us", detail: ENTERPRISE_DETAIL },
 ];
 
 export default async function Billing({

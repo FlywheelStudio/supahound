@@ -94,3 +94,8 @@ Erik chose **B**, shown to **workspace owners only**.
   that it is emptied with the logs.
 - The Workers log lines need no new service: Cloudflare Workers Logs already keeps the web app's
   `console.log` output.
+
+## Amended by 048 (2026-11-22)
+
+Points 8 and 9: the 90 days are the standard window. Enterprise and staff-exempt workspaces see
+and, once they stop paying, keep a year ([048](048-enterprise-history.md)).

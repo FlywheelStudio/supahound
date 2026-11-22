@@ -210,6 +210,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W51 | An owner marks a table intentionally public on the Posture page: its read finding reads "Accepted (intentionally public)" and leaves the counts, the change is audited, a viewer gets no buttons and a replayed owner form is refused; Unmark restores the open finding (`posture.uat.spec.ts`, decision 045) |
 | UAT-W52 | The owner sets the RPC burst threshold next to email alerts; it is audited; an out-of-range value and a viewer's replayed form are refused by the server (`alerts.uat.spec.ts`, decision 045) |
 | UAT-W53 | The owner reads a member's sign-in and an invite on Settings → Security log; the member gets no log and no link; the rows hold no address (`securityLog.uat.spec.ts`, decision 044) |
+| UAT-W54 | An Enterprise workspace sees a 200-day-old incident (list and detail) and security event, not a 370-day-old one; the plan page says "1-year history"; clearing the flag hides them on the next request without deleting them (`incidents.uat.spec.ts`, decision 048) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
@@ -301,7 +302,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | History keeps to its project (#44) | `listIncidentHistory` and `getIncident` drop the project filter | 4 Postgres tests fail |
 | The detail keeps to its project (#44) | `getIncident` alone drops the project filter | UAT-W25 fails (200, not 404) |
 | Open incidents stay in the window (#44) | The window drops `status = 'open'` | 1 Postgres test fails |
-| The window is 30 days (#44) | The window set to 3650 days | 1 Postgres test fails |
+| The window follows `days` (#44, #170) | `IN_WINDOW` ignores `days` (a fixed 3650 days) | 16 Postgres tests fail (`incidentHistory`, `enterpriseHistory`) |
 | The cursor keeps microseconds (#44) | The cursor is cut to milliseconds | 1 Postgres test fails (a row is skipped) |
 | Ties on last seen break by id (#44) | The keyset compares `last_seen_at` only | 1 Postgres test fails |
 | No next page after a full last page (#44) | `next` set when the page is exactly full | 2 Postgres tests fail |
@@ -472,5 +473,11 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Security events: the disconnect records its outcome (#138) | The event drops `revoked` | `securityEvents.test.ts` fails |
 | Security events: only owners get the page (#138) | `canReadSecurityLog` allows admins | `apps/web/test/securityLog.test.ts` fails |
 | Security events: a bad hook signature is logged (#138) | The log call removed | `apps/web/test/securityLog.test.ts` fails |
+| Enterprise: the window follows the plan (#170) | `historyWindowFor` ignores the staff exemption | 3 Postgres tests fail (`enterpriseHistory.test.ts`) |
+| Enterprise: the data job deletes by the plan's window (#170) | `applyRetention` cuts at a fixed 30 days | 1 Postgres test fails |
+| Enterprise: security events kept a year (#170) | The data job passes 90 days to `deleteExpiredSecurityEvents` | 1 Postgres test fails |
+| Enterprise: the security log shows a year (#170) | `listSecurityEvents` uses a fixed 90 days | 3 Postgres tests fail |
+| Enterprise: the detail shows a year (#170) | `getIncident` uses a fixed 30 days | 5 Postgres tests fail |
+| Enterprise: pages say "the last year" (#170) | `windowPhrase` always prints days | 1 web unit test fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

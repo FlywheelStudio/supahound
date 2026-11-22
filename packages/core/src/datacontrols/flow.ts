@@ -4,7 +4,7 @@ import { accessFor } from "../billing/policy.js";
 import { isLive, type ProjectSub } from "../billing/projects.js";
 import { projectSubFromStripe, type StripeSubscription } from "../billing/stripeMap.js";
 import {
-  getBilling, isPaying, listProjectSubscriptions, refreshStanding, saveProjectSubscription, saveSubscription, watchedProjects,
+  getBilling, isPaying, listProjectSubscriptions, refreshStanding, retentionPlan, saveProjectSubscription, saveSubscription, watchedProjects,
   type SubscriptionSnapshot,
 } from "../db/billing.js";
 import { deferPurge, getClosure, purgeHistory, recordClosure, reopenWorkspace, type ReopenResult } from "../db/closure.js";
@@ -323,7 +323,7 @@ export async function runDataJob(pool: Pool, tenant: TenantId, now: Date): Promi
     if (projectsDeleted > 0) {
       await recordSecurityEvent(tx, { action: "data_deleted", actor: null, detail: { kind: "removed_projects", count: projectsDeleted } });
     }
-    const paying = await isPaying(tx);
+    const { paying, window } = await retentionPlan(tx);
     // purgeHistory checks purge_after itself, in the UPDATE that claims the purge.
     if (closure && paying) await deferPurge(tx, now);
     else if (closure && (await purgeHistory(tx, now))) {
@@ -335,9 +335,10 @@ export async function runDataJob(pool: Pool, tenant: TenantId, now: Date): Promi
     if (connectionsDeleted > 0) {
       await recordSecurityEvent(tx, { action: "data_deleted", actor: null, detail: { kind: "disconnected_connections", count: connectionsDeleted } });
     }
-    // Decision 044: security events older than 90 days, only while the workspace does not pay.
-    if (!paying) await deleteExpiredSecurityEvents(tx, now);
-    const retention = await applyRetention(tx, now, { deleteHistory: !paying });
+    // Decisions 044 and 048: security events older than the plan's window (90 days, or a year on
+    // Enterprise), only while the workspace does not pay.
+    if (!paying) await deleteExpiredSecurityEvents(tx, now, window.securityEventDays);
+    const retention = await applyRetention(tx, now, { deleteHistory: !paying, historyDays: window.incidentDays });
     return { paying, purged: false, retention, connectionsDeleted, projectsDeleted };
   });
 }

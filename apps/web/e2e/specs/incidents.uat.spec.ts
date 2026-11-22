@@ -3,7 +3,8 @@ import { adminQuery, ALICE, BOB, pollAttack, pollPickedProject, sha256Hex } from
 import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from "../support/session";
 
 // UAT for incident history (issue #44, decision 035): the 30-day list with keyset pages, the
-// incident detail, and a 404 for every incident the URL may not show.
+// incident detail, and a 404 for every incident the URL may not show. UAT-W54: the Enterprise
+// year and a downgrade (issue #170, decision 048).
 
 const ID = "[0-9a-f-]{36}";
 
@@ -155,5 +156,46 @@ test.describe("UAT: incident history", () => {
     expect(res?.status()).toBe(404);
     await expect(other.getByText("w25-a Co")).toHaveCount(0);
     await other.close();
+  });
+
+  test("UAT-W54 an Enterprise workspace sees a year of incidents and security events; a downgrade hides the older ones at once", async ({ page }) => {
+    const { tenant, ids } = await workspaceWith(page, "w54");
+    const api = `/w/${tenant}/p/${ids.Api}/incidents`;
+    const old = await seedOne(tenant, ids.Api!, "resolved", "200 days");
+    const tooOld = await seedOne(tenant, ids.Api!, "resolved", "370 days");
+    await adminQuery(
+      "INSERT INTO supahound.security_events (tenant_id, action, result, created_at) VALUES ($1, 'workspace_reopened', 'success', now() - interval '200 days')",
+      [tenant],
+    );
+
+    // Standard: 30 days of incidents, 90 of security events; the plan page says so.
+    expect((await page.goto(`${api}/${old}`))?.status()).toBe(404);
+    await page.goto(`/w/${tenant}/p/${ids.Api}/settings/plan`);
+    await expect(page.getByTestId("plan-history")).toHaveText("30-day incident history and a 90-day security log. Enterprise keeps a year.");
+
+    // An operator marks the workspace Enterprise (decision 048).
+    await adminQuery("UPDATE supahound.billing_accounts SET enterprise_at = now() WHERE tenant_id = $1", [tenant]);
+    await page.goto(`/w/${tenant}/p/${ids.Api}/settings/plan`);
+    await expect(page.getByTestId("plan-history")).toHaveText("Enterprise · 1-year history: incidents, findings and the security log.");
+    await page.goto(api);
+    await expect(page.getByRole("main")).toContainText("from the last year");
+    const listed = await hrefs(page);
+    expect(listed).toContain(`${api}/${old}`);
+    expect(listed).not.toContain(`${api}/${tooOld}`);
+    expect((await page.goto(`${api}/${old}`))?.status()).toBe(200);
+    expect((await page.goto(`${api}/${tooOld}`))?.status()).toBe(404);
+    await page.goto(`/w/${tenant}/settings/security`);
+    await expect(page.getByRole("main")).toContainText("from the last year");
+    await expect(page.getByRole("list", { name: "Security events" })).toContainText("Kept the workspace open");
+
+    // Downgrade: hidden on the next request (the paying workspace's rows are not deleted).
+    await adminQuery("UPDATE supahound.billing_accounts SET enterprise_at = NULL WHERE tenant_id = $1", [tenant]);
+    await page.goto(api);
+    expect(await hrefs(page)).not.toContain(`${api}/${old}`);
+    expect((await page.goto(`${api}/${old}`))?.status()).toBe(404);
+    await page.goto(`/w/${tenant}/settings/security`);
+    await expect(page.getByRole("main")).toContainText("from the last 90 days");
+    await expect(page.getByRole("main")).not.toContainText("Kept the workspace open");
+    expect((await adminQuery("SELECT 1 FROM supahound.incidents WHERE id = $1", [old])).length).toBe(1);
   });
 });

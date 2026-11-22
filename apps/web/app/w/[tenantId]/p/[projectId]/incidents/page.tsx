@@ -1,16 +1,19 @@
 import { actorAlias, detectorLabel } from "@supahound/core/alerts/email";
-import { INCIDENT_HISTORY_DAYS, listIncidentHistory } from "@supahound/core/db/repo";
+import { historyWindow } from "@supahound/core/db/billing";
+import { listIncidentHistory } from "@supahound/core/db/repo";
 import Link from "../../../../../../components/NavLink";
 import { notFound } from "next/navigation";
 import { SeverityBadge, Shell } from "../../../../../../components/Shell";
 import { StatusBadge } from "../../../../../../components/StatusBadge";
 import { mode } from "../../../../../../lib/billing";
+import { windowPhrase } from "../../../../../../lib/history";
 import { encodeCursor, HISTORY_PAGE_SIZE, parseCursor } from "../../../../../../lib/incidents";
 import { incidentPath, projectPath, utc } from "../../../../../../lib/nav";
 import { loadProjectPage } from "../../../../../../lib/projectPage";
 
 // Incident history for one project (issue #44, decision 035): open and resolved incidents of the
-// last 30 days, newest first, 25 to a page. The keyset cursor is in the URL (?before=...).
+// last 30 days (a year on Enterprise, decision 048), newest first, 25 to a page. The keyset cursor
+// is in the URL (?before=...).
 
 export default async function ProjectIncidents({
   params,
@@ -21,21 +24,23 @@ export default async function ProjectIncidents({
 }) {
   const after = parseCursor((await searchParams).before);
   if (after === "invalid") notFound();
-  const d = await loadProjectPage(params, (tx, p) =>
-    listIncidentHistory(tx, p.id, { now: new Date(), limit: HISTORY_PAGE_SIZE, after }));
+  const d = await loadProjectPage(params, async (tx, p) => {
+    const window = await historyWindow(tx);
+    return { days: window.incidentDays, ...await listIncidentHistory(tx, p.id, { now: new Date(), days: window.incidentDays, limit: HISTORY_PAGE_SIZE, after }) };
+  });
   const { tenant, project: p } = d;
-  const { incidents, next } = d.extra;
+  const { incidents, next, days } = d.extra;
   const base = projectPath(tenant, p.id, "incidents");
 
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={mode() !== "off"} active={{ kind: "project", project: p, page: "incidents" }}>
       <h1 className="mb-1 text-2xl font-semibold">Incidents</h1>
       <p className="mb-6 text-sm text-slate-600">
-        Open and resolved incidents for {p.name} from the last {INCIDENT_HISTORY_DAYS} days, newest first. Open incidents stay
+        Open and resolved incidents for {p.name} from the last {windowPhrase(days)}, newest first. Open incidents stay
         here until they resolve.
       </p>
       {incidents.length === 0 ? (
-        <p className="text-slate-600">{after ? "No older incidents." : `No incidents in the last ${INCIDENT_HISTORY_DAYS} days.`}</p>
+        <p className="text-slate-600">{after ? "No older incidents." : `No incidents in the last ${windowPhrase(days)}.`}</p>
       ) : (
         <ul aria-label="Incident history" className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
           {incidents.map((i) => (

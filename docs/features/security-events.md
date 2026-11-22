@@ -6,7 +6,8 @@ Issue #138. Decision [044](../decisions/044-security-events.md). ASVS 16.3.
 
 Supahound records who changed access to a workspace or its data, and whether it worked. Workspace
 owners read the record on **Workspace settings → Security log** (`/w/<tenant>/settings/security`):
-the last 90 days, newest first, 50 to a page. Admins and members see "Only a workspace owner can see
+the last 90 days (a year on Enterprise and staff-exempt workspaces, decision 048), newest first,
+50 to a page. Admins and members see "Only a workspace owner can see
 the security log." and RLS gives them no rows.
 
 | Event | Where it is written | Results |
@@ -43,8 +44,9 @@ Events with no workspace go to Workers logs as `{"event":"security_event","kind"
   `owner_read` (signed-in readers must be workspace owners); `project_access` (decision 036);
   `actor_is_me` (the actor is `app.user_id` when set); `system_delete` (only transactions without
   `app.user_id` delete). No UPDATE grant.
-- **Retention:** the daily data job deletes rows older than 90 days while the workspace does not
-  pay (decision 037); the purge of a closed workspace deletes them all.
+- **Retention:** the daily data job deletes rows older than the plan's window (90 days, or a year
+  on Enterprise, decision 048) while the workspace does not pay (decision 037); the purge of a
+  closed workspace deletes them all.
 
 ## Tests
 

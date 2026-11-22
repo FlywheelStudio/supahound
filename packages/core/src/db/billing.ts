@@ -3,6 +3,7 @@ import {
   accessForAccount, isBillingModel, isBillingStatus, isTier, payingAccount, tierFor, USAGE_WINDOW_DAYS,
   type Access, type BillingModel, type BillingStatus, type CardRejection, type Seats, type Tier,
 } from "../billing/policy.js";
+import { historyWindowFor, type HistoryWindow } from "../billing/history.js";
 import { planReconcile, workspaceStanding, type ProjectSub, type WatchedProject } from "../billing/projects.js";
 import type { ProjectId, TenantId, UserId } from "../tenancy/scope.js";
 import { getClosure, isClosedNow, WorkspaceClosedError } from "./closure.js";
@@ -48,6 +49,9 @@ export interface BillingAccount {
   model: BillingModel;
   // The status of every project subscription the reader may see (payingAccount).
   projectStatuses: BillingStatus[];
+  // Decision 048: when an operator marked the workspace Enterprise (one year of history); null
+  // otherwise. Only an operator sets it; the app never writes it.
+  enterpriseAt: Date | null;
 }
 
 interface Row {
@@ -67,12 +71,13 @@ interface Row {
   exempt_at: Date | null;
   billing_model: string;
   project_statuses: string[];
+  enterprise_at: Date | null;
 }
 
 const NONE: BillingAccount = {
   customerId: null, status: "none", subscriptionId: null, seats: null, trialEnd: null, currentPeriodEnd: null,
   cancelAtPeriodEnd: false, cardVerifiedAt: null, verificationError: null, termsVersion: null, termsAcceptedAt: null,
-  exempt: false, exemptAt: null, model: "workspace", projectStatuses: [],
+  exempt: false, exemptAt: null, model: "workspace", projectStatuses: [], enterpriseAt: null,
 };
 
 // The owners of the tenant, as a list, are exactly [exempt_owner]. Shared by getBilling and grantExemption.
@@ -85,7 +90,7 @@ export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
   const [r] = await tx.query<Row>(
     `SELECT stripe_customer_id, status, subscription_id, starter_seats, pro_seats, trial_end, current_period_end,
             cancel_at_period_end, card_verified_at, verification_error, terms_version, terms_accepted_at,
-            exempt_owner IS NOT NULL AND ${SOLE_OWNER_IS("exempt_owner")} AS exempt, exempt_at, billing_model,
+            exempt_owner IS NOT NULL AND ${SOLE_OWNER_IS("exempt_owner")} AS exempt, exempt_at, billing_model, enterprise_at,
             ARRAY(SELECT s.status FROM supahound.project_subscriptions s WHERE s.tenant_id = $1) AS project_statuses
      FROM supahound.billing_accounts WHERE tenant_id = $1`,
     [tx.tenantId],
@@ -107,7 +112,14 @@ export async function getBilling(tx: TenantTx): Promise<BillingAccount> {
     exemptAt: r.exempt ? r.exempt_at : null,
     model: isBillingModel(r.billing_model) ? r.billing_model : "workspace",
     projectStatuses: r.project_statuses.filter(isBillingStatus),
+    enterpriseAt: r.enterprise_at,
   };
+}
+
+// Decision 048: the workspace's history window (billing/history.ts), read from its plan inside the
+// transaction that lists or deletes history. A workspace with no billing row is standard.
+export async function historyWindow(tx: TenantTx): Promise<HistoryWindow> {
+  return historyWindowFor(await getBilling(tx));
 }
 
 // $1 is always the tenant. Creates the row on first use, then applies the assignments. `set` is
@@ -213,6 +225,13 @@ export const billedTiers = (tiers: readonly ProjectTier[]): Tier[] => tiers.filt
 // path asks this inside the transaction that would delete.
 export async function isPaying(tx: TenantTx): Promise<boolean> {
   return payingAccount(await getBilling(tx));
+}
+
+// The data job's one read of the plan: whether the workspace pays (decision 037) and its history
+// window (decision 048), from the same row.
+export async function retentionPlan(tx: TenantTx): Promise<{ paying: boolean; window: HistoryWindow }> {
+  const billing = await getBilling(tx);
+  return { paying: payingAccount(billing), window: historyWindowFor(billing) };
 }
 
 // Decision 037: one free trial per workspace, ever, and none when the user adding the card owns
