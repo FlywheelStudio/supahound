@@ -5,18 +5,45 @@ import type { PostureFinding } from "./types.js";
 
 // Advisor lints that report the same thing as one of Supahound's catalog checks.
 export const ADVISOR_EQUIVALENT: Readonly<Record<string, string>> = {
+  // splinter 0026 to 0029, which the catalog checks of issue #135 port.
+  anon_security_definer_function_executable: "function_definer_exposed",
+  authenticated_security_definer_function_executable: "function_definer_exposed",
+  pg_graphql_anon_table_exposed: "graphql_table_exposed",
+  pg_graphql_authenticated_table_exposed: "graphql_table_exposed",
   rls_disabled_in_public: "rls_disabled",
   policy_exists_rls_disabled: "rls_disabled",
   rls_enabled_no_policy: "rls_no_policies",
   security_definer_view: "view_not_invoker",
+  // splinter 0024 (issue #134): a write policy whose USING or WITH CHECK passes every row.
+  rls_policy_always_true: "permissive_policy",
 };
 
+// The part of an object a finding is about, when one object can have several: a policy on a
+// table, or one overload of a function (its identity arguments).
+function partOf(f: PostureFinding): string | null {
+  const p = f.evidence.policy ?? f.evidence.arguments;
+  return typeof p === "string" ? p : null;
+}
+
 // Drops an Advisor finding when a catalog finding already reports the same check on the same
-// object. The catalog one stays: its severity knows the grants. Worst first, then by object.
+// object (and the same policy or overload, when the Advisor names one). The catalog one stays:
+// its severity knows the grants. Worst first, then by object.
 export function dedupePosture<T extends PostureFinding>(findings: T[]): T[] {
-  const catalog = new Set(findings.filter((f) => f.source === "catalog").map((f) => `${f.check}|${f.schema}|${f.object}`));
+  const catalog = new Set<string>();
+  for (const f of findings) {
+    if (f.source !== "catalog") continue;
+    const key = `${f.check}|${f.schema}|${f.object}`;
+    catalog.add(key);
+    const part = partOf(f);
+    if (part !== null) catalog.add(`${key}|${part}`);
+  }
+  const repeats = (f: T) => {
+    const key = `${ADVISOR_EQUIVALENT[f.check] ?? "-"}|${f.schema}|${f.object}`;
+    const part = partOf(f);
+    return catalog.has(part === null ? key : `${key}|${part}`);
+  };
   return findings
-    .filter((f) => f.source !== "advisor" || !catalog.has(`${ADVISOR_EQUIVALENT[f.check] ?? "-"}|${f.schema}|${f.object}`))
+    .filter((f) => f.source !== "advisor" || !repeats(f))
     .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]
       || `${a.schema}.${a.object}.${a.check}`.localeCompare(`${b.schema}.${b.object}.${b.check}`));
 }

@@ -78,6 +78,11 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    that succeeds replaces its findings (decision 038). It never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
+   The rollup keeps the busiest `ROLLUP_LIMIT` (5000) templates and the poller asks for one more. A
+   full answer has dropped its quietest templates, so the poller halves the window, keeping its start,
+   and asks again (at most `MAX_ROLLUP_QUERIES`, 4, queries a poll). The run then covers that shorter
+   window and the next poll continues from its end. If no half fits, or one minute alone is full, the
+   run is `unable_to_assess` with `rollup_saturated` (issue #129).
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
@@ -93,6 +98,34 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
 9. **Email.** After the save, `sendPendingAlerts` emails each open incident at or above the
    project's threshold that has not been emailed at its severity, one email per member, and marks it
    (decision 030; `alerts/email.ts` renders it). A failed send stays pending for the next poll.
+
+## Detection rules
+
+`packages/core/src/detectors/rules.ts` gives each detector signal a stable rule ID, MITRE ATT&CK
+techniques (Enterprise v20.1), OWASP API Security Top 10 2023 categories, a confidence and the
+known false positives. Rule IDs are derived from a finding's or incident's detector and signals
+(`findingRuleIds`, `incidentRuleIds`), so nothing new is stored. IDs are never renumbered or reused.
+
+| Rule | Detector / signal | ATT&CK | OWASP API | Confidence |
+| --- | --- | --- | --- | --- |
+| SH-D2-001 | cross_tenant / other_owner | T1078 | API1 | high |
+| SH-D2-002 | cross_tenant / all_but_self | T1078, T1213 | API1 | high |
+| SH-D2-003 | cross_tenant / excludes_other | T1078, T1213 | API1 | medium |
+| SH-D2-004 | cross_tenant / pattern | T1078, T1213 | API1 | medium |
+| SH-D2-005 | cross_tenant / range | T1078, T1213 | API1 | medium |
+| SH-D2-006 | cross_tenant / any_owner | T1078, T1213 | API1 | medium |
+| SH-D2-007 | cross_tenant / posture_exposed | T1078, T1213 | API1, API8 | high |
+| SH-D4-001 | service_role_misuse / browser_caller | T1552.001, T1078.004 | API8, API5 | high |
+| SH-D4-002 | service_role_misuse / mobile_app_caller | T1552.001, T1078.004 | API8, API5 | high |
+| SH-D4-003 | service_role_misuse / non_hosting_network | T1078.004, T1552 | API2 | medium |
+| SH-D4-004 | service_role_misuse / manual_tool | T1078.004 | API2 | low |
+| SH-D4-005 | service_role_misuse / new_network | T1078.004 | API2 | low |
+
+A new signal or detector needs an entry: the registry's type fails the typecheck without one, and
+`rules.test.ts` checks every signal at runtime. `incidents/ocsf.ts` turns an incident into an OCSF
+1.5 Detection Finding (class 2004) for webhooks: a pure function, not yet wired to a transport. It
+carries rule IDs, ATT&CK and OWASP tags, severity, counts and times. The actor is a fingerprint (plus
+the ASN for the service-role key); the only UUIDs are the incident's own tenant, project and ID.
 
 ## Tenant isolation
 
