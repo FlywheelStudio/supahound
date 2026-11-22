@@ -296,6 +296,9 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Always-true policies dedupe per policy (#134) | `dedupePosture` ignores the policy name / `postureSummaries` reads no evidence | 1 unit test fails / 1 Postgres test fails |
 | The newer lints rate by exposure (#134) | `sensitive_columns_exposed` override removed | 2 unit tests fail |
 | Each newer lint has its own fix (#134) | `fixPrompt` skips `newerLint` | 1 unit test fails |
+| SECURITY DEFINER functions are found (#135) | The function rows lose `f.prosecdef` / the check ignores `securityDefiner` | 1 Postgres test fails / 1 unit test fails |
+| GraphQL exposure counts column grants, not partitioned roots (#135) | The relkind filter removed | 1 Postgres test fails |
+| Ported checks hide their Advisor lints (#135) | `pg_graphql_anon_table_exposed` mapping removed | 1 unit test fails |
 | Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
 | The raise agrees with the Posture page (#11) | `postureExposedTables` filters by severity before dedupe | 1 Postgres test fails |
 | Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |

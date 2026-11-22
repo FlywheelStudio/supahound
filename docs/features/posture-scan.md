@@ -6,7 +6,8 @@ Issue #11. Decision 038. Builds on decisions 024 (read-only SQL in the poll) and
 
 Supahound answers "am I exposed?" within about 2 minutes of a project pick. The poller checks the
 project's `public` schema for tables without RLS, policies that pass every row (`USING (true)`,
-`WITH CHECK (true)`), and views without `security_invoker`. It also reads Supabase's Security
+`WITH CHECK (true)`), views without `security_invoker`, SECURITY DEFINER functions the API roles
+can execute, and, when pg_graphql is installed, tables and views it shows them (#135). It also reads Supabase's Security
 Advisor. Each finding shows its severity, the object (`schema.table`), the check and a fix prompt:
 copyable SQL built from a template. The scan runs on the first poll, then daily, and on demand
 (Scan now). A cross-tenant detection on a table that posture shows exposed is raised one step.
@@ -26,7 +27,7 @@ copyable SQL built from a template. The scan runs on the first poll, then daily,
      endpoint (`ownership/client.ts`, `queryReadOnly`).
    - `deps.posture.queryAdvisor` calls the Security Advisor (`posture/advisor.ts`,
      `querySecurityAdvisor`).
-4. `parseCatalogRows` and `catalogFindings` (`posture/catalog.ts`) run the four checks.
+4. `parseCatalogRows` and `catalogFindings` (`posture/catalog.ts`) run the six checks.
    `parseLints` and `advisorFindings` keep the Advisor's security lints, with the checked
    metadata of the newer splinter lints (`ADVISOR_METADATA`, issue #134) as evidence and the
    per-lint severity overrides of `LINT_SEVERITY`.
@@ -43,7 +44,8 @@ copyable SQL built from a template. The scan runs on the first poll, then daily,
    `canScan` (owners, admins, editors) in the project transaction, then `requestPostureScan` sets
    `requested_at`. Refused while a request is pending and within 60 seconds of the last attempt.
 
-Severity rules and the Advisor mapping: decision 038, items 4 and 5.
+Severity rules and the Advisor mapping: decision 038, items 4 and 5, and its addendum for the
+function and GraphQL checks (#135).
 
 ## Data model and RLS
 
@@ -79,7 +81,7 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
 
 ## Testing
 
-- `packages/core/test/posture.test.ts` (62): every check on fixtures, including RLS on with no
+- `packages/core/test/posture.test.ts` (69): every check on fixtures, including RLS on with no
   policies, FORCE and not, views with `security_invoker` true and false, restrictive policies,
   grants; the Advisor client (request shape, every error status, bodies without lints, free
   text dropped, the unavailable lint); dedupe; the severity raise; fix prompts. Issue #134 adds
@@ -91,7 +93,8 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
   stored scan; a table the catalog rates low is not raised even when the Advisor rates it high; no deps, no scan; a scan in the first poll after a pick (`runDuePolls`); Scan now
   (queued, already queued, cooldown, before the first scan); RLS for owner, editor, viewer,
   member without a role and another tenant; findings never writable by signed-in users; CHECKs;
-  cross-tenant foreign keys; cascade on removal; `POSTURE_SQL` on a real Postgres 17 catalog;
+  cross-tenant foreign keys; cascade on removal; `POSTURE_SQL` on a real Postgres 17 catalog,
+  including SECURITY DEFINER functions and GraphQL exposure through a stand-in `pg_extension` row (#135);
   the overview counts an Advisor always-true policy the catalog did not flag (#134).
 - `isolation.test.ts` and `people.test.ts` list both tables.
 - `apps/web/test/posture.test.ts` (10) and `apps/web/test/nav.test.ts`: roles, notices, states, the
@@ -112,6 +115,9 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
 - **Clocks.** `requested_at` comes from the database's `now()`; `attempted_at` from the poller's
   clock. They are the same clock in production. Tests that mix them keep them apart by more than
   a second.
-- **Only `public`.** Other schemas are not checked by the catalog SQL.
+- **Only `public`.** Other schemas are not checked by the catalog SQL, functions included.
+- **pg_graphql exposure is broad.** On a default Supabase project every table the API roles can
+  read shows in the GraphQL schema, so `graphql_table_exposed` rates medium (anon) or low and never
+  raises detections. The Advisor reports the same objects (lints 0026/0027); dedupe shows one.
 - **Not verified live:** the Advisor's response shape, and `has_table_privilege` for other roles
   as `supabase_read_only_user`. Needs the OAuth app (#4).
