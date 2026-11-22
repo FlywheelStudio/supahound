@@ -99,6 +99,8 @@ export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleCon
         networkType: network,
         asn: event.asn,
         expectedNetwork: expected,
+        // The kind of key used (#154), an enum: `secret` (sb_secret_) or `jwt` (the legacy key).
+        apiKeyKind: event.apiKeyKind,
         method: event.method,
         table: safeIdentifier(tableFromPath(event.path)),
         status: event.status,

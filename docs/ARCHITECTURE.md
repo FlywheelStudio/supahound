@@ -105,7 +105,18 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
    An empty rollup is checked with one count query: REST traffic with no subject or role filled
-   lists both detectors in `unassessed_detectors`, not zero findings (issue #130).
+   lists both detectors in `unassessed_detectors`, not zero findings (issue #130). REST traffic
+   whose only auth signal is a key kind (below) lists detector 2 alone: a user subject only comes
+   from a JWT (#154).
+   **New API keys (#154).** `sb_secret_` and `sb_publishable_` keys are not JWTs, so their requests
+   fill no `request.sb.jwt.*` field. Edge logs carry the first 15 characters of the `apikey` and
+   Authorization headers instead (`request.sb.apikey.{apikey,authorization}.prefix`, seen live
+   2026-11-22). That prefix holds key material, so it never leaves Supabase: the SQL maps it to a
+   key kind (`secret`, `publishable`, `jwt`, `none`, `other`) inside ClickHouse (`keyKindSql`) and
+   selects and groups by the kind only. `effectiveRole` reads the JWT role first, then the legacy
+   key's role, then the kind: `secret` is service_role, `publishable` is anon. The rollup's
+   service-role branch and its anon branches (table reads, RPC, Storage, GraphQL counts) read roles
+   the same way. Detector 4's evidence names the key kind.
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
    `detectors/exposedRead.ts` (#132) flags anon reads of those anon-readable tables, one finding per
    table, ASN and caller class (actor `anon:asn:<n>`): rows from a critical-posture table rate high,

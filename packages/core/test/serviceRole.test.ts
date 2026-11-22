@@ -50,6 +50,18 @@ describe("classifyNetwork", () => {
 });
 
 describe("detectServiceRoleMisuse", () => {
+  // Issue #154: an sb_secret_ key is not a JWT, so its requests fill no role field.
+  it("sees an sb_secret_ key used from a browser, and names the key kind in the evidence", () => {
+    const secret = serviceEvent({
+      jwtRole: null, apiKeyRole: null, apiKeyKind: "secret", authorizationKind: "secret",
+      userAgent: CHROME_UA, clientInfo: null, asn: 7922, asOrganization: "Comcast Cable Communications, LLC",
+    });
+    const [finding] = detectServiceRoleMisuse([secret], ctx());
+    expect(finding).toMatchObject({ severity: "critical", signals: ["browser_caller", "non_hosting_network"] });
+    expect(finding!.evidence.apiKeyKind).toBe("secret");
+    expect(detectServiceRoleMisuse([{ ...secret, apiKeyKind: "publishable" }], ctx())).toEqual([]);
+  });
+
   it("passes a server SDK on a hosting network", () => {
     expect(detectServiceRoleMisuse([serviceEvent()], ctx())).toEqual([]);
   });

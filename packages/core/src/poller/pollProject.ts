@@ -398,7 +398,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
   const unassessedDetectors: Finding["detector"][] = owners.loaded ? [] : ["cross_tenant"];
   // Every rollup row has an auth field filled, so only an empty rollup can hide empty fields (issue
-  // #130). Then REST traffic with no subject or role means neither detector could see anything.
+  // #130). Then REST traffic with no subject or role means neither detector could see anything;
+  // REST traffic whose only auth signal is a key kind leaves detector 2 blind but not detector 4.
   if (rows.length === 0) {
     const coverageSql = authCoverageSql(deps.env);
     let counts: Record<string, unknown> | undefined;
@@ -414,9 +415,14 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
       return { status: "unable_to_assess", errorCode: code };
     }
-    if (Number(counts?.rest_requests ?? 0) > 0 && Number(counts?.rest_with_auth ?? 0) === 0) {
-      for (const d of ["cross_tenant", "service_role_misuse"] as const) if (!unassessedDetectors.includes(d)) unassessedDetectors.push(d);
-    }
+    // A user subject only ever comes from a JWT field, so detector 2 needs one. Detector 4 also
+    // reads the role from the API key's kind, which sb_secret_ / sb_publishable_ keys fill (#154).
+    const restRequests = Number(counts?.rest_requests ?? 0);
+    const withJwt = Number(counts?.rest_with_auth ?? 0);
+    const withKeyKind = Number(counts?.rest_with_key_kind ?? 0);
+    const blind: Finding["detector"][] = restRequests === 0 || withJwt > 0 ? []
+      : withKeyKind > 0 ? ["cross_tenant"] : ["cross_tenant", "service_role_misuse"];
+    for (const d of blind) if (!unassessedDetectors.includes(d)) unassessedDetectors.push(d);
   }
   // A detection on a table that posture shows exposed is raised one step (decision 038).
   const findings = raiseForPosture(scan(events, {

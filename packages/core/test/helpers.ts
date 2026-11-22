@@ -25,6 +25,8 @@ export function event(overrides: Partial<EdgeEvent> = {}): EdgeEvent {
     jwtSubject: ALICE,
     jwtRole: "authenticated",
     apiKeyRole: "anon",
+    apiKeyKind: "jwt",
+    authorizationKind: "jwt",
     ...overrides,
   };
 }

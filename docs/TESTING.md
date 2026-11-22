@@ -157,6 +157,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D17 | GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role, then show and count (#157) |
 | UAT-D18 | Anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed (#157) |
 | UAT-D19 | Signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page (#157) |
+| UAT-D20 | An `sb_secret_` key used from a browser on a home network raises a critical incident, though its requests carry no role field (#154) |
+| UAT-D21 | `sb_publishable_` key reads of a table the posture scan shows open raise a paging incident (#154) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -466,6 +468,13 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | GraphQL gate hides without traffic (#157) | `gateGraphql` shows every finding | 3 unit tests, 1 Postgres test and UAT-D17 fail |
 | GraphQL gate: the poll stores its counts (#157) | `pollProject` saves `graphqlCalls: null` | UAT-D17 fails |
 | GraphQL gate: the overview counts what the page shows (#157) | `postureSummaries` counts ungated findings | 1 Postgres test and UAT-D17 fail |
+| New keys: sb_secret_ traffic is service traffic (#154) | `effectiveRole` ignores the key kind | 2 unit tests, UAT-D20 and UAT-D21 fail |
+| New keys: the rollup fetches sb_secret_ traffic (#154) | `edgeRollupSql` drops the `secret` branch | 1 unit test and UAT-D20 fail |
+| New keys: the anon branches fetch sb_publishable_ traffic (#154) | `roleIs("anon")` drops the `publishable` case | 1 unit test and UAT-D21 fail |
+| New keys: a key prefix never leaves Supabase (#154) | The rollup also selects the raw prefix | 1 unit test fails |
+| New keys: the rollup groups by kind, not prefix (#154) | `GROUP BY` adds the raw prefix | 2 unit tests fail |
+| New keys: only known kinds reach an event (#154) | `normalizeRow` passes any string as a kind | 1 unit test fails |
+| New keys: a key kind assesses detector 4 only (#154) | The coverage check ignores `rest_with_key_kind`, or clears detector 2 with it too | 1 Postgres test fails (either way) |
 | Security events: owners only read them (#138) | `owner_read` allows admins | `securityEvents.test.ts` fails |
 | Security events: append-only for signed-in users (#138) | `system_delete` passes every row | `securityEvents.test.ts` fails |
 | Security events: sign-in policy allows one row shape (#138) | `own_sign_in` drops its result and project checks | `securityEvents.test.ts` fails |

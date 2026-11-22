@@ -13,7 +13,7 @@ misuse) against one project.
      Also check which key or role field fills for traffic that uses the new `sb_secret_` /
      `sb_publishable_` keys. On those projects `request.sb.jwt.apikey.payload.role` may be empty.
      The rollup SQL would then drop all service traffic, and detector 4 would report zero findings,
-     which reads as an all-clear.
+     which reads as an all-clear. Confirmed and fixed through the key kinds (#154, below).
   2. Fix `src/config/fields.ts` if a path differs. Set `SUPAHOUND_SOURCE_COLUMN` if `source` fails.
   3. Export the project's `pg_policies` rows (SQL from `print-sql`) to `ownership.local.json`.
   4. `pnpm scan --project <ref> --ownership ownership.local.json --minutes 60`. Review every finding.
@@ -90,6 +90,46 @@ The rest of #131, with Erik's decisions of 2026-11-22.
   threshold is untuned until live data. The bucket from the path is matched raw (no URL decoding):
   an encoded flagged name reads as an unflagged bucket, low.
 
+## New API keys: sb_secret_ and sb_publishable_ (#154)
+
+Part (b) of #130. Field discovery on 2026-11-22 against two live projects (key names and counts
+only; no values were read):
+
+- Every edge-log request carries `request.sb.apikey.apikey.prefix`, `request.sb.apikey.apikey.hash`
+  and `request.sb.apikey.authorization.prefix`. The prefix is the key's first 15 characters:
+  `sb_secret_` or `sb_publishable_` and then key material, or `eyJ` for a legacy JWT key.
+- `sb_secret_` traffic (thousands of requests) carries no `request.sb.jwt.*` key at all. The JWT
+  role fields appear only with legacy JWT keys, beside `.algorithm`, `.expires_at`, `.issued_at`,
+  `.issuer`, `.is_oauth_token` and `.signature_prefix`. So until this fix the rollup dropped all
+  `sb_secret_` service traffic, and detector 4 and the anon branches never saw new keys.
+- No `payload.subject` key showed up: the sample had no signed-in traffic. `jwtSubject` stays
+  unverified.
+
+What changed:
+
+- `config/fields.ts`: `jwtRole` and `apiKeyRole` verified. The two prefixes are in
+  `KEY_PREFIX_FIELDS`, apart from `EDGE_FIELDS`, because the rollup selects every `EDGE_FIELDS`
+  path and a prefix must never be selected.
+- `logs/sql.ts`, `keyKindSql`: `multiIf(startsWith(prefix, 'sb_secret_'), 'secret',
+  startsWith(prefix, 'sb_publishable_'), 'publishable', startsWith(prefix, 'eyJ'), 'jwt',
+  prefix = '', 'none', 'other')`, inside ClickHouse. The rollup selects and groups by
+  `apiKeyKind` and `authorizationKind`, never the prefix (a unit test checks every query).
+  The `.hash` field is not read.
+- Roles: `effectiveRole` reads the JWT role, then the legacy key's role, then the API key's kind
+  (`secret` → service_role, `publishable` → anon). The Authorization header's kind never decides a
+  role; it is carried for later use. The rollup's service branch adds `apiKeyKind = 'secret'`;
+  the anon branches (table reads, RPC, Storage) and the GraphQL anon count add "no JWT role and
+  `apiKeyKind = 'publishable'`". Authenticated still needs a user JWT.
+- Coverage (#130): the count adds `rest_with_key_kind`. REST traffic with a known key kind but no
+  JWT field leaves detector 4 assessed and lists only detector 2 (a subject comes only from a JWT).
+- Detector 4's evidence adds `apiKeyKind` (an enum).
+- `pnpm discover-keys` lists the prefix paths and prints key-kind counts (`keyKindCountsSql`);
+  `pnpm -s print-sql` prints that query.
+- UAT-D20 (`sb_secret_` from a browser pages, detector 4) and UAT-D21 (`sb_publishable_` reads
+  of an exposed table page, detector 11).
+- Still open: confirm the subject path on a project with signed-in traffic. With new keys a
+  signed-in user's Authorization header holds a user JWT, so its fields should fill as before.
+
 ## Field paths
 
 | Field | Path | Source |
@@ -97,8 +137,10 @@ The rest of #131, with Erik's decisions of 2026-11-22.
 | method, path, search, status, content range, ASN, AS org, x_client_info | `request.*` / `response.*` | Log field reference (verified) |
 | user agent | `request.headers.user_agent` | Troubleshooting guide (verified) |
 | JWT subject | `request.sb.jwt.authorization.payload.subject` | Search summary of troubleshooting docs (**unverified**) |
-| JWT role | `request.sb.jwt.authorization.payload.role` | Inferred (**unverified**) |
-| API key role | `request.sb.jwt.apikey.payload.role` | Inferred from the older BigQuery schema (**unverified**) |
+| JWT role | `request.sb.jwt.authorization.payload.role` | Seen live for legacy JWT keys, 2026-11-22 (verified) |
+| API key role | `request.sb.jwt.apikey.payload.role` | Seen live for legacy JWT keys, 2026-11-22 (verified) |
+| API key prefix → `apiKeyKind` | `request.sb.apikey.apikey.prefix` | Seen live on every request, 2026-11-22 (verified; never selected raw) |
+| Authorization prefix → `authorizationKind` | `request.sb.apikey.authorization.prefix` | Seen live on every request, 2026-11-22 (verified; never selected raw) |
 
 The API reference filters on `source`; the 23 Sept 2026 changelog filters on `source_name`.
 

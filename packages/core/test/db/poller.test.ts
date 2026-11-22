@@ -359,6 +359,15 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       expect(await lastRun(client)).toEqual({ status: "ok", unassessed_detectors: [] });
     });
 
+    // #154: sb_secret_ / sb_publishable_ keys fill no JWT field, but their kind gives detector 4 a
+    // role. A user subject only comes from a JWT, so detector 2 stays unassessed.
+    it("keeps only detector 2 unassessed when REST traffic carries a key kind but no JWT field", async () => {
+      behaviour[await tokenOf(agency)] = (q) =>
+        isCoverage(q) ? [{ rest_requests: "120", rest_with_auth: "0", rest_with_key_kind: "120" }] : [];
+      expect(await pollProject(agency, deps())).toMatchObject({ status: "ok", findings: 0 });
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: ["cross_tenant"] });
+    });
+
     it("skips the count when the rollup has rows: each one has an auth field filled", async () => {
       behaviour[await tokenOf(agency)] = (q) => (isCoverage(q) ? [{ rest_requests: "9", rest_with_auth: "0" }] : benignRows);
       await pollProject(agency, deps());
