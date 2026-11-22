@@ -44,6 +44,19 @@ FROM logs
 WHERE ${sourceColumn(env)} = 'edge_logs'`;
 }
 
+// Issue #130: the rollup keeps only traffic with a user subject or a service-role key, so if
+// Supabase leaves those fields empty (sb_secret_ keys are not JWTs) it returns nothing and both
+// detectors would read as clean. This counts the window's PostgREST requests, and those with any
+// auth field filled. Two numbers, never a log row.
+export function authCoverageSql(env?: EnvVars): string {
+  const rest = `match(${attr("path")}, '^/rest/v1/')`;
+  return `SELECT
+  countIf(${rest}) AS rest_requests,
+  countIf(${rest} AND (${attr("jwtSubject")} != '' OR ${attr("jwtRole")} != '' OR ${attr("apiKeyRole")} != '')) AS rest_with_auth
+FROM logs
+WHERE ${sourceColumn(env)} = 'edge_logs'`;
+}
+
 // PRD task 1: lists which auth-related keys exist in edge logs, never their values,
 // so the check pulls no user IDs, emails or tokens into a terminal.
 export function discoverKeysSql(env?: EnvVars): string {

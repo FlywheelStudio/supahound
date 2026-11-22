@@ -5,7 +5,7 @@ import { withTenant } from "../../src/db/tenant.js";
 import type { IncidentFeatures } from "../../src/explainer/features.js";
 import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
-import { LogsApiError } from "../../src/logs/client.js";
+import { LogsApiError, type LogsQuery } from "../../src/logs/client.js";
 import { SqlQueryError } from "../../src/ownership/client.js";
 import { ownershipFromColumns } from "../../src/ownership/ownership.js";
 import { pollProject, type PollDeps } from "../../src/poller/pollProject.js";
@@ -46,7 +46,8 @@ const normalTraffic = (seen: Date) => [
 
 describe.skipIf(pgInfo === null)("UAT: detection", () => {
   const db = useDb();
-  let logs: (now: Date) => Record<string, unknown>[];
+  // `q` is the window Supabase was asked for; most scenarios place every row inside it.
+  let logs: (now: Date, q: LogsQuery) => Record<string, unknown>[];
   // The project's pg_policies rows, read through the read-only SQL endpoint. Only projects that
   // start without a hand-set map (pickProject) read them.
   let policies: () => Record<string, unknown>[];
@@ -75,7 +76,7 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
   function poll(scope: ProjectScope, now: Date) {
     const deps: PollDeps = {
       app: db.app, vault: db.vault, now: () => now, intervalSeconds: 0,
-      queryLogs: async () => logs(now),
+      queryLogs: async (q) => logs(now, q),
       queryPolicies: async () => policies(),
       explain: async (f: IncidentFeatures): Promise<ExplainResult> =>
         ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
@@ -190,5 +191,16 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     logs = (now) => normalTraffic(new Date(now.getTime() - 200_000));
     expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
     expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "no_owned_tables" }]);
+  });
+
+  it("UAT-D12 REST traffic whose logs carry no user or key role reads both detectors as 'unable to assess', not clean", async () => {
+    const s = await watchProject("New keys app");
+    // sb_secret_ keys are not JWTs (#130): the rollup finds nothing, the coverage count finds REST traffic.
+    logs = (_now, q) => (q.sql.includes("rest_with_auth") ? [{ rest_requests: 240, rest_with_auth: 0 }] : []);
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
+    expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "unable_to_assess" }]);
+    const run = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ unassessed_detectors: string[] }>(
+      "SELECT unassessed_detectors FROM supahound.poll_runs"));
+    expect(run).toEqual([{ unassessed_detectors: ["cross_tenant", "service_role_misuse"] }]);
   });
 });

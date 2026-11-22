@@ -109,6 +109,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D7 | A scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet |
 | UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
 | UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
+| UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -205,6 +206,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Remove needs the exact name | `removalOutcome` ignores the typed name | UAT-W14 fails |
 | Removal keeps audit rows | Migration `20261109000000` left out | Postgres `projects.test.ts` fails |
 | Never-loaded ownership is not clean (#10) | The run records no unassessed detectors | 3 tests fail, including UAT-D8 |
+| Empty auth fields are not clean (#130) | The poller never runs the coverage count | 3 tests fail, including UAT-D12 |
 | Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
 | A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |
 | A failed read retries after an hour (#10) | Retry wait set to 0 | 1 Postgres test fails |

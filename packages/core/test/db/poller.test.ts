@@ -47,7 +47,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   const db = useDb();
   let agency: ProjectScope;
   let client: ProjectScope;
-  let logCalls: { token: string; ref: string; start: Date; end: Date }[];
+  let logCalls: { token: string; ref: string; start: Date; end: Date; sql: string }[];
   let explained: IncidentFeatures[];
   const behaviour: Record<string, (q: LogsQuery) => Record<string, unknown>[]> = {};
 
@@ -68,7 +68,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       vault: db.vault,
       now: () => NOW,
       queryLogs: async (q: LogsQuery, o: { token: string }) => {
-        logCalls.push({ token: o.token, ref: q.projectRef, start: q.start, end: q.end });
+        logCalls.push({ token: o.token, ref: q.projectRef, start: q.start, end: q.end, sql: q.sql });
         return behaviour[o.token]!(q);
       },
       queryPolicies: async () => { throw new Error("queryPolicies called: ownership was hand-set"); },
@@ -172,12 +172,14 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   describe("windows", () => {
     const later = (s: number) => new Date(NOW.getTime() + s * 1000);
     const minute = (d: Date) => d.getTime() % 60_000 === 0;
+    // An empty rollup is followed by the auth coverage count (#130); these tests follow the rollups.
+    const rollups = () => logCalls.filter((c) => !c.sql.includes("rest_with_auth"));
 
     it("reads contiguous, minute-aligned windows that never overlap", async () => {
       behaviour[await tokenOf(agency)] = () => [];
       await pollProject(agency, deps({ now: () => NOW }));
       await pollProject(agency, deps({ now: () => later(60) }));
-      const [w1, w2] = logCalls;
+      const [w1, w2] = rollups();
       expect(w1!.end.getTime()).toBe(Math.floor((NOW.getTime() - LAG_SECONDS * 1000) / 60_000) * 60_000);
       expect(w1!.end.getTime() - w1!.start.getTime()).toBe(FIRST_LOOKBACK_MINUTES * 60_000);
       expect(w2!.start).toEqual(w1!.end);
@@ -209,8 +211,9 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       expect(await pollProject(agency, deps({ now: () => later(60) }))).toMatchObject({ status: "unable_to_assess" });
       fail = false;
       await pollProject(agency, deps({ now: () => later(120) }));
-      expect(logCalls[2]!.start).toEqual(logCalls[0]!.end);
-      expect(logCalls[2]!.end.getTime()).toBeGreaterThan(logCalls[1]!.end.getTime());
+      const [w1, w2, w3] = rollups();
+      expect(w3!.start).toEqual(w1!.end);
+      expect(w3!.end.getTime()).toBeGreaterThan(w2!.end.getTime());
     });
 
     it("skips when nothing new has landed since the last window", async () => {
@@ -261,5 +264,49 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     );
     expect(await pollProject(client, deps())).toEqual({ status: "unable_to_assess", errorCode: "token_unavailable" });
     expect(logCalls).toEqual([]);
+  });
+
+  describe("auth field coverage (#130)", () => {
+    const isCoverage = (q: LogsQuery) => q.sql.includes("rest_with_auth");
+    // An empty rollup; the coverage count answers with these numbers.
+    const counts = (rest: number, withAuth: number) => (q: LogsQuery) =>
+      isCoverage(q) ? [{ rest_requests: String(rest), rest_with_auth: String(withAuth) }] : [];
+    const lastRun = (s: ProjectScope) => withTenant(db.app, s.tenantId, async (tx) => (await tx.query<{ status: string; unassessed_detectors: string[] }>(
+      "SELECT status, unassessed_detectors FROM supahound.poll_runs ORDER BY started_at DESC LIMIT 1"))[0]!);
+
+    it("marks both detectors unassessed when REST traffic carries no subject or role", async () => {
+      behaviour[await tokenOf(agency)] = counts(120, 0);
+      expect(await pollProject(agency, deps())).toMatchObject({ status: "ok", findings: 0 });
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: ["cross_tenant", "service_role_misuse"] });
+      // The count covers the rollup's window and is audited before it runs.
+      expect(logCalls).toHaveLength(2);
+      expect(logCalls[1]!.start).toEqual(logCalls[0]!.start);
+      expect(logCalls[1]!.end).toEqual(logCalls[0]!.end);
+      const audit = await withTenant(db.app, agency.tenantId, (tx) =>
+        tx.query<{ detail: Record<string, unknown> }>("SELECT detail FROM supahound.audit_log WHERE action = 'logs_query' ORDER BY created_at"));
+      expect(audit.map((a) => a.detail.purpose)).toEqual([undefined, "auth_coverage"]);
+      expect(audit[1]!.detail.sql_sha256).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("reads as assessed when the fields are filled, or there is no REST traffic", async () => {
+      behaviour[await tokenOf(agency)] = counts(120, 3);
+      behaviour[await tokenOf(client)] = counts(0, 0);
+      await pollProject(agency, deps());
+      await pollProject(client, deps());
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: [] });
+      expect(await lastRun(client)).toEqual({ status: "ok", unassessed_detectors: [] });
+    });
+
+    it("skips the count when the rollup has rows: each one has an auth field filled", async () => {
+      behaviour[await tokenOf(agency)] = (q) => (isCoverage(q) ? [{ rest_requests: "9", rest_with_auth: "0" }] : benignRows);
+      await pollProject(agency, deps());
+      expect(logCalls).toHaveLength(1);
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: [] });
+    });
+
+    it("reads a failed count as unable to assess, never clean", async () => {
+      behaviour[await tokenOf(agency)] = (q) => { if (isCoverage(q)) throw new LogsApiError("rate limited", 429); return []; };
+      expect(await pollProject(agency, deps())).toEqual({ status: "unable_to_assess", errorCode: "rate_limited" });
+    });
   });
 });
