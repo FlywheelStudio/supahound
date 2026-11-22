@@ -86,6 +86,8 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
+   An empty rollup is checked with one count query: REST traffic with no subject or role filled
+   lists both detectors in `unassessed_detectors`, not zero findings (issue #130).
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
@@ -162,7 +164,11 @@ tenant's row counts stay the same.
   Haiku 5.5 runs on Anthropic's API, the Grok fallback on xAI's, both in the US. No logs or
   derived data ever go to a Chinese model provider, or to any provider not on that list.
 - **Web hardening.** Users come only from `getClaims()`. The middleware rejects cross-origin
-  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. The Send Email
+  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. It also sends
+  security headers on every response (`apps/web/lib/security.ts`, #143): HSTS, `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal `Permissions-Policy`, and a CSP with a fresh
+  nonce per response (`script-src 'self' 'nonce-…'`, `frame-ancestors 'none'`). vinext reads the
+  nonce back from that header and puts it on its inline hydration scripts. The Send Email
   Hook checks its Standard Webhooks signature. The OAuth state is single-use, bound to the user and
   the workspace, and stored only as a hash.
 

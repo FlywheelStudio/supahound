@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { env } from "cloudflare:workers";
 import { NextResponse, type NextRequest } from "next/server";
-import { isSafeMethod, isSameOrigin, SIGNED_ROUTES } from "./lib/security";
+import { isSafeMethod, isSameOrigin, newNonce, setSecurityHeaders, SIGNED_ROUTES } from "./lib/security";
 
 // 1. Reject cross-origin state changes (CSRF). Signed server-to-server routes are exempt and
 //    verify their own signatures.
@@ -9,15 +9,23 @@ import { isSafeMethod, isSameOrigin, SIGNED_ROUTES } from "./lib/security";
 // 3. Never let a shared cache store a page: one user's workspace must never be served to
 //    another. The app has no public pages since the marketing site moved out (decision 025), so
 //    every response is private.
+// 4. Send the security headers (lib/security.ts) on every response, with a fresh CSP nonce that
+//    vinext reads back from the response header and puts on its inline hydration scripts.
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const signed = (SIGNED_ROUTES as readonly string[]).includes(path);
+  const nonce = newNonce();
+  const secure = (res: NextResponse) => {
+    // Only `vite dev` sets "development"; an unset NODE_ENV gets the strict policy.
+    setSecurityHeaders(res.headers, nonce, process.env.NODE_ENV === "development");
+    return res;
+  };
 
   if (!isSafeMethod(request.method) && !signed && !isSameOrigin(request, env.APP_URL)) {
-    return new NextResponse("Forbidden", { status: 403 });
+    return secure(new NextResponse("Forbidden", { status: 403 }));
   }
-  if (signed) return NextResponse.next();
+  if (signed) return secure(NextResponse.next());
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
@@ -33,7 +41,7 @@ export async function middleware(request: NextRequest) {
   await supabase.auth.getClaims();
 
   response.headers.set("Cache-Control", "private, no-store");
-  return response;
+  return secure(response);
 }
 
 export const config = {

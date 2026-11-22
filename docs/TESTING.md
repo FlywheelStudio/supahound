@@ -11,7 +11,7 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 | Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 289, within the 820 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
-| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
+| E2E, signed out | The built web Worker: redirects, CSRF, cache and security headers (CSP nonce, hydration with no violation), hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 12 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
 
 Totals on `feature/project-removal-grace` (2026-11-12): core 820, web 182, poller 15, E2E 72.
@@ -130,6 +130,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
 | UAT-D10 | A lone probe in a window too busy to read whole still raises its incident (#129) |
 | UAT-D11 | A minute with more traffic than one poll can read is "unable to assess", never an all-clear (#129) |
+| UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -220,12 +221,14 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | `getClaims()` verifies the signature | Fake Auth signs with a key that is not in its JWKS | UAT-W1 fails |
 | Hook checks its signature | Fake Auth signs the hook with the wrong secret | UAT-W1 fails (401) |
 | No shared caching of signed-in pages | Middleware stops setting `private, no-store` | 3 E2E checks fail |
+| CSP blocks inline script without the nonce (#143) | `script-src` loses `'nonce-…'` | 3 unit tests fail; on the built Worker the headers E2E check fails and Chrome reports CSP violations on `/login` (2026-11-22) |
 | No second page for a repeat | Engine pages on every update at high or above | UAT-D4 fails |
 | Sign-in email HTML is escaped | `renderSignInEmail` drops `escapeHtml` | 2 unit tests fail |
 | Picks are checked against Supabase's list | `handleWatch` inserts the submitted refs | UAT-W12 fails |
 | Remove needs the exact name | `removalOutcome` ignores the typed name | UAT-W14 fails |
 | Removal keeps audit rows | Migration `20261109000000` left out | Postgres `projects.test.ts` fails |
 | Never-loaded ownership is not clean (#10) | The run records no unassessed detectors | 3 tests fail, including UAT-D8 |
+| Empty auth fields are not clean (#130) | The poller never runs the coverage count | 3 tests fail, including UAT-D12 |
 | Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
 | A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |
 | A failed read retries after an hour (#10) | Retry wait set to 0 | 1 Postgres test fails |
