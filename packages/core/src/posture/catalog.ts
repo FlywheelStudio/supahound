@@ -22,6 +22,19 @@ export interface CatalogRelation {
   policyCount: number;
   securityInvoker: boolean;
   grants: Set<string>; // "anon:SELECT", "authenticated:INSERT", ...
+  // API roles that see it in pg_graphql's schema; null when pg_graphql is not installed.
+  graphqlRoles: ApiRole[] | null;
+}
+
+// A SECURITY DEFINER function in a checked schema (issue #135).
+export interface CatalogFunction {
+  schema: string;
+  name: string;
+  // pg_get_function_identity_arguments: tells overloads apart and completes REVOKE ... ON FUNCTION.
+  arguments: string;
+  securityDefiner: boolean;
+  searchPathSet: boolean;
+  executableBy: ApiRole[];
 }
 
 export interface CatalogPolicy {
@@ -38,6 +51,7 @@ export interface CatalogPolicy {
 export interface Catalog {
   relations: CatalogRelation[];
   policies: CatalogPolicy[];
+  functions: CatalogFunction[];
   // Rows dropped for a bad shape or an unsafe name. Counted, never stored.
   skipped: number;
 }
@@ -69,11 +83,19 @@ function list(v: unknown): string[] {
 }
 
 const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const apiRoles = (v: unknown): ApiRole[] => API_ROLES.filter((r) => list(v).includes(r));
+
+// A function's identity arguments: at most 512 characters and no control characters, so they can
+// sit on one SQL line of a fix prompt.
+export function safeArguments(v: unknown): string | null {
+  // eslint-disable-next-line no-control-regex
+  return typeof v === "string" && v.length <= 512 && !/[\u0000-\u001f\u007f]/.test(v) ? v : null;
+}
 const CMDS = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "ALL"]);
 
 export function parseCatalogRows(rows: Record<string, unknown>[]): Catalog {
   if (rows.length > MAX_CATALOG_ROWS) throw new CatalogError(`More than ${MAX_CATALOG_ROWS} catalog rows`);
-  const catalog: Catalog = { relations: [], policies: [], skipped: 0 };
+  const catalog: Catalog = { relations: [], policies: [], functions: [], skipped: 0 };
   for (const r of rows) {
     const schema = safeName(r.schema_name);
     const name = safeName(r.object_name);
@@ -93,7 +115,21 @@ export function parseCatalogRows(rows: Record<string, unknown>[]): Catalog {
         rlsForced: bool(r.rls_forced) ?? false,
         securityInvoker: bool(r.security_invoker) ?? false,
         grants: new Set(list(r.grants).filter((g) => /^(anon|authenticated):(SELECT|INSERT|UPDATE|DELETE)$/.test(g))),
+        graphqlRoles: r.graphql_roles === null || r.graphql_roles === undefined ? null : apiRoles(r.graphql_roles),
       });
+    } else if (r.kind === "function") {
+      const args = safeArguments(r.arguments);
+      const definer = bool(r.security_definer);
+      if (args === null || definer === null) {
+        catalog.skipped += 1;
+        continue;
+      }
+      catalog.functions.push({
+        schema, name, arguments: args, securityDefiner: definer,
+        searchPathSet: bool(r.search_path_set) ?? false,
+        executableBy: API_ROLES.filter((role) => list(r.grants).includes(`${role}:EXECUTE`)),
+      });
+
     } else if (r.kind === "policy") {
       const policy = safeName(r.policy_name);
       const cmd = (text(r.cmd) ?? "ALL").toUpperCase().replace("*", "ALL");
@@ -152,6 +188,12 @@ function exposureOf(grants: Set<string>, privileges: Privilege[], roles: readonl
 const privilegesOf = (grants: Set<string>, role: ApiRole) => COMMANDS.filter((p) => grants.has(`${role}:${p}`));
 
 const RLS_OFF: Record<Exposure, Severity> = { anon: "critical", authenticated: "high", none: "low" };
+// A SECURITY DEFINER function runs as its owner, past every RLS policy (issue #135).
+const DEFINER: Record<Exclude<Exposure, "none">, Severity> = { anon: "high", authenticated: "medium" };
+// pg_graphql introspection shows the object's name, columns and relationships, not its rows.
+const GRAPHQL: Record<Exclude<Exposure, "none">, Severity> = { anon: "medium", authenticated: "low" };
+const exposureOfRoles = (roles: readonly ApiRole[]): Exposure =>
+  roles.includes("anon") ? "anon" : roles.includes("authenticated") ? "authenticated" : "none";
 const VIEW: Record<Exposure, Severity> = { anon: "high", authenticated: "medium", none: "low" };
 
 export function catalogFindings(catalog: Catalog): PostureFinding[] {
@@ -218,5 +260,28 @@ export function catalogFindings(catalog: Catalog): PostureFinding[] {
       },
     });
   }
+  // function_definer_exposed (splinter 0028/0029): a SECURITY DEFINER function the Data API roles
+  // can EXECUTE, so PostgREST serves it at /rest/v1/rpc/<name>.
+  for (const fn of catalog.functions) {
+    const exposure = exposureOfRoles(fn.executableBy);
+    if (!fn.securityDefiner || exposure === "none") continue;
+    findings.push({
+      source: "catalog", check: "function_definer_exposed", severity: DEFINER[exposure],
+      schema: fn.schema, object: fn.name, objectType: "function",
+      evidence: { exposure, executableBy: fn.executableBy, arguments: fn.arguments, searchPathSet: fn.searchPathSet },
+    });
+  }
+
+  // graphql_table_exposed (splinter 0026/0027): pg_graphql is installed and an API role can SELECT
+  // a column of the table or view, so the GraphQL schema shows it to that role.
+  for (const r of catalog.relations) {
+    const exposure = exposureOfRoles(r.graphqlRoles ?? []);
+    if (exposure === "none") continue;
+    findings.push({
+      source: "catalog", check: "graphql_table_exposed", severity: GRAPHQL[exposure],
+      schema: r.schema, object: r.name, objectType: r.kind, evidence: { exposure, roles: r.graphqlRoles ?? [] },
+    });
+  }
   return findings;
 }
+

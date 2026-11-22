@@ -556,3 +556,87 @@ describe("postureSourceStatus", () => {
     expect(postureSourceStatus(new TypeError("fetch failed"))).toBe("network_error");
   });
 });
+
+// Issue #135: catalog checks ported from splinter 0026 to 0029.
+const fn = (name: string, o: Partial<{ definer: boolean | string; grants: string; args: string | null; searchPath: boolean }> = {}) => ({
+  kind: "function", schema_name: "public", object_name: name, rls_enabled: null, rls_forced: null, policy_count: null,
+  security_invoker: null, grants: o.grants ?? "anon:EXECUTE,authenticated:EXECUTE", policy_name: null, permissive: null, roles: null,
+  cmd: null, qual: null, with_check: null, graphql_roles: null, security_definer: o.definer ?? true,
+  search_path_set: o.searchPath ?? false, arguments: o.args === undefined ? "uid uuid" : o.args,
+});
+
+describe("function_definer_exposed", () => {
+  it("flags a SECURITY DEFINER function the API roles can execute: high for anon, medium for authenticated only", () => {
+    const f = only([fn("a"), fn("b", { grants: "authenticated:EXECUTE" }), fn("c", { grants: "" }), fn("d", { definer: false })], "function_definer_exposed");
+    expect(f.map((x) => [x.object, x.severity, x.objectType])).toEqual([["a", "high", "function"], ["b", "medium", "function"]]);
+    expect(f[0]!.evidence).toEqual({ exposure: "anon", executableBy: ["anon", "authenticated"], arguments: "uid uuid", searchPathSet: false });
+  });
+
+  it("keeps each overload, and drops a row with unsafe arguments", () => {
+    const parsed = parseCatalogRows([fn("f", { args: "a integer" }), fn("f", { args: "a text" }), fn("g", { args: "x text\n-- y" }), fn("h", { args: "a".repeat(513) })]);
+    expect(parsed.functions.map((x) => x.arguments)).toEqual(["a integer", "a text"]);
+    expect(parsed.skipped).toBe(2);
+    expect(safeArguments("")).toBe("");
+  });
+
+  it("revokes EXECUTE with the exact signature and pins a mutable search_path", () => {
+    const [f] = only([fn("grant_admin")], "function_definer_exposed");
+    const p = fixPrompt(f!);
+    expect(p.title).toBe("Signed-out visitors can run a SECURITY DEFINER function");
+    expect(p.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."grant_admin"(uid uuid) FROM PUBLIC, anon, authenticated;');
+    expect(p.sql).toContain('-- ALTER FUNCTION "public"."grant_admin"(uid uuid) SECURITY INVOKER;');
+    expect(p.sql).toContain(`ALTER FUNCTION "public"."grant_admin"(uid uuid) SET search_path = '';`);
+    expect(p.explanation).toMatch(/\/rest\/v1\/rpc\/grant_admin/);
+    const [pinned] = only([fn("g", { grants: "authenticated:EXECUTE", searchPath: true, args: "" })], "function_definer_exposed");
+    const q = fixPrompt(pinned!);
+    expect(q.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."g"() FROM PUBLIC, authenticated;');
+    expect(q.sql).not.toMatch(/search_path/);
+    expect(q.title).toBe("Signed-in users can run a SECURITY DEFINER function");
+  });
+});
+
+describe("graphql_table_exposed", () => {
+  const withGraphql = <T extends object>(row: T, roles: string | null) => ({ ...row, graphql_roles: roles });
+
+  it("flags a table or view an API role can see in GraphQL, only when pg_graphql is installed", () => {
+    const f = only([
+      withGraphql(table("a"), "anon,authenticated"), withGraphql(table("b"), "authenticated"), withGraphql(table("c"), ""),
+      withGraphql(view("v", true), "anon"), withGraphql(table("d"), null), table("e"),
+    ], "graphql_table_exposed");
+    expect(f.map((x) => [x.object, x.severity, x.objectType, x.evidence.exposure])).toEqual([
+      ["a", "medium", "table", "anon"], ["b", "low", "table", "authenticated"], ["v", "medium", "view", "anon"],
+    ]);
+  });
+
+  it("revokes SELECT from the roles that see it", () => {
+    const [f] = only([withGraphql(table("posts"), "anon,authenticated")], "graphql_table_exposed");
+    const p = fixPrompt(f!);
+    expect(p.title).toBe("Signed-out visitors can see this object in the GraphQL schema");
+    expect(p.sql).toContain('REVOKE SELECT ON "public"."posts" FROM anon, authenticated;');
+    expect(p.sql).toContain("-- REVOKE ALL ON FUNCTION graphql.resolve FROM anon, authenticated;");
+  });
+
+  it("never raises detections: introspection is not row access", () => {
+    expect(exposedTables(only([withGraphql(table("posts"), "anon")], "graphql_table_exposed")).size).toBe(0);
+  });
+});
+
+describe("dedupe of the ported checks against their Advisor lints", () => {
+  it("hides the Advisor's function and GraphQL lints behind the catalog finding on the same object", () => {
+    const catalog = run([fn("f"), { ...table("posts"), graphql_roles: "anon,authenticated" }])
+      .filter((f) => f.check === "function_definer_exposed" || f.check === "graphql_table_exposed");
+    const adv = (check: string, object: string, objectType: string | null) =>
+      finding({ source: "advisor", check, severity: "medium", object, objectType, evidence: { level: "WARN" } });
+    const list = dedupePosture([
+      ...catalog,
+      adv("anon_security_definer_function_executable", "f", "function"),
+      adv("authenticated_security_definer_function_executable", "f", "function"),
+      adv("pg_graphql_anon_table_exposed", "posts", "table"),
+      adv("pg_graphql_authenticated_table_exposed", "posts", "table"),
+      adv("anon_security_definer_function_executable", "other", "function"),
+    ]);
+    expect(list.map((f) => `${f.source}:${f.check}:${f.object}`)).toEqual([
+      "catalog:function_definer_exposed:f", "advisor:anon_security_definer_function_executable:other", "catalog:graphql_table_exposed:posts",
+    ]);
+  });
+});

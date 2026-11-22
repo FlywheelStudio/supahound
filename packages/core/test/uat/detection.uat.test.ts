@@ -230,13 +230,24 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     expect(open[0]!.summary?.summary).toContain("`customers`");
   });
 
+  it("UAT-D12 REST traffic whose logs carry no user or key role reads both detectors as 'unable to assess', not clean", async () => {
+    const s = await watchProject("New keys app");
+    // sb_secret_ keys are not JWTs (#130): the rollup finds nothing, the coverage count finds REST traffic.
+    logs = (_now, q) => (q.sql.includes("rest_with_auth") ? [{ rest_requests: 240, rest_with_auth: 0 }] : []);
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
+    expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "unable_to_assess" }]);
+    const run = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ unassessed_detectors: string[] }>(
+      "SELECT unassessed_detectors FROM supahound.poll_runs"));
+    expect(run).toEqual([{ unassessed_detectors: ["cross_tenant", "service_role_misuse"] }]);
+  });
+
   // Issue #129: the rollup keeps its busiest 5000 templates, so a burst of normal traffic could push
   // a single probe out of the answer and still read as clean.
   // A fake Supabase that, like the real rollup, returns the window's busiest templates up to the query's LIMIT.
   const inWindow = (rows: Record<string, unknown>[]) => (_now: Date, q: LogsQuery) => rows
     .filter((r) => Date.parse(r.first_seen as string) >= q.start.getTime() && Date.parse(r.first_seen as string) < q.end.getTime())
     .sort((a, b) => Number(b.hits) - Number(a.hits))
-    .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)![1]));
+    .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)?.[1] ?? 0)); // a query without LIMIT (the #130 coverage count) gets no rows
   const busyMinute = (seen: Date) => Array.from({ length: ROLLUP_LIMIT + 1 }, (_, i) => row(seen, {
     method: "GET", path: "/rest/v1/notes", search: `?user_id=eq.${BOB}&offset=${i}`, userAgent: CHROME_UA, asn: "7922",
     asOrganization: "Comcast", jwtSubject: BOB, jwtRole: "authenticated", apiKeyRole: "anon", hits: "50",

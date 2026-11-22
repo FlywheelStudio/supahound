@@ -5,6 +5,11 @@ import type { PostureFinding } from "./types.js";
 
 // Advisor lints that report the same thing as one of Supahound's catalog checks.
 export const ADVISOR_EQUIVALENT: Readonly<Record<string, string>> = {
+  // splinter 0026 to 0029, which the catalog checks of issue #135 port.
+  anon_security_definer_function_executable: "function_definer_exposed",
+  authenticated_security_definer_function_executable: "function_definer_exposed",
+  pg_graphql_anon_table_exposed: "graphql_table_exposed",
+  pg_graphql_authenticated_table_exposed: "graphql_table_exposed",
   rls_disabled_in_public: "rls_disabled",
   policy_exists_rls_disabled: "rls_disabled",
   rls_enabled_no_policy: "rls_no_policies",

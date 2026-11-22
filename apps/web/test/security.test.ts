@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { currentStep, onboardingSteps } from "../lib/onboarding";
-import { escapeHtml, isSafeMethod, isSameOrigin, safeNext } from "../lib/security";
+import {
+  contentSecurityPolicy,
+  escapeHtml,
+  isSafeMethod,
+  isSameOrigin,
+  newNonce,
+  safeNext,
+  securityHeaders,
+  setSecurityHeaders,
+} from "../lib/security";
 
 const APP = "https://app.supahound.example";
 const req = (origin?: string) => new Request(`${APP}/x`, { method: "POST", headers: origin ? { origin } : {} });
@@ -27,6 +36,60 @@ describe("safeNext", () => {
     ["javascript:alert(1)", "/app"],
   ])("maps %s to %s", (input, expected) => {
     expect(safeNext(input)).toBe(expected);
+  });
+});
+
+// Issue #143. The E2E spec (e2e/specs/public.spec.ts) checks the same headers on the built Worker
+// and that the page hydrates with no CSP violation.
+describe("security headers", () => {
+  const directives = (csp: string) =>
+    new Map(csp.split(";").map((d) => d.trim().split(/\s+/)).map(([name, ...values]) => [name!, values]));
+
+  it("sends HSTS, nosniff, no framing, a strict referrer and a minimal Permissions-Policy", () => {
+    const h = securityHeaders("n0nce");
+    expect(h["Strict-Transport-Security"]).toBe("max-age=31536000; includeSubDomains");
+    expect(h["X-Content-Type-Options"]).toBe("nosniff");
+    expect(h["X-Frame-Options"]).toBe("DENY");
+    expect(h["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
+    for (const feature of ["camera", "microphone", "geolocation", "payment"]) {
+      expect(h["Permissions-Policy"]).toContain(`${feature}=()`);
+    }
+    expect(h["Content-Security-Policy"]).toBe(contentSecurityPolicy("n0nce"));
+  });
+
+  it("allows scripts only from this origin or with this response's nonce", () => {
+    const csp = directives(contentSecurityPolicy("abc123=="));
+    expect(csp.get("script-src")).toEqual(["'self'", "'nonce-abc123=='"]);
+    expect(csp.get("default-src")).toEqual(["'self'"]);
+    expect(csp.get("frame-ancestors")).toEqual(["'none'"]);
+    expect(csp.get("object-src")).toEqual(["'none'"]);
+    expect(csp.get("base-uri")).toEqual(["'none'"]);
+    expect(csp.get("connect-src")).toEqual(["'self'"]);
+    // Nothing anywhere re-opens inline or eval'd script.
+    expect(csp.get("script-src")).not.toContain("'unsafe-inline'");
+    expect([...csp.values()].flat()).not.toContain("'unsafe-eval'");
+  });
+
+  it("allows eval only in vite dev, for React's development build", () => {
+    expect(contentSecurityPolicy("n", true)).toContain("script-src 'self' 'nonce-n' 'unsafe-eval';");
+    expect(securityHeaders("n")["Content-Security-Policy"]).not.toContain("unsafe-eval");
+  });
+
+  it("makes a new 128-bit nonce each time, safe to put in a header and an HTML attribute", () => {
+    const nonces = new Set(Array.from({ length: 50 }, newNonce));
+    expect(nonces.size).toBe(50);
+    for (const n of nonces) {
+      expect(n).toMatch(/^[A-Za-z0-9+/]{22}==$/);
+      expect(atob(n)).toHaveLength(16);
+    }
+  });
+
+  it("sets every header on a response, replacing what was there", () => {
+    const headers = new Headers({ "X-Frame-Options": "SAMEORIGIN", "Cache-Control": "private, no-store" });
+    setSecurityHeaders(headers, "n0nce");
+    expect(headers.get("X-Frame-Options")).toBe("DENY");
+    expect(headers.get("Cache-Control")).toBe("private, no-store");
+    expect(headers.get("Content-Security-Policy")).toContain("'nonce-n0nce'");
   });
 });
 

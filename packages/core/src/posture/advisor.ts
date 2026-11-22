@@ -5,7 +5,7 @@ import {
 import type { Severity } from "../detectors/finding.js";
 import { MANAGEMENT_API } from "../logs/client.js";
 import { QUERY_TIMEOUT_MS } from "../ownership/client.js";
-import { safeName } from "./catalog.js";
+import { safeArguments, safeName } from "./catalog.js";
 import type { PostureEvidenceValue, PostureFinding } from "./types.js";
 
 // Supabase Security Advisor (issue #11, decision 038): GET /v1/projects/{ref}/advisors/security.
@@ -73,10 +73,8 @@ export async function querySecurityAdvisor(projectRef: string, options: AdvisorC
 
 // A function's identity arguments ("uid uuid, query text"): at most 512 characters and no
 // control characters, so they can sit on one SQL line of a fix prompt.
-export function safeArguments(v: unknown): string | null {
-  // eslint-disable-next-line no-control-regex
-  return typeof v === "string" && v.length <= 512 && !/[\u0000-\u001f\u007f]/.test(v) ? v : null;
-}
+// One definition, shared with the catalog checks (#135).
+export { safeArguments };
 
 const VERSION_RE = /^[0-9A-Za-z._+-]{1,32}$/;
 const POLICY_COMMANDS: readonly unknown[] = ["SELECT", "INSERT", "UPDATE", "DELETE", "ALL"];

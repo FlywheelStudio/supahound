@@ -89,6 +89,8 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
+   An empty rollup is checked with one count query: REST traffic with no subject or role filled
+   lists both detectors in `unassessed_detectors`, not zero findings (issue #130).
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
    `detectors/exposedRead.ts` (#132) flags anon reads of those anon-readable tables, one finding per
    table, ASN and caller class (actor `anon:asn:<n>`): rows from a critical-posture table rate high,
@@ -168,7 +170,11 @@ tenant's row counts stay the same.
 - **ZDR on every call** (decision 005). `providerOptions.gateway.zeroDataRetention = true` is set
   after any merge, so nothing can override it. A routing report without ZDR discards the output.
 - **Web hardening.** Users come only from `getClaims()`. The middleware rejects cross-origin
-  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. The Send Email
+  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. It also sends
+  security headers on every response (`apps/web/lib/security.ts`, #143): HSTS, `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal `Permissions-Policy`, and a CSP with a fresh
+  nonce per response (`script-src 'self' 'nonce-…'`, `frame-ancestors 'none'`). vinext reads the
+  nonce back from that header and puts it on its inline hydration scripts. The Send Email
   Hook checks its Standard Webhooks signature. The OAuth state is single-use, bound to the user and
   the workspace, and stored only as a hash.
 
