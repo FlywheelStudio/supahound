@@ -217,6 +217,12 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Redirect hops pass the scope guard (#74) | `scopedGet` follows `Location` without `scannableUrl` | 2 unit tests fail |
 | A leak path must answer at its own path (#74) | `probeLeakPaths` drops the same-path check | 1 unit test fails |
 | An npmrc needs a known key (#74) | `leakShape` drops the known-key check | 1 unit test fails |
+| Inline source maps are scanned (#140) | `scanClientCode` skips the decoded inline map | 1 unit test fails |
+| A truncated inline map still decodes (#140) | `inlineSourceMap` does not trim the base64 to whole quads | 1 unit test fails |
+| `SourceMap` headers are followed (#140) | `scanClientCode` ignores the header / `scopedGet` drops `X-SourceMap` | 4 unit tests fail / 1 fails |
+| Short-prefix keys need a random body (#140) | Resend drops its mixed-character check / Twilio drops its digit-and-letter check / Twilio drops `\b` | 1 unit test fails each |
+| Mailgun needs its name (#140) | The Mailgun rule drops the `mailgun` context | 1 unit test fails |
+| Scoped Supabase tokens match (#140) | The access-token rule drops the `sbp_fc` branch | 2 unit tests fail |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
