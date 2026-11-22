@@ -52,3 +52,6 @@ Erik decided on 2026-11-10 (issue #74) that the secrets scanner also probes comm
   funnel** (`needs-erik` on #74); until then the funnel can call `scanClientCode` alone.
 - A new rule needs a test that proves it can fail: a near miss that must not match.
 - Test fixtures build fake keys at runtime, so the repo's gitleaks scan stays clean.
+- [Decision 046](046-scan-anon-key-exposure.md) adds a third entry point,
+  `scanClientCodeWithAnonExposure`: the client-code scan, then one GET to the site's Supabase
+  project's PostgREST root with the anon key it ships, recording exposed names and counts.

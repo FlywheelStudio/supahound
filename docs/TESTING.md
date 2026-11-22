@@ -250,6 +250,16 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Mailgun needs its name (#140) | The Mailgun rule drops the `mailgun` context | 1 unit test fails |
 | Scoped Supabase tokens match (#140) | The access-token rule drops the `sbp_fc` branch | 2 unit tests fail |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
+| Only a Supabase project the site names is in scope (#139) | `supabaseHostInScope` drops the named-refs check | 3 unit tests fail |
+| Only the PostgREST root is requested (#139) | `supabaseRestRootUrl` drops the path and query check | 4 unit tests fail |
+| The root's redirect is never followed (#139) | `supabaseRestRootGet` keeps the caller's `maxRedirects` | 1 unit test fails |
+| The key is never stored (#139) | The finding's evidence holds the key | 1 unit test fails |
+| Names pass `safeName` (#139) | `exposedNames` keeps names unchecked | 1 unit test fails |
+| The key must be for the named project (#139) | The collector pairs an anon key with every URL, ignoring its `ref` | 3 unit tests fail |
+| At most two projects per scan (#139) | The probe drops the cap | 1 unit test fails |
+| An oversized document is not parsed (#139) | The probe parses a truncated body | 1 unit test fails |
+| Exposure names on the page are shape-checked (#139) | `evidenceItems` drops the name check | 1 web unit test fails |
+| Posture link only for the same ref (#139) | `exposureFollowUp` links to any project | 1 web unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
 | Staff exemption ends with the owners (decision 029) | The membership trigger never fires | 4 Postgres exemption tests fail |

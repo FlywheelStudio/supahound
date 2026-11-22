@@ -464,10 +464,17 @@ function isHtml(contentType: string, text: string): boolean {
   return contentType.includes("text/html") || /^\s*<(?:!doctype|html|head|body)\b/i.test(text);
 }
 
+export interface ClientCodeOptions extends ScopedFetchOptions {
+  // Called with the text of every file the scan matched (page, scripts, source maps). The anon-key
+  // exposure check (supabaseExposure.ts) reads the project URL and anon key from it, in memory.
+  onText?: (text: string) => void;
+}
+
 // Reads the page at `targetUrl`, every same-apex script it loads or names, and each script's public
 // source map, and matches every file against the rules. A script on another host is skipped, not
 // fetched. Throws only when `targetUrl` itself is outside the verified apex.
-export async function scanClientCode(targetUrl: string, verifiedApex: string, opts: ScopedFetchOptions = {}): Promise<SecretsScanResult> {
+export async function scanClientCode(targetUrl: string, verifiedApex: string, opts: ClientCodeOptions = {}): Promise<SecretsScanResult> {
+  const onText = opts.onText ?? (() => undefined);
   const start = scannableUrl(targetUrl, verifiedApex);
   if (start === null || start === "out-of-scope") {
     throw new Error(`${reportUrl(targetUrl) || "the target"} is not a scannable URL inside ${verifiedApex}`);
@@ -484,6 +491,7 @@ export async function scanClientCode(targetUrl: string, verifiedApex: string, op
   }
   result.fetched.push(reportUrl(page.url));
   findings.addSecrets(matchSecrets(page.text), page.url, "page");
+  onText(page.text);
 
   // Breadth first: the page's own scripts before the chunks they name.
   const queue: { url: string; source: "script" | "source-map" }[] = [];
@@ -520,11 +528,15 @@ export async function scanClientCode(targetUrl: string, verifiedApex: string, op
     if (doc.status !== 200 || isHtml(doc.contentType, doc.text)) continue; // A 404 page or SPA shell.
     result.fetched.push(reportUrl(doc.url));
     findings.addSecrets(matchSecrets(doc.text), doc.url, next.source);
+    onText(doc.text);
     if (next.source === "script") {
       // A source map can be inline (base64 in the script), named in a trailing comment, or named in
       // a `SourceMap` / `X-SourceMap` response header. A named map is fetched like any other URL.
       const inline = inlineSourceMap(doc.text);
-      if (inline !== null) findings.addSecrets(matchSecrets(inline), doc.url, "source-map");
+      if (inline !== null) {
+        findings.addSecrets(matchSecrets(inline), doc.url, "source-map");
+        onText(inline);
+      }
       if (doc.sourceMap) enqueue(doc.sourceMap, "source-map", doc.url);
       const map = sourceMapUrl(doc.text, doc.url);
       if (map) enqueue(map, "source-map", doc.url);

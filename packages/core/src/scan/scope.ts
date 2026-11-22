@@ -80,3 +80,24 @@ export function assertInScope(host: string, verifiedApex: string): void {
     throw new ScopeError(`${host} is outside the verified scope of ${verifiedApex}`);
   }
 }
+
+// ---- The Supabase project a verified site names (decision 046) -------------------------------------
+
+// A Supabase project ref: 20 lowercase letters or digits. The same shape the secrets scanner accepts
+// in a JWT's `ref` claim.
+export const SUPABASE_REF = /^[a-z0-9]{20}$/;
+
+// The one host outside the verified apex the scanner may contact: `<ref>.supabase.co`, where the ref
+// is one the verified site's own client code names. No other Supabase host (custom domains,
+// `supabase.com`, `*.supabase.in`), no subdomain of the project host, no trailing dot, no
+// look-alike. `namedRefs` comes from the scanner's read of that site's code, never from user input.
+export function supabaseHostInScope(host: string, namedRefs: ReadonlySet<string>): boolean {
+  const m = /^([a-z0-9]{20})\.supabase\.co$/.exec(host);
+  return m !== null && SUPABASE_REF.test(m[1]!) && namedRefs.has(m[1]!);
+}
+
+export function assertSupabaseHostInScope(host: string, namedRefs: ReadonlySet<string>): void {
+  if (!supabaseHostInScope(host, namedRefs)) {
+    throw new ScopeError(`${host} is not a Supabase project the verified site names`);
+  }
+}
