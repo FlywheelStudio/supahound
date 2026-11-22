@@ -151,6 +151,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
 | UAT-D13 | Anon-key reads of a table the posture scan shows open raise a paging incident from the next poll (#132) |
 | UAT-D14 | A burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll (#131) |
+| UAT-D15 | A table marked intentionally public is not watched and raises nothing; unmarking restores the alert (#160) |
+| UAT-D16 | The project's RPC burst threshold decides when anon calls to an exposed function page (#160) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -202,6 +204,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W48 | A project Viewer sees the plan and status but no portal button and no invoices; a replayed owner portal form is refused and opens no portal session |
 | UAT-W49 | The owner opens the Billing Portal from the plan page; the portal returns to that page |
 | UAT-W50 | Remove → the projects page, project dashboard, workspace billing and Plan & billing all say "stays active until <period end> and is deleted on <+7 days> unless you keep it"; Keep project on the plan page cancels the removal and resumes the same subscription (decision 042) |
+| UAT-W51 | An owner marks a table intentionally public on the Posture page: its read finding reads "Accepted (intentionally public)" and leaves the counts, the change is audited, a viewer gets no buttons and a replayed owner form is refused; Unmark restores the open finding (`posture.uat.spec.ts`, decision 045) |
+| UAT-W52 | The owner sets the RPC burst threshold next to email alerts; it is audited; an out-of-range value and a viewer's replayed form are refused by the server (`alerts.uat.spec.ts`, decision 045) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
@@ -441,5 +445,10 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | RPC: authenticated-only definers are not watched (#131) | `anonDefinerFunctions` ignores the stored exposure | 1 unit test fails |
 | RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D14 fails |
 | RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D14 fails |
+| Marked tables are not watched (#160) | `pollProject` passes an empty set to `withoutPublicTables` | UAT-D15 fails |
+| The project's burst threshold reaches the detector (#160) | `pollProject` drops `rpcBurstHits` from the scan | UAT-D16 fails |
+| A mark accepts reads only (#160) | `acceptedAsPublic` accepts a policy with any open command | 1 unit test fails |
+| Only Owners and Admins mark, in RLS (#160) | The migration's INSERT/DELETE policies also allow `editor` | 1 Postgres test fails |
+| The server checks the role before a mark (#160) | `markPublicAction` skips `canMarkPublic` (RLS still refuses) | UAT-W51 fails (no role notice) |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

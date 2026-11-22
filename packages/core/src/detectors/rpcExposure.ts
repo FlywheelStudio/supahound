@@ -10,8 +10,15 @@ import { safeIdentifier, type Finding, type Severity } from "./finding.js";
 // SQL fetches only anon calls to these functions (logs/sql.ts). Request bodies, and so RPC
 // arguments sent as JSON, are not in edge logs: the finding says which function, never with what.
 
-// Calls in one poll from one network and caller class that read as automation, not an app.
+// Calls in one poll from one network and caller class that read as automation, not an app. The
+// default; each project sets its own between RPC_BURST_MIN and RPC_BURST_MAX (decision 045).
 export const RPC_BURST_HITS = 100;
+export const RPC_BURST_MIN = 10;
+export const RPC_BURST_MAX = 10_000;
+
+export function isRpcBurstHits(n: unknown): n is number {
+  return typeof n === "number" && Number.isInteger(n) && n >= RPC_BURST_MIN && n <= RPC_BURST_MAX;
+}
 
 // The signals this detector emits; each has a rule in rules.ts.
 export const RPC_EXPOSURE_SIGNALS = ["definer_rpc_call", "rpc_burst"] as const;
@@ -31,9 +38,15 @@ interface Group {
 }
 
 // One finding per function, network (ASN) and caller class in this poll. Rejected calls (4xx/5xx)
-// ran nothing and raise nothing.
-export function detectRpcExposure(events: EdgeEvent[], definers: ReadonlyMap<string, DefinerExposure>): Finding[] {
+// ran nothing and raise nothing. burstHits is the project's paging threshold (decision 045); an
+// out-of-range value falls back to the default, so a bad setting never silences the burst.
+export function detectRpcExposure(
+  events: EdgeEvent[],
+  definers: ReadonlyMap<string, DefinerExposure>,
+  burstHits: number = RPC_BURST_HITS,
+): Finding[] {
   if (definers.size === 0) return [];
+  const burst = isRpcBurstHits(burstHits) ? burstHits : RPC_BURST_HITS;
   const groups = new Map<string, Group>();
 
   for (const event of events) {
@@ -66,7 +79,7 @@ export function detectRpcExposure(events: EdgeEvent[], definers: ReadonlyMap<str
   return [...groups.values()].map((g) => {
     const signals: RpcExposureSignal[] = ["definer_rpc_call"];
     let severity: Severity = "medium";
-    if (g.hits >= RPC_BURST_HITS) {
+    if (g.hits >= burst) {
       signals.push("rpc_burst");
       severity = "high";
     }
@@ -85,6 +98,8 @@ export function detectRpcExposure(events: EdgeEvent[], definers: ReadonlyMap<str
         // One method, or "mixed" when the group saw several (GET and POST both call a function).
         method: g.methods.size === 1 ? [...g.methods][0]! : "mixed",
         rowsReturned: g.rows,
+        // The project's paging threshold for this poll, a count (decision 045).
+        burstThreshold: burst,
         asn: g.asn,
         callerClass: g.callerClass,
         networkType: g.networkType,

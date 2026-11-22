@@ -19,7 +19,8 @@ import { POSTURE_SQL } from "../config/posture.js";
 import * as postureRepo from "../db/posture.js";
 import { AdvisorApiError, advisorFindings, type AdvisorLint } from "../posture/advisor.js";
 import { CatalogError, catalogFindings, parseCatalogRows } from "../posture/catalog.js";
-import { raiseForPosture } from "../posture/findings.js";
+import { raiseForPosture, withoutPublicTables } from "../posture/findings.js";
+import { publicTableSet } from "../db/detectionSettings.js";
 import type { SourceStatus } from "../posture/types.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
@@ -307,7 +308,11 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     // Anon reads are fetched only for the tables the stored posture shows readable by anon (#132),
     // and anon RPC calls only for the functions it shows as SECURITY DEFINER and anon-executable
     // (#131). A scan that runs later in this poll takes effect from the next poll: the SQL is audited here.
-    const anonReadable = await postureRepo.postureAnonReadableTables(tx, scope.projectId);
+    // Tables an Owner or Admin marked intentionally public are not watched at all (decision 045).
+    const anonReadable = withoutPublicTables(
+      await postureRepo.postureAnonReadableTables(tx, scope.projectId),
+      await publicTableSet(tx, scope.projectId),
+    );
     const anonDefiners = await postureRepo.postureAnonDefinerFunctions(tx, scope.projectId);
     const sql = edgeRollupSql({
       limit: ROLLUP_LIMIT + 1, ...(deps.env ? { env: deps.env } : {}),
@@ -412,6 +417,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
     anonReadable: loaded.anonReadable,
     anonDefiners: loaded.anonDefiners,
+    rpcBurstHits: project.rpcBurstHits,
   }), exposed);
   const openIncidents: Incident[] = loaded.open.map((i) => ({
     ...i, scope, status: "open", detectors: i.detectors as Incident["detectors"],

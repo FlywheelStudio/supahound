@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect } from "vitest";
 import * as billing from "../../src/db/billing.js";
+import * as settings from "../../src/db/detectionSettings.js";
 import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
 import { withTenant } from "../../src/db/tenant.js";
@@ -99,6 +100,8 @@ export async function seedFullTenant(db: Db, name: string, token: string): Promi
       catalog: { status: "ok", findings: [{ source: "catalog", check: "rls_disabled", severity: "high", schema: "public", object: "notes", objectType: "table", evidence: {} }] },
       advisor: null,
     }, new Date());
+    // Detection settings (decision 045): one table marked intentionally public.
+    expect(await settings.markPublicTable(tx, project, "notes", null)).toBe("marked");
     return { tenant, connection, project, run, incident };
   });
 }

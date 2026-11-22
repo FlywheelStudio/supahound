@@ -141,4 +141,64 @@ test.describe("UAT: posture scan", () => {
     await expect(page.getByRole("main")).toContainText("No posture findings in the last scan.");
     await expect(page.getByRole("button", { name: "Scan now" })).toBeEnabled();
   });
+
+  test("UAT-W51 an owner marks a table intentionally public: its read finding reads accepted, a viewer cannot change it, unmark restores", async ({ page, browser }) => {
+    const shop = { ref: "posturew51shopxxxxxx", name: "Shop" };
+    const { tenant, ids } = await workspaceWithPick(page, "w51", [shop]);
+    // prices: RLS on with a read-all policy (a public lookup); orders: RLS off with Supabase's default grants.
+    await setPosture(shop.ref, [
+      table("prices", true, 1), { ...policy("prices", "read all", "SELECT", null, "true"), roles: "public" }, table("orders", false),
+    ], []);
+    await pollWithPosture(tenant, ids.Shop!);
+    // anon may read every row of both, so both are offered.
+    const postureUrl = `/w/${tenant}/p/${ids.Shop}/posture`;
+    await page.goto(postureUrl);
+    const readable = page.getByRole("list", { name: "Tables anyone can read" });
+    await expect(readable.getByRole("listitem")).toHaveCount(2);
+    await expect(page.getByRole("region", { name: "Scan status" })).toContainText("1 critical · 1 medium");
+    const ownerForm = await page.locator("form", { has: page.getByRole("button", { name: "Mark public.prices intentionally public" }) }).evaluate((f) => f.outerHTML);
+
+    await settled(page);
+    await page.getByRole("button", { name: "Mark public.prices intentionally public" }).click();
+    await expect(page).toHaveURL(`${postureUrl}?public=marked#public-tables`);
+    await expect(page.getByRole("status")).toHaveText(/Marked intentionally public/);
+    await expect(page.getByRole("list", { name: "Tables marked intentionally public" })).toContainText("public.prices");
+    const prices = page.getByRole("list", { name: "Posture findings" }).getByRole("listitem").filter({ hasText: "public.prices" });
+    await expect(prices).toContainText("Accepted (intentionally public)");
+    // The accepted finding no longer counts; orders (writes open) still does.
+    await expect(page.getByRole("region", { name: "Scan status" })).toContainText("1 critical");
+    await expect(page.getByRole("region", { name: "Scan status" })).not.toContainText("medium");
+    const marked = await adminQuery<{ table_name: string }>("SELECT table_name FROM supahound.public_tables WHERE tenant_id = $1", [tenant]);
+    expect(marked).toEqual([{ table_name: "prices" }]);
+    const audit = await adminQuery<{ detail: Record<string, unknown> }>(
+      "SELECT detail FROM supahound.audit_log WHERE tenant_id = $1 AND action = 'detection_setting'", [tenant]);
+    expect(audit.map((a) => a.detail)).toMatchObject([{ setting: "public_table", change: "mark", table: "prices" }]);
+
+    // A viewer: no buttons, and the owner's form replayed (for orders) is refused by the server.
+    const member = await browser.newPage();
+    const memberEmail = uniqueEmail("w51-viewer");
+    await signIn(member, memberEmail);
+    await addViewer(tenant, await userIdFor(memberEmail));
+    await member.goto(postureUrl);
+    await expect(member.getByText("Only the project's owners and admins can mark a table intentionally public.")).toBeVisible();
+    await expect(member.getByRole("button", { name: /intentionally public|Unmark/ })).toHaveCount(0);
+    await settled(member);
+    await member.evaluate((html) => {
+      document.body.insertAdjacentHTML("beforeend", html);
+      const form = document.body.lastElementChild as HTMLFormElement;
+      form.querySelector<HTMLInputElement>("input[name=table]")!.value = "orders";
+      form.requestSubmit();
+    }, ownerForm);
+    await expect(member).toHaveURL(/public=role/);
+    await expect(member.getByRole("status")).toHaveText(/Only the project's owners and admins/);
+    expect(await adminQuery("SELECT table_name FROM supahound.public_tables WHERE tenant_id = $1", [tenant])).toEqual(marked);
+    await member.close();
+
+    // Unmark restores the open finding.
+    await page.getByRole("button", { name: "Unmark public.prices" }).click();
+    await expect(page).toHaveURL(`${postureUrl}?public=unmarked#public-tables`);
+    await expect(page.getByRole("main")).not.toContainText("Accepted (intentionally public)");
+    await expect(page.getByRole("region", { name: "Scan status" })).toContainText("1 critical · 1 medium");
+    expect(await adminQuery("SELECT 1 FROM supahound.public_tables WHERE tenant_id = $1", [tenant])).toEqual([]);
+  });
 });
