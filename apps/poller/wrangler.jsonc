@@ -55,7 +55,10 @@
     "APP_URL": "http://localhost:5173",
     // Sender of incident alert emails. Use an address on a domain onboarded to Email Sending.
     "EMAIL_FROM_ADDRESS": "alerts@supahound.example",
-    "EMAIL_FROM_NAME": "Supahound alerts"
+    "EMAIL_FROM_NAME": "Supahound alerts",
+    // Staff heartbeat (issue #133): who is emailed when polling stops or mostly fails. One address
+    // or a comma-separated list; empty turns the heartbeat off. At most one email per 6 hours.
+    "SUPAHOUND_STAFF_ALERT_EMAIL": ""
   },
   "secrets": { "required": ["SUPAHOUND_MASTER_KEYS", "SUPABASE_OAUTH_CLIENT_SECRET"] },
   "observability": {
