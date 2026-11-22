@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SCANNER_USER_AGENT, scopedGet, type FetchLike } from "../src/scan/fetch.js";
 import {
+  inlineSourceMap,
   jwtPayload,
   keyValueNames,
   LEAK_PATHS,
@@ -59,6 +60,20 @@ const POSITIVES: [string, string][] = [
   ["github-token", join("gh", "p_", rand(36))],
   ["slack-token", join("xo", "xb-", rand(12), "-", rand(24))],
   ["sendgrid-api-key", join("SG", ".", rand(22), ".", rand(43))],
+  ["supabase-access-token", join("sb", "p_oauth_", hex(40))],
+  ["supabase-access-token", join("sb", "p_fc", rand(38))],
+  ["supabase-oauth-client-secret", join("sb", "a_", hex(40))],
+  ["openrouter-api-key", join("sk", "-or-v1-", hex(64))],
+  ["groq-api-key", join("gs", "k_", rand(52))],
+  ["xai-api-key", join("xa", "i-", rand(80))],
+  ["resend-api-key", join("r", "e_", rand(8), "_", rand(24))],
+  ["google-api-key", join("AI", "za", rand(35, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"))],
+  ["twilio-api-key", join("S", "K", hex(32))],
+  ["mailgun-api-key", join("MAILGUN_API_KEY=", "ke", "y-", hex(32))],
+  ["mailgun-api-key", join("mailgunSigningKey: ", hex(32), "-", hex(8), "-", hex(8))],
+  ["cloudflare-api-token", join("cf", "ut_", rand(46))],
+  ["cloudflare-api-token", join("cf", "at_", rand(48))],
+  ["cloudflare-api-token", join("cf", "k_", rand(48))],
 ];
 
 // Strings one step away from a real key, keyed by the rule they test. Each must produce no finding.
@@ -89,6 +104,22 @@ const NEAR_MISSES: [string, string, string][] = [
   ["github-token", "unknown GitHub prefix", join("gh", "x_", rand(36))],
   ["slack-token", "Slack token one short", join("xo", "xb-", rand(19))],
   ["sendgrid-api-key", "SendGrid key one short", join("SG", ".", rand(22), ".", rand(42))],
+  ["supabase-access-token", "scoped token one short", join("sb", "p_fc", rand(31))],
+  ["supabase-oauth-client-secret", "client secret with 39 hex", join("sb", "a_", hex(39))],
+  ["openrouter-api-key", "OpenRouter key one short", join("sk", "-or-v1-", hex(63))],
+  ["openrouter-api-key", "OpenRouter key in upper case", join("sk", "-or-v1-", hex(64).toUpperCase())],
+  ["groq-api-key", "Groq key too short", join("gs", "k_", rand(47))],
+  ["xai-api-key", "xAI key too short", join("xa", "i-", rand(69))],
+  ["resend-api-key", "re_ identifier in minified code", join("r", "e_", "validate", "_", "currentselectionhandlers")],
+  ["resend-api-key", "Resend key without the separator", join("r", "e_", rand(32))],
+  ["google-api-key", "Google key one short", join("AI", "za", rand(34))],
+  ["twilio-api-key", "SK and 32 digits", join("S", "K", rand(32, "0123456789"))],
+  ["twilio-api-key", "Twilio key one short", join("S", "K", hex(31))],
+  ["twilio-api-key", "SK inside a longer word", join("TASK", hex(32))],
+  ["mailgun-api-key", "key- and 32 hex with no Mailgun name", join("cacheKey = ", "ke", "y-", hex(32))],
+  ["mailgun-api-key", "Mailgun key one short", join("MAILGUN_API_KEY=", "ke", "y-", hex(31))],
+  ["cloudflare-api-token", "Cloudflare token without a checksum", join("cf", "ut_", rand(40))],
+  ["cloudflare-api-token", "unknown Cloudflare prefix", join("cf", "xx_", rand(46))],
 ];
 
 describe("matchSecrets", () => {
@@ -232,6 +263,22 @@ describe("script discovery", () => {
     expect(sourceMapUrl("x()\n//# sourceMappingURL=index.js.map\n", `${SITE}/assets/index.js`)).toBe(`${SITE}/assets/index.js.map`);
     expect(sourceMapUrl("x()\n//# sourceMappingURL=data:application/json;base64,e30=", `${SITE}/a.js`)).toBeNull();
   });
+
+  it("decodes an inline base64 source map", () => {
+    const map = JSON.stringify({ version: 3, sourcesContent: [`const k = "${STRIPE_LIVE}"; // café`] });
+    const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(map)));
+    expect(inlineSourceMap(`x()\n//# sourceMappingURL=data:application/json;base64,${b64}`)).toBe(map);
+    expect(inlineSourceMap(`x()\n/*# sourceMappingURL=data:application/json;charset=utf-8;base64,${b64} */`)).toBe(map);
+    // Cut off by the byte cap: still decodes up to the cut.
+    expect(inlineSourceMap(`x()\n//# sourceMappingURL=data:application/json;base64,${b64.slice(0, 101)}`)).toBe(map.slice(0, 75));
+  });
+
+  it("ignores text that is not an inline source map", () => {
+    expect(inlineSourceMap("x()\n//# sourceMappingURL=index.js.map")).toBeNull();
+    expect(inlineSourceMap(`s = "sourceMappingURL=data:application/json;base64,e30="`)).toBeNull();
+    expect(inlineSourceMap("//# sourceMappingURL=data:text/plain;base64,e30=")).toBeNull();
+    expect(inlineSourceMap("x()\n//# sourceMappingURL=data:application/json;base64,!!!")).toBeNull();
+  });
 });
 
 describe("scanClientCode", () => {
@@ -282,6 +329,56 @@ describe("scanClientCode", () => {
     const pg = out.findings.find((f) => f.type === "exposed-secret:postgres-url-with-password");
     expect(pg?.evidence.source).toBe("source-map");
     expect(s.urls()).toContain(`${SITE}/assets/lazy.js`);
+  });
+
+  it("reads a secret from an inline source map without a request", async () => {
+    const map = JSON.stringify({ version: 3, sourcesContent: [`const pg = "${POSITIVES[3]![1]}";`] });
+    const s = site({
+      [`${SITE}/`]: html(`<script src="/app.js"></script>`),
+      [`${SITE}/app.js`]: js(`x()\n//# sourceMappingURL=data:application/json;base64,${btoa(map)}`),
+    });
+    const out = await scanClientCode(`${SITE}/`, APEX, { fetchImpl: s.fetchImpl });
+    expect(out.findings).toHaveLength(1);
+    expect(out.findings[0]).toMatchObject({
+      type: "exposed-secret:postgres-url-with-password",
+      endpoint: `${SITE}/app.js`,
+      evidence: { source: "source-map" },
+    });
+    expect(s.urls()).toEqual([`${SITE}/`, `${SITE}/app.js`]);
+  });
+
+  it.each(["SourceMap", "X-SourceMap"])("follows a %s response header", async (header) => {
+    const s = site({
+      [`${SITE}/`]: html(`<script src="/assets/app.js"></script>`),
+      [`${SITE}/assets/app.js`]: { body: "x()", headers: { "content-type": "application/javascript", [header]: "app.js.map" } },
+      [`${SITE}/assets/app.js.map`]: {
+        body: JSON.stringify({ version: 3, sourcesContent: [`k = "${STRIPE_LIVE}"`] }),
+        headers: { "content-type": "application/json" },
+      },
+    });
+    const out = await scanClientCode(`${SITE}/`, APEX, { fetchImpl: s.fetchImpl });
+    expect(out.findings.map((f) => [f.type, f.evidence.source])).toEqual([["exposed-secret:stripe-secret-key", "source-map"]]);
+    expect(out.fetched).toContain(`${SITE}/assets/app.js.map`);
+  });
+
+  it("never fetches a SourceMap header that points out of scope", async () => {
+    const s = site({
+      [`${SITE}/`]: html(`<script src="/app.js"></script>`),
+      [`${SITE}/app.js`]: { body: "x()", headers: { "content-type": "application/javascript", SourceMap: "https://evil.test/app.js.map" } },
+    });
+    const out = await scanClientCode(`${SITE}/`, APEX, { fetchImpl: s.fetchImpl });
+    expect(out.skipped).toContainEqual({ url: "https://evil.test/app.js.map", reason: "third-party" });
+    expect(s.urls().some((u) => u.includes("evil.test"))).toBe(false);
+  });
+
+  it("counts a header-named source map against the script limit", async () => {
+    const s = site({
+      [`${SITE}/`]: html(`<script src="/app.js"></script>`),
+      [`${SITE}/app.js`]: { body: "x()", headers: { "content-type": "application/javascript", SourceMap: "/app.js.map" } },
+    });
+    const out = await scanClientCode(`${SITE}/`, APEX, { fetchImpl: s.fetchImpl, limits: { maxScripts: 1 } });
+    expect(out.skipped).toContainEqual({ url: `${SITE}/app.js.map`, reason: "limit" });
+    expect(s.urls()).toEqual([`${SITE}/`, `${SITE}/app.js`]);
   });
 
   it("stops at the script limit", async () => {

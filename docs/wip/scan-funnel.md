@@ -63,10 +63,29 @@ Erik asked for a secrets scanner and chose to probe leak paths as well as client
 - Problems solved: the first test generator multiplied past 2^53, so its low bits collapsed and the
   "random" hex had too few symbols. It now uses `Math.imul`. The placeholder check reads the last 16
   characters, so a fixed prefix such as `sk_live_` cannot add variety to a fake key.
-- Known gaps: chunks that webpack builds from a runtime map (no literal path) are not found. Base64
-  inline source maps are not decoded. The scanner does not read `SourceMap` response headers.
+- Known gaps: chunks that webpack builds from a runtime map (no literal path) are not found.
 - Next: #51 wires `scanClientCode` (and `probeLeakPaths` once legal review clears it) into the scan
   job and the report.
+
+## Status — 2026-11-22: wider rules, inline and header source maps (#140)
+
+- Done:
+  - 10 more rules (26 in all): Supabase OAuth client secret (`sba_`, the `.gitleaks.toml` regex),
+    Supabase scoped tokens (`sbp_fc`, folded into the access-token rule), Google API key (`AIza`,
+    severity low: Firebase and Maps keys belong in client code when restricted), OpenRouter, Groq,
+    xAI, Resend, Twilio API key, Mailgun (only after a name that says mailgun) and Cloudflare's
+    prefixed tokens (`cfk_`, `cfut_`, `cfat_`, `cfast_`). Google, Twilio and Mailgun are ported from
+    gitleaks' default config (MIT, attributed in `secrets.ts`); the rest follow the provider's docs.
+  - Short-prefix rules carry a second check: a Resend body must mix digits and both cases; a Twilio
+    body must mix digits and hex letters, and `SK` must start a word.
+  - `inlineSourceMap` decodes a base64 `data:application/json` source map in a script and scans it as
+    `source: "source-map"`, with no request. A map cut off by the byte cap decodes up to the cut.
+  - `scopedGet` returns the `SourceMap` (or `X-SourceMap`) header; the scanner queues that URL like a
+    comment-named map, so the scope guard and the script limit apply.
+  - Tests: 154 in `scanSecrets.test.ts`. A sweep of 825 MB of minified JS and source maps in
+    `node_modules` (38,545 files, 3 inline maps) found no match from the new rules.
+- Not matched, on purpose: Cloudflare's older unprefixed tokens (40 alphanumerics, no distinct shape),
+  `cfoat_` Wrangler tokens (length not published), Mailgun public validation keys (public by design).
 
 ## Approach
 

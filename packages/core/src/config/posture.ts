@@ -85,7 +85,8 @@ export const ADVISOR_OBJECT_TYPES = [
 ] as const;
 export type AdvisorObjectType = (typeof ADVISOR_OBJECT_TYPES)[number];
 
-// The lint `name` enum in the reference (45 values, 2026-11-12). A name outside this list is
+// The lint `name` enum in the reference (45 values, 2026-11-12), plus 12 newer splinter security
+// lints (below). A name outside this list is
 // still kept when it is a plain snake_case word (Supabase adds lints), with a generic fix prompt.
 export const ADVISOR_LINTS = [
   "unindexed_foreign_keys", "auth_users_exposed", "auth_rls_initplan", "no_primary_key", "unused_index",
@@ -101,7 +102,37 @@ export const ADVISOR_LINTS = [
   "log_storage_error_rate_high", "log_edge_function_error_rate_high", "realtime_authorization_timeouts",
   "realtime_postgres_changes_spike", "realtime_concurrent_users_near_limit", "project_not_active",
   "advisor_check_unavailable",
+  // splinter 0019 to 0032, security category only (issue #134). splinter is the Advisor's lint
+  // source; names checked against https://github.com/supabase/splinter/tree/main/lints on 2026-11-22.
+  "insecure_queue_exposed_in_api", "fkey_to_auth_unique", "extension_versions_outdated", "sensitive_columns_exposed",
+  "rls_policy_always_true", "public_bucket_allows_listing", "pg_graphql_anon_table_exposed",
+  "pg_graphql_authenticated_table_exposed", "anon_security_definer_function_executable",
+  "authenticated_security_definer_function_executable", "anon_dynamic_sql_function_executable",
+  "authenticated_dynamic_sql_function_executable",
 ] as const;
+
+// Extra `metadata` keys of the newer splinter lints (issue #134). Each value is a catalog
+// identifier, an enum, a boolean or a version string; advisor.ts checks each before keeping it as
+// evidence. Other metadata (policy expressions, owners, matched patterns, bucket ids) is never read.
+export const ADVISOR_METADATA = {
+  policy: "policy_name", // rls_policy_always_true
+  command: "command", // rls_policy_always_true: SELECT | INSERT | UPDATE | DELETE | ALL
+  policies: "policy_names", // public_bucket_allows_listing: its policies on storage.objects
+  arguments: "arguments", // function lints: pg_get_function_identity_arguments(oid)
+  securityDefiner: "security_definer", // function lints
+  sensitiveColumns: "sensitive_columns", // sensitive_columns_exposed
+  foreignKey: "foreign_key", // fkey_to_auth_unique
+  extension: "extension_name", // extension_versions_outdated: it has no schema, name or type
+  installedVersion: "installed_version",
+  defaultVersion: "default_version",
+} as const;
+
+// Lints whose metadata has no `type`, although the lint itself says what kind of object it names.
+export const ADVISOR_LINT_OBJECT_TYPE: Readonly<Record<string, AdvisorObjectType>> = {
+  anon_security_definer_function_executable: "function",
+  authenticated_security_definer_function_executable: "function",
+  extension_versions_outdated: "extension",
+};
 
 export const LINT_NAME_RE = /^[a-z0-9_]{1,64}$/;
 

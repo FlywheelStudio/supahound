@@ -13,6 +13,11 @@ function attr(field: EdgeField): string {
   return `log_attributes[${quote(EDGE_FIELDS[field].key)}]`;
 }
 
+// The most templates one poll reads. The rollup keeps the busiest, so a window with more would drop
+// its quietest ones: often the single probe detector 2 looks for. The poller asks for one more and
+// treats a full answer as saturated (issue #129).
+export const ROLLUP_LIMIT = 5000;
+
 // At most this many exposed tables go into one query (issue #132), so the SQL stays short.
 export const MAX_ANON_READ_TABLES = 200;
 
@@ -32,7 +37,7 @@ export function anonReadTables(tables: Iterable<string>): string[] {
 // (REST, Auth admin, Storage) made with the service-role key, and anon-key reads of the tables
 // the posture scan shows readable by anon (`anonReadTables`, issue #132).
 export function edgeRollupSql(options: { limit?: number; env?: EnvVars; anonReadTables?: Iterable<string> } = {}): string {
-  const limit = options.limit ?? 5000;
+  const limit = options.limit ?? ROLLUP_LIMIT;
   const fields = Object.keys(EDGE_FIELDS) as EdgeField[];
   const columns = fields.map((f) => `  ${attr(f)} AS ${f}`).join(",\n");
   const watched = anonReadTables(options.anonReadTables ?? []);

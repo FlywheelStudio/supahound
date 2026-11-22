@@ -192,7 +192,10 @@ export async function postureSummaries(tx: TenantTx): Promise<Map<ProjectId, Pos
     [tx.tenantId],
   );
   const findings = await tx.query<FindingRow>(
-    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, '{}'::jsonb AS evidence, found_at
+    // Evidence: only the keys dedupePosture reads (a policy or a function's arguments), so the
+    // overview counts what the Posture page shows.
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type,
+            jsonb_strip_nulls(jsonb_build_object('policy', evidence->'policy', 'arguments', evidence->'arguments')) AS evidence, found_at
      FROM supahound.posture_findings WHERE tenant_id = $1`,
     [tx.tenantId],
   );

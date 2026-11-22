@@ -12,6 +12,10 @@ import { safeIdentifier, type Finding, type Severity } from "./finding.js";
 // Rows in one poll from one network and caller class that read as a dump, not a page view.
 export const BULK_READ_ROWS = 1000;
 
+// The signals this detector emits; each has a rule in rules.ts.
+export const EXPOSED_READ_SIGNALS = ["exposed_table_read", "rows_returned", "bulk_read"] as const;
+export type ExposedReadSignal = (typeof EXPOSED_READ_SIGNALS)[number];
+
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
 interface Group {
@@ -65,7 +69,7 @@ export function detectExposedReads(events: EdgeEvent[], anonReadable: ReadonlyMa
 
   return [...groups.values()].map((g) => {
     const rows = g.rows ?? 0;
-    const signals = ["exposed_table_read"];
+    const signals: ExposedReadSignal[] = ["exposed_table_read"];
     if (rows > 0) signals.push("rows_returned");
     if (rows >= BULK_READ_ROWS) signals.push("bulk_read");
     return {
