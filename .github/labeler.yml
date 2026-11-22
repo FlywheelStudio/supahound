@@ -19,7 +19,7 @@
       - any-glob-to-any-file: ["packages/core/src/tenancy/**", "packages/core/src/vault/**", "packages/core/src/supabase/**"]
 "area:infra":
   - changed-files:
-      - any-glob-to-any-file: [".github/**", "**/wrangler.jsonc", "pnpm-workspace.yaml"]
+      - any-glob-to-any-file: [".github/**", "**/wrangler.jsonc", "pnpm-workspace.yaml", "apps/log-sink/**"]
 "type:docs":
   - changed-files:
       - all-globs-to-all-files: ["**/*.md"]

@@ -34,6 +34,7 @@ uses read-only OAuth instead.
 | --- | --- | --- |
 | `apps/web` | A Cloudflare Worker | Sign-in (magic links), workspaces, Connect Supabase, dashboard |
 | `apps/poller` | A Cloudflare Worker, cron every minute plus a queue | Reads each project's edge logs, runs the detectors, opens incidents |
+| `apps/log-sink` (optional) | A Cloudflare tail Worker and an R2 bucket | Keeps both Workers' own events for 90 days ([Log retention](#log-retention)) |
 | Supahound database | Your own Supabase project | Schema `supahound` with forced RLS, reached through Hyperdrive |
 
 The Supahound database is a separate Supabase project from the apps it watches. Use a new
@@ -175,6 +176,10 @@ Put the client ID in both `wrangler.jsonc` files as `SUPABASE_OAUTH_CLIENT_ID`.
 
 ### 8. Deploy
 
+Both `wrangler.jsonc` files name the log sink in `tail_consumers`. Either set it up first
+([Log retention](#log-retention)) or delete the `tail_consumers` entry from both files: a deploy
+that names a tail Worker that does not exist fails.
+
 Set the vars in both `wrangler.jsonc` files: `APP_URL`, and in the web app `SUPABASE_URL`,
 `SUPABASE_PUBLISHABLE_KEY` and the optional brand links. Then set the secrets and deploy. Wrangler
 is a dev dependency, so run it with `pnpm exec`:
@@ -231,6 +236,33 @@ incidents, findings and poll runs for 30 days after their last activity, and del
 workspace's logs and history 30 days after it closed; the workspace record and audit log stay.
 With billing off no workspace counts as paying, so these rules always apply. Nothing to configure:
 the cron that polls every minute runs it.
+
+## Log retention
+
+Optional (decision 047). Workers Logs keeps each Worker's log lines for 3 days (Workers Free) or 7
+days (Workers Paid). To keep them for 90 days, deploy the tail Worker in `apps/log-sink`. It needs
+Workers Paid (tail Workers) and R2. It writes the web and poller Workers' own events to a private R2
+bucket as NDJSON under `logs/YYYY/MM/DD/HH/`, and drops headers, query strings, client IPs and
+any console line that is not a Supahound event. The full list of events is in
+`docs/ARCHITECTURE.md` ("Log inventory").
+
+```bash
+cd apps/log-sink
+pnpm exec wrangler r2 bucket create supahound-logs
+pnpm exec wrangler r2 bucket lifecycle add supahound-logs expire-90-days --expire-days 90 --force
+pnpm exec wrangler r2 bucket lifecycle list supahound-logs     # shows the rule
+pnpm exec wrangler deploy
+```
+
+Then deploy the web and poller Workers (step 8); their `tail_consumers` entry names
+`supahound-log-sink`. Keep the bucket private: do not turn on its `r2.dev` URL or attach a custom
+domain. To read the logs, browse the bucket on the R2 page of the dashboard, or fetch one object
+with `pnpm exec wrangler r2 object get supahound-logs/logs/<YYYY>/<MM>/<DD>/<HH>/<file>.ndjson
+--remote --pipe`. A
+different bucket name goes in `apps/log-sink/wrangler.jsonc` (`r2_buckets`).
+
+Without the sink, remove `tail_consumers` from `apps/web/wrangler.jsonc` and
+`apps/poller/wrangler.jsonc`.
 
 ## Heartbeat
 

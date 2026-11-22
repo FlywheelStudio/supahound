@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { opsLine, opsLog } from "../logging/opsLog.js";
 import type { ProjectId, UserId } from "../tenancy/scope.js";
 import { begin, type TenantTx } from "./tenant.js";
 
@@ -216,12 +217,16 @@ export const TENANTLESS_EVENTS = [
 ] as const;
 export type TenantlessEvent = (typeof TENANTLESS_EVENTS)[number];
 
-// One line of JSON on the Workers log. Fields follow safeDetail's rules, so nothing personal can
-// be passed. Never throws: logging must not break the request it describes.
-export function logSecurityEvent(kind: TenantlessEvent, fields?: SecurityDetail, log: (line: string) => void = console.log): void {
+// One line of JSON on the Workers log, through opsLog (decision 047), which also takes it to R2.
+// Fields follow safeDetail's rules, so nothing personal can be passed; a detail that breaks them
+// is left out. Never throws: logging must not break the request it describes.
+export function logSecurityEvent(kind: TenantlessEvent, fields?: SecurityDetail, log?: (line: string) => void): void {
+  let detail: SecurityDetail = {};
   try {
-    log(JSON.stringify({ event: "security_event", kind, ...safeDetail(fields) }));
+    detail = safeDetail(fields);
   } catch {
-    log(JSON.stringify({ event: "security_event", kind }));
+    // The kind alone.
   }
+  if (log) log(opsLine("security_event", { kind, ...detail }));
+  else opsLog("security_event", { kind, ...detail });
 }

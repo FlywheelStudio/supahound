@@ -1,0 +1,25 @@
+// Supahound log sink (decision 047). A tail Worker: the web and poller Workers name it in
+// tail_consumers, and it writes each of their invocations that logged an event, threw or failed
+// to R2 as newline-delimited JSON, keyed by UTC date and hour. It keeps only Supahound's own
+// events (packages/core/src/logging/opsLog.ts) and drops request headers, bodies, query strings,
+// the cf object and any other console output, so the bucket holds no personal data.
+//
+// Create the bucket and its 90-day expiry before the first deploy (docs/self-hosting.md):
+//   wrangler r2 bucket create supahound-logs
+//   wrangler r2 bucket lifecycle add supahound-logs expire-90-days --expire-days 90 --force
+// Deploy this Worker before the web and poller Workers: a deploy that names a missing tail
+// consumer fails. The bucket is private; never enable its r2.dev URL or a custom domain.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "supahound-log-sink",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "r2_buckets": [{ "binding": "LOGS", "bucket_name": "supahound-logs" }],
+  // No fetch handler and no route: nothing calls this Worker but the tail.
+  "workers_dev": false,
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 }
+  }
+}

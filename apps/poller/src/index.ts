@@ -4,6 +4,7 @@ import { countDailyUsage } from "@supahound/core/billing/usage";
 import { billingMode } from "@supahound/core/db/billing";
 import { billedTenants, dataJobTenants, dueProjects } from "@supahound/core/db/repo";
 import { runDataJob } from "@supahound/core/datacontrols/flow";
+import { opsLog as log } from "@supahound/core/logging/opsLog";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
@@ -66,11 +67,6 @@ export function parseMessage(body: unknown): ProjectScope | null {
   } catch {
     return null;
   }
-}
-
-function log(event: string, fields: Record<string, string | number | boolean | null> = {}): void {
-  // Internal IDs and counts only. Never log error text, tokens, refs or customer data.
-  console.log(JSON.stringify({ event, ...fields }));
 }
 
 export interface PollQueue {

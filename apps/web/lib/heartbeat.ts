@@ -1,5 +1,6 @@
 import { billingMode } from "@supahound/core/db/billing";
 import { runHeartbeat, type HeartbeatDeps, type HeartbeatOutcome } from "@supahound/core/poller/heartbeat";
+import { opsLog, type OpsFields } from "@supahound/core/logging/opsLog";
 import pg from "pg";
 
 // The web Worker's cron (issue #159): the staff heartbeat's "stale" check, so polling that has
@@ -29,18 +30,13 @@ export interface ScheduledDeps {
   // One pool per invocation: Workers may not share I/O objects across requests.
   pool: (connectionString: string) => SchedulerPool;
   heartbeat: (deps: HeartbeatDeps, now: Date) => Promise<HeartbeatOutcome>;
-  log: (event: string, fields?: Record<string, string | number>) => void;
-}
-
-function log(event: string, fields: Record<string, string | number> = {}): void {
-  // Counts and statuses only.
-  console.log(JSON.stringify({ event, ...fields }));
+  log: (event: "heartbeat" | "heartbeat_crashed", fields?: OpsFields<"heartbeat">) => void;
 }
 
 export const defaultScheduledDeps: ScheduledDeps = {
   pool: (connectionString) => new pg.Pool({ connectionString, max: 1 }),
   heartbeat: runHeartbeat,
-  log,
+  log: opsLog,
 };
 
 // Never throws: a failed check must not fail the cron, and the next minute checks again.
