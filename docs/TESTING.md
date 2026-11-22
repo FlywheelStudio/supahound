@@ -73,17 +73,34 @@ each of the three byte alignments. On 2026-11-22, with `gitleaks dir` over nine 
 `service_role` keys only (the default `jwt` rule fired on all nine); with one alignment removed it
 missed one key; the real history had no findings.
 
+`supabase-personal-access-token` also matches scoped `sbp_fc` tokens (#161), with the same pattern
+as the scanner (`packages/core/src/scan/secrets.ts`). On 2026-11-22, with `gitleaks dir` over
+random planted tokens generated in a scratch directory (never committed): it fired on a scoped,
+a classic and an OAuth token, and not on a too-short `sbp_fc` body; with the previous rule a scoped
+token in a string literal had no finding at all (in a `TOKEN=` line only the default
+`generic-api-key` rule caught it); the real history had no findings.
+
 ### Workflow lint and dependency scan
 
 - `workflows` (zizmor 1.32.0, pinned by SHA-256) audits `.github/workflows` and fails on any
   high-severity finding. Run it locally with `zizmor --min-severity high .github/workflows`
   (`pipx install zizmor`). On 2026-11-22 it passed; removing the `ignore` comments in `cla.yml`
-  failed it with two `dangerous-triggers` errors.
+  failed it with two `dangerous-triggers` errors. It passed again after `cla.yml` moved from the
+  archived CLA Assistant Lite to `actions/github-script` (#161), with the same two errors when the
+  ignores are removed.
 - `osv` (osv-scanner 2.7.1, pinned by SHA-256) scans `pnpm-lock.yaml` and fails on any known
   vulnerability that `osv-scanner.toml` does not list with a reason and an expiry. Run it locally
   with `osv-scanner scan source --lockfile pnpm-lock.yaml`. On 2026-11-22 it found two (fflate via
-  satori, minimatch via ESLint), both unreachable and listed until 2027-01-31; without the config it
-  exits non-zero.
+  satori, minimatch via ESLint); #161 fixed both (ESLint 10.15 and typescript-eslint 8.73 take
+  minimatch 11, and a pnpm override in `package.json` moves fflate to 0.7.5), so the config has no
+  entries and the scan finds nothing; the previous lockfile still fails it with both.
+- `cla.yml`'s script has no test in the repo (it runs only on GitHub). On 2026-11-22 (#161) it ran
+  against a mocked `github` client: unsigned author fails and gets one comment (updated, never
+  duplicated); allowlisted and signed authors (by user ID) pass with no comment; a sign comment
+  from a non-author records nothing; an author's sign comment writes the old Lite record shape,
+  flips the comment and re-runs the failed PR run; a write conflict retries and keeps the other
+  signature; an unlinked commit email fails. Dropping the allowlist, the signature lookup or the
+  re-run each failed it.
 - `scorecard.yml` (OpenSSF Scorecard) is a grade, not a gate: it files code scanning alerts.
 
 ### Self-hosting checks
