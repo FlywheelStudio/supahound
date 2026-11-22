@@ -66,6 +66,9 @@
     "SUPAHOUND_STAFF_ALERT_EMAIL": ""
   },
   "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET", "SUPAHOUND_MASTER_KEYS"] },
+  // Each invocation's events go to the log sink Worker, which keeps them in R2 for 90 days
+  // (decision 047). Deploy apps/log-sink first. Self-hosting without it: remove this entry.
+  "tail_consumers": [{ "service": "supahound-log-sink" }],
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },

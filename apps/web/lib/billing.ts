@@ -4,6 +4,7 @@ import { billingMode, PaymentRequiredError, withPaidTenantForUser, type BillingM
 import { WorkspaceClosedError } from "@supahound/core/db/closure";
 import type { TenantTx } from "@supahound/core/db/tenant";
 import type { Role } from "@supahound/core/db/user";
+import { opsLog } from "@supahound/core/logging/opsLog";
 import type { TenantId, UserId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
 import { redirect } from "next/navigation";
@@ -52,6 +53,6 @@ export async function syncBillingAfterChange(pool: pg.Pool, tenant: TenantId, pr
   try {
     await syncBilling(flowDeps(pool), tenant, prorate);
   } catch {
-    console.log(JSON.stringify({ event: "billing_sync_failed", tenant_id: tenant }));
+    opsLog("billing_sync_failed", { tenant_id: tenant });
   }
 }

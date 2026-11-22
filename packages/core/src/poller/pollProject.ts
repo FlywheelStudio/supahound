@@ -29,6 +29,7 @@ import { markRevoked, sendDisconnectEmails } from "../datacontrols/flow.js";
 import { accessTokenFor } from "../supabase/credentials.js";
 import { isRevokedGrant, OAuthError, type OAuthClient } from "../supabase/oauth.js";
 import type { TokenVault } from "../vault/vault.js";
+import { opsLog } from "../logging/opsLog.js";
 
 // One poll of one project, entirely inside one tenant's scope. Transactions stay short and never
 // span an external call (Supabase logs, the model): load → call → compute → save.
@@ -282,7 +283,7 @@ async function refreshPosture(
     });
   } catch {
     // IDs only, never error text.
-    console.log(JSON.stringify({ event: "posture_scan_crashed", project_id: scope.projectId }));
+    opsLog("posture_scan_crashed", { project_id: scope.projectId });
     return null;
   }
 }
@@ -378,7 +379,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   if ("errorCode" in rollup) {
     const code = rollup.errorCode;
     const saturated = code === "rollup_saturated" ? { templates: ROLLUP_LIMIT + 1 } : {};
-    if (saturated.templates) console.log(JSON.stringify({ event: code, project_id: scope.projectId, ...saturated }));
+    if (saturated.templates) opsLog("rollup_saturated", { project_id: scope.projectId, ...saturated });
     await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code, ...saturated }));
     return { status: "unable_to_assess", errorCode: code };
   }
@@ -575,7 +576,7 @@ export async function sendPendingAlerts(scope: ProjectScope, deps: PollDeps): Pr
     return emailed;
   } catch {
     // IDs only, never error text (it can hold addresses or SQL).
-    console.log(JSON.stringify({ event: "alert_email_crashed", project_id: scope.projectId }));
+    opsLog("alert_email_crashed", { project_id: scope.projectId });
     return 0;
   }
 }
