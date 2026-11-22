@@ -90,11 +90,16 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    run is `unable_to_assess` with `rollup_saturated` (issue #129).
    Anon calls to `/rest/v1/rpc/<fn>` are kept too, for the functions the stored posture shows as
    SECURITY DEFINER and anon-executable (at most 200 plain identifiers, issue #131), on the same
-   next-poll basis.
-   A second query counts the window's edge-log requests (`edgeRequestCountSql`, one number) into
-   `poll_runs.edge_requests`; its hash is in the same audit row. A failed count leaves it NULL. The
-   project page shows a **log gap** when the newest 60 counted windows are all zero after earlier
-   traffic (issue #133).
+   next-poll basis. Anon calls to Storage's list endpoint (`/storage/v1/object/list/`, one fixed
+   prefix whatever the bucket) are kept too (#157). Signed-in calls to definer functions need no
+   branch: every REST call with a user subject is already in.
+   A second query (`pollCountSql`) counts the window's edge-log requests into
+   `poll_runs.edge_requests`, and its `/graphql/v1` calls by anon and by authenticated into
+   `graphql_anon_calls` and `graphql_authenticated_calls` (#157): three numbers, never a row. Its
+   hash is in the same audit row. A failed count leaves them NULL. The project page shows a **log
+   gap** when the newest 60 counted windows are all zero after earlier traffic (issue #133); the
+   Posture page shows GraphQL findings only for a role with calls in the last 7 days (decision 038,
+   addendum of #157).
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
@@ -110,6 +115,14 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    RPC burst threshold or more in one poll. The threshold is `projects.rpc_burst_hits`: default 100,
    10 to 10,000, set by the project's Owners, Admins and Editors on its Notifications page; the
    finding records it as `burstThreshold` (decision 045).
+   It also records signed-in calls to functions posture shows authenticated-executable (#157):
+   always low, actor `definer:fn:<name>` (the function, never the user, so it never stacks onto a
+   user's incident and never pages), evidence counts the distinct users.
+   `detectors/storageListing.ts` (detector 13, #157) flags anon list calls per bucket, ASN and
+   caller class: medium for a bucket posture flags `public_bucket_allows_listing`, high at 100 list
+   calls in one poll; low for any other bucket, which evidence names only by fingerprint.
+   Low signed-in definer calls and low anon listings of unflagged buckets are dashboard-only: they
+   show in incidents and history but never email, at any alert threshold (`dashboardOnly`).
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
@@ -162,6 +175,10 @@ known false positives. Rule IDs are derived from a finding's or incident's detec
 | SH-D11-003 | exposed_read / bulk_read | T1190, T1213 | API8, API1 | high |
 | SH-D12-001 | rpc_exposure / definer_rpc_call | T1190 | API5, API8 | medium |
 | SH-D12-002 | rpc_exposure / rpc_burst | T1190 | API5, API8 | high |
+| SH-D12-003 | rpc_exposure / authenticated_definer_call | T1078 | API5 | low |
+| SH-D13-001 | storage_listing / anon_bucket_list | T1530 | API8 | low |
+| SH-D13-002 | storage_listing / listable_bucket | T1530, T1619 | API8, API3 | medium |
+| SH-D13-003 | storage_listing / list_burst | T1530, T1619 | API8, API4 | medium |
 
 A new signal or detector needs an entry: the registry's type fails the typecheck without one, and
 `rules.test.ts` checks every signal at runtime. `incidents/ocsf.ts` turns an incident into an OCSF

@@ -148,5 +148,8 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
 - **pg_graphql exposure is broad.** On a default Supabase project every table the API roles can
   read shows in the GraphQL schema, so `graphql_table_exposed` rates medium (anon) or low and never
   raises detections. The Advisor reports the same objects (lints 0026/0027); dedupe shows one.
+  Since #157 these findings (and both Advisor lints) are shown and counted only for a role whose
+  GraphQL calls the last 7 days of polls counted; otherwise the Posture page hides them with a
+  note (decision 038, addendum of #157).
 - **Not verified live:** the Advisor's response shape, and `has_table_privilege` for other roles
   as `supabase_read_only_user`. Needs the OAuth app (#4).

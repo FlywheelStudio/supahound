@@ -51,10 +51,13 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
     return s;
   }
 
-  async function openIncident(s: ProjectScope, severity: Severity, alerted: Severity | null = null): Promise<string> {
+  async function openIncident(
+    s: ProjectScope, severity: Severity, alerted: Severity | null = null,
+    kind: { detectors: string[]; signals: string[] } = { detectors: ["cross_tenant"], signals: ["other_owner"] },
+  ): Promise<string> {
     return withTenant(db.app, s.tenantId, async (tx) => {
       const id = await repo.upsertIncident(tx, s.projectId, {
-        id: null, actor: randomUUID(), status: "open", severity, detectors: ["cross_tenant"], signals: ["other_owner"],
+        id: null, actor: randomUUID(), status: "open", severity, detectors: kind.detectors as never, signals: kind.signals,
         findingCount: 1, hits: 5, openedAt: NOW, lastSeenAt: NOW,
       });
       if (alerted) await repo.markAlerted(tx, id, alerted);
@@ -123,6 +126,16 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
     expect(byTo("x@globex.test")).toHaveLength(1);
     expect(byTo("x@globex.test")[0]!.subject).toContain("Globex");
     expect(sent.filter((m) => m.subject.includes("Globex")).map((m) => m.to)).toEqual(["x@globex.test"]);
+  });
+
+  it("never emails a dashboard-only incident, at any threshold (Erik, 2026-11-22)", async () => {
+    await openIncident(scope, "low", null, { detectors: ["rpc_exposure"], signals: ["authenticated_definer_call"] });
+    await openIncident(scope, "low", null, { detectors: ["storage_listing"], signals: ["anon_bucket_list"] });
+    expect(await sendPendingAlerts(scope, deps())).toBe(0);
+    expect(sent).toEqual([]);
+    // A flagged bucket emails as usual.
+    await openIncident(scope, "medium", null, { detectors: ["storage_listing"], signals: ["anon_bucket_list", "listable_bucket"] });
+    expect(await sendPendingAlerts(scope, deps())).toBe(1);
   });
 
   it("emails every severity by default and respects the project's threshold", async () => {

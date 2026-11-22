@@ -1,5 +1,5 @@
 import { listPublicTables } from "@supahound/core/db/detectionSettings";
-import { getPostureScan, listPostureFindings } from "@supahound/core/db/posture";
+import { getPostureScan, postureView } from "@supahound/core/db/posture";
 import { anonReadableTables, countBySeverity } from "@supahound/core/posture/findings";
 import { fixPrompt } from "@supahound/core/posture/fix";
 import { Notice, SeverityBadge, Shell } from "../../../../../../components/Shell";
@@ -7,7 +7,7 @@ import { mode } from "../../../../../../lib/billing";
 import { ACCEPTED_LABEL, canMarkPublic, publicNoticeFrom, publicStatus, WRITES_OPEN_TEXT } from "../../../../../../lib/detectionSettings";
 import { utc } from "../../../../../../lib/nav";
 import {
-  canScan, countsText, isPending, postureState, scanNoticeFrom, SOURCE_LABEL, sourceNotes, stateText,
+  canScan, countsText, graphqlHiddenNote, isPending, postureState, scanNoticeFrom, SOURCE_LABEL, sourceNotes, stateText,
 } from "../../../../../../lib/posture";
 import { loadProjectPage } from "../../../../../../lib/projectPage";
 import { markPublicAction, scanNowAction, unmarkPublicAction } from "./actions";
@@ -25,16 +25,17 @@ export default async function ProjectPosture({
 }) {
   const d = await loadProjectPage(params, async (tx, p) => ({
     scan: await getPostureScan(tx, p.id),
-    findings: await listPostureFindings(tx, p.id),
+    view: await postureView(tx, p.id),
     marks: await listPublicTables(tx, p.id),
   }));
   const { tenant, project: p } = d;
-  const { scan, findings, marks } = d.extra;
+  const { scan, view: { findings, hiddenGraphql }, marks } = d.extra;
   const query = await searchParams;
   const notice = scanNoticeFrom(query);
   const publicNotice = publicNoticeFrom(query);
   const state = postureState(scan);
   const notes = sourceNotes(scan);
+  const graphqlNote = state.kind === "scanned" ? graphqlHiddenNote(hiddenGraphql.length) : null;
   // Intentionally public tables (issue #160, decision 045).
   const publicTables = new Set(marks.map((m) => m.table));
   const readable = [...anonReadableTables(findings).keys()].filter((t) => !publicTables.has(t)).sort();
@@ -111,6 +112,7 @@ export default async function ProjectPosture({
       ) : (
         state.kind === "scanned" && <p className="text-slate-600">No posture findings in the last scan.</p>
       )}
+      {graphqlNote && <p aria-label="Hidden GraphQL findings" className="mt-4 text-sm text-slate-600">{graphqlNote}</p>}
 
       <section id="public-tables" aria-labelledby="public-heading" className="mt-10 rounded-md border border-slate-200 bg-white p-6">
         <h2 id="public-heading" className="mb-2 font-semibold">Intentionally public tables</h2>

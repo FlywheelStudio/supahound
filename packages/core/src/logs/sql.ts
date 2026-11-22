@@ -44,36 +44,46 @@ export function anonRpcFunctions(functions: Iterable<string>): string[] {
     .slice(0, MAX_ANON_RPC_FUNCTIONS);
 }
 
-// Anon calls (the role as effectiveRole reads it: the user JWT's, else the API key's) to the given
-// RPC functions. Empty when there are none, so the SQL is unchanged.
+// The role as effectiveRole reads it: the user JWT's role, else the API key's.
+function roleIs(role: "anon" | "authenticated"): string {
+  return `(${attr("jwtRole")} = '${role}' OR (${attr("jwtRole")} = '' AND ${attr("apiKeyRole")} = '${role}'))`;
+}
+
+// Anon calls to the given RPC functions. Empty when there are none, so the SQL is unchanged.
 function anonRpcBranch(functions: string[]): string {
   if (functions.length === 0) return "";
   return `
     OR (
-      (${attr("jwtRole")} = 'anon' OR (${attr("jwtRole")} = '' AND ${attr("apiKeyRole")} = 'anon'))
+      ${roleIs("anon")}
       AND ${attr("path")} IN (${functions.map((f) => quote(`/rest/v1/rpc/${f}`)).join(", ")})
     )`;
 }
 
+// Storage's list endpoint (issue #157): POST /storage/v1/object/list/<bucket>. One fixed prefix
+// for every bucket, so the branch never grows; the detector names only the buckets posture knows.
+export const STORAGE_LIST_PREFIX = "/storage/v1/object/list/";
+
 // Rolls identical requests up inside ClickHouse so a poll returns templates, not raw rows.
-// Only three kinds of traffic can trip the baseline-free detectors, so everything else is
-// filtered out before it leaves Supabase: PostgREST calls that carry a user subject, any call
-// (REST, Auth admin, Storage) made with the service-role key, anon-key reads of the tables the
-// posture scan shows readable by anon (`anonReadTables`, issue #132), and anon calls to the RPC
-// functions posture shows as SECURITY DEFINER and anon-executable (`anonRpcFunctions`, #131).
+// Only these kinds of traffic can trip the baseline-free detectors, so everything else is
+// filtered out before it leaves Supabase: PostgREST calls that carry a user subject (signed-in
+// calls to SECURITY DEFINER functions among them, #157), any call (REST, Auth admin, Storage) made
+// with the service-role key, anon-key reads of the tables the posture scan shows readable by anon
+// (`anonReadTables`, issue #132), anon calls to the RPC functions posture shows as SECURITY DEFINER
+// and anon-executable (`anonRpcFunctions`, #131), and anon calls to Storage's list endpoint (#157).
 export function edgeRollupSql(options: { limit?: number; env?: EnvVars; anonReadTables?: Iterable<string>; anonRpcFunctions?: Iterable<string> } = {}): string {
   const limit = options.limit ?? ROLLUP_LIMIT;
   const fields = Object.keys(EDGE_FIELDS) as EdgeField[];
   const columns = fields.map((f) => `  ${attr(f)} AS ${f}`).join(",\n");
   const rpcBranch = anonRpcBranch(anonRpcFunctions(options.anonRpcFunctions ?? []));
   const watched = anonReadTables(options.anonReadTables ?? []);
-  // The role as effectiveRole reads it: the user JWT's role, else the API key's.
   const anonBranch = watched.length === 0 ? "" : `
     OR (
       ${attr("method")} IN ('GET', 'HEAD')
-      AND (${attr("jwtRole")} = 'anon' OR (${attr("jwtRole")} = '' AND ${attr("apiKeyRole")} = 'anon'))
+      AND ${roleIs("anon")}
       AND ${attr("path")} IN (${watched.map((t) => quote(`/rest/v1/${t}`)).join(", ")})
     )`;
+  const storageBranch = `
+    OR (${roleIs("anon")} AND match(${attr("path")}, ${quote(`^${STORAGE_LIST_PREFIX}`)}))`;
   return `SELECT
 ${columns},
   count() AS hits,
@@ -84,7 +94,7 @@ WHERE ${sourceColumn(options.env)} = 'edge_logs'
   AND (
     (match(${attr("path")}, '^/rest/v1/') AND ${attr("jwtSubject")} != '')
     OR ${attr("jwtRole")} = 'service_role'
-    OR ${attr("apiKeyRole")} = 'service_role'${anonBranch}${rpcBranch}
+    OR ${attr("apiKeyRole")} = 'service_role'${anonBranch}${rpcBranch}${storageBranch}
   )
 GROUP BY ${fields.join(", ")}
 ORDER BY hits DESC
@@ -95,6 +105,22 @@ LIMIT ${Math.trunc(limit)}`;
 // one number, never a log row.
 export function edgeRequestCountSql(env?: EnvVars): string {
   return `SELECT count() AS requests
+FROM logs
+WHERE ${sourceColumn(env)} = 'edge_logs'`;
+}
+
+// pg_graphql's endpoint. Request bodies are not in edge logs, so a poll only counts its calls.
+const GRAPHQL_PATH = "^/graphql/v1(/|$)";
+
+// The poll's counts (issues #133 and #157), counted inside ClickHouse: every edge-log request in
+// the window (as edgeRequestCountSql), and the GraphQL calls made with the anon role and with the
+// authenticated role. Three numbers, never a log row.
+export function pollCountSql(env?: EnvVars): string {
+  const graphql = `match(${attr("path")}, ${quote(GRAPHQL_PATH)})`;
+  return `SELECT
+  count() AS requests,
+  countIf(${graphql} AND ${roleIs("anon")}) AS graphql_anon,
+  countIf(${graphql} AND ${roleIs("authenticated")}) AS graphql_authenticated
 FROM logs
 WHERE ${sourceColumn(env)} = 'edge_logs'`;
 }

@@ -22,6 +22,15 @@ export function meetsThreshold(severity: Severity, level: AlertLevel): boolean {
 
 // True when the incident should email now: it meets the threshold and no email went out at this
 // severity or higher yet. A rise in severity emails again; a repeat at the same level does not.
+// Signals that show on the dashboard and in incident history but never email (Erik, 2026-11-22):
+// signed-in calls to SECURITY DEFINER functions (#157) and anon listings of buckets posture does
+// not flag. A flagged bucket adds `listable_bucket`, and any escalation above low emails as usual.
+export const DASHBOARD_ONLY_SIGNALS: ReadonlySet<string> = new Set(["authenticated_definer_call", "anon_bucket_list", "list_burst"]);
+
+export function dashboardOnly(incident: { severity: Severity; signals: readonly string[] }): boolean {
+  return incident.severity === "low" && incident.signals.length > 0 && incident.signals.every((s) => DASHBOARD_ONLY_SIGNALS.has(s));
+}
+
 export function alertDue(severity: Severity, alerted: Severity | null, level: AlertLevel): boolean {
   return meetsThreshold(severity, level) && (alerted === null || SEVERITY_RANK[severity] > SEVERITY_RANK[alerted]);
 }
@@ -75,8 +84,9 @@ const SEVERITY_MEANING: Record<Severity, string> = {
 const DETECTOR_LABEL: Record<Finding["detector"], string> = {
   cross_tenant: "Cross-tenant data access",
   service_role_misuse: "Service-role key misuse",
-  rpc_exposure: "Anon calls to an exposed SECURITY DEFINER function",
+  rpc_exposure: "Calls to an exposed SECURITY DEFINER function",
   exposed_read: "Anon reads of an exposed table",
+  storage_listing: "Anon listing of a Storage bucket",
 };
 
 const SIGNAL_LABEL: Record<string, string> = {
@@ -97,6 +107,10 @@ const SIGNAL_LABEL: Record<string, string> = {
   exposed_table_read: "Read a table the anon key can read in full",
   rows_returned: "Rows came back",
   bulk_read: "Read 1,000 rows or more in one poll",
+  authenticated_definer_call: "A signed-in user called a SECURITY DEFINER function",
+  anon_bucket_list: "Listed the files of a Storage bucket",
+  listable_bucket: "The bucket is public and anyone may list it",
+  list_burst: "Listed it 100 times or more in one poll",
 };
 
 const MAX_SUMMARY = 600;
@@ -149,6 +163,8 @@ export function actorAlias(actor: string): string {
   // anon:asn:<number|unknown>. The ASN is a public network number, not personal data.
   const anon = /^anon:asn:(\d{1,10}|unknown)$/.exec(actor);
   if (anon) return anon[1] === "unknown" ? "Signed-out callers (anon key)" : `Signed-out callers (anon key) on AS${anon[1]}`;
+  // Signed-in calls to a SECURITY DEFINER function (#157): the actor is the function, not a user.
+  if (actor.startsWith("definer:fn:")) return "Signed-in users";
   return `User ${fingerprint(actor).slice(0, 8)}`;
 }
 

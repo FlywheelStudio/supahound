@@ -134,7 +134,7 @@ describe("detectRpcExposure", () => {
 });
 
 describe("the project's RPC burst threshold (issue #160, decision 045)", () => {
-  const burst = (hits: number, threshold?: number) => detectRpcExposure([anonCall({ hits })], DEFINERS, threshold)[0]!;
+  const burst = (hits: number, threshold?: number) => detectRpcExposure([anonCall({ hits })], DEFINERS, new Map(), threshold)[0]!;
 
   it("defaults to RPC_BURST_HITS and records the threshold in the evidence", () => {
     expect(RPC_BURST_HITS).toBe(100);
@@ -195,7 +195,7 @@ describe("RPC exposure in incidents, explanations and alerts", () => {
   });
 
   it("labels the detector, its signals and the anon actor", () => {
-    expect(detectorLabel("rpc_exposure")).toBe("Anon calls to an exposed SECURITY DEFINER function");
+    expect(detectorLabel("rpc_exposure")).toBe("Calls to an exposed SECURITY DEFINER function");
     expect(signalLabel("rpc_burst")).not.toBe("rpc burst");
     expect(actorAlias("anon:asn:14061")).toBe("Signed-out callers (anon key) on AS14061");
   });

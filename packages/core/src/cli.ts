@@ -5,7 +5,7 @@ import pg from "pg";
 import { EDGE_FIELDS, type EdgeField } from "./config/fields.js";
 import { pollWindow, queryLogs } from "./logs/client.js";
 import { normalizeRow, type EdgeEvent } from "./logs/event.js";
-import { authCoverageSql, discoverKeysSql, edgeRollupSql } from "./logs/sql.js";
+import { authCoverageSql, discoverKeysSql, edgeRollupSql, pollCountSql } from "./logs/sql.js";
 import {
   ownershipFromColumns,
   ownershipFromPolicies,
@@ -306,6 +306,7 @@ async function main(argv: string[]): Promise<void> {
       return runDiscoverKeys(rest);
     case "print-sql":
       process.stdout.write(`-- Edge rollup (Management API logs endpoint)\n${edgeRollupSql({ env: process.env })}\n\n`);
+      process.stdout.write(`-- Request and GraphQL call counts per poll (issues #133, #157)\n${pollCountSql(process.env)}\n\n`);
       process.stdout.write(`-- Auth field coverage, after an empty rollup (issue #130)\n${authCoverageSql(process.env)}\n\n`);
       process.stdout.write(`-- Key discovery (PRD task 1)\n${discoverKeysSql(process.env)}\n\n`);
       process.stdout.write(`-- Ownership from RLS policies (read-only SQL)\n${POLICIES_SQL}\n\n`);
