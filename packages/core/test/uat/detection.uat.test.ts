@@ -72,13 +72,14 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     });
   }
 
-  function poll(scope: ProjectScope, now: Date) {
+  function poll(scope: ProjectScope, now: Date, extra: Partial<PollDeps> = {}) {
     const deps: PollDeps = {
       app: db.app, vault: db.vault, now: () => now, intervalSeconds: 0,
       queryLogs: async () => logs(now),
       queryPolicies: async () => policies(),
       explain: async (f: IncidentFeatures): Promise<ExplainResult> =>
         ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
+      ...extra,
     };
     return pollProject(scope, deps);
   }
@@ -190,5 +191,45 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     logs = (now) => normalTraffic(new Date(now.getTime() - 200_000));
     expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
     expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "no_owned_tables" }]);
+  });
+  it("UAT-D11 a burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll", async () => {
+    const s = await watchProject("Credits app");
+    // Posture: the Advisor reports grant_credits as SECURITY DEFINER and anon-executable.
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 0, grants: "" },
+      ],
+      queryAdvisor: async () => [
+        { name: "anon_security_definer_function_executable", level: "WARN", security: true, schema: "public", object: "grant_credits", type: "function" },
+      ],
+    };
+    const sqls: string[] = [];
+    const calls = (seen: Date) => [
+      row(seen, {
+        method: "POST", path: "/rest/v1/rpc/grant_credits", search: "", userAgent: "curl/8.7.1", contentRange: "",
+        asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "250",
+      }),
+      // The same anon key on a function posture does not flag: not watched, never a finding.
+      row(seen, {
+        method: "POST", path: "/rest/v1/rpc/public_stats", search: "", userAgent: "curl/8.7.1", contentRange: "",
+        asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "5",
+      }),
+    ];
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, queryLogs: async (q) => { sqls.push(q.sql); return calls(new Date(now.getTime() - 130_000)); },
+    });
+
+    // First poll: the scan runs; the logs query was fixed (and audited) before it, so nothing yet.
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    expect(sqls[0]).not.toContain("/rest/v1/rpc/");
+
+    // Next poll: the branch watches grant_credits only, and the burst pages.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(sqls[1]).toContain("'/rest/v1/rpc/grant_credits'");
+    expect(sqls[1]).not.toContain("public_stats");
+    const open = await dashboard(s);
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ severity: "high", detectors: ["rpc_exposure"], hits: 250 });
+    expect(open[0]!.summary?.summary).toContain("`grant_credits`");
   });
 });

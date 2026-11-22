@@ -31,6 +31,25 @@ misuse) against one project.
 - Detector 4 classifies the caller (X-Client-Info first, then user agent) and the network (bundled
   hosting-ASN list plus org-name match).
 
+## Anon calls to exposed SECURITY DEFINER functions (#131, RPC part)
+
+- `postgrest/query.ts`, `rpcFunctionFromPath`: `/rest/v1/rpc/<fn>` → the function name
+  (`tableFromPath` still returns null for RPC, so detector 2 is unchanged).
+- Posture input (`posture/findings.ts`, `anonDefinerFunctions`): public functions with the catalog
+  check `function_definer_exposed` (#135, may not exist yet) or the Advisor lint
+  `anon_security_definer_function_executable`. Either may be absent. A catalog finding whose
+  stored `exposure` names another role is skipped.
+- The rollup adds one `WHERE` branch: anon calls (any method) to those paths. Only plain identifiers,
+  quoted, sorted, at most 200 (`logs/sql.ts`, `anonRpcFunctions`). None: the SQL is unchanged.
+- `detectors/rpcExposure.ts` groups by function, ASN and caller class. Evidence: function, posture
+  check and severity, method (or `mixed`), rows (when a Content-Range came back), ASN, caller class,
+  network type. Medium, or high at 100+ calls in one poll. Rejected calls raise nothing.
+- Known gaps: RPC arguments sent as a JSON body are invisible, so a finding says which function,
+  never with what. Authenticated calls to authenticated-executable definers are not watched yet.
+  A fresh scan's functions are watched from the next poll. GraphQL (`/graphql/v1`) call counts per
+  role and anon Storage listing (`/storage/v1/object/list/<bucket>`) are still to do (#131).
+- Migration `20261122010000_detector_names.sql` widens `findings.detector` (shared with #132).
+
 ## Field paths
 
 | Field | Path | Source |

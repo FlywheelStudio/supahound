@@ -13,7 +13,7 @@ export type EvidenceValue = string | number | boolean | null;
 // A detector's output. Evidence holds structured features only (counts, enums, hashes, ASNs):
 // the PRD bars raw attacker-controlled strings (user agents, query values) from later stages.
 export interface Finding {
-  detector: "cross_tenant" | "service_role_misuse";
+  detector: "cross_tenant" | "service_role_misuse" | "rpc_exposure";
   severity: Severity;
   actor: string;
   signals: string[];

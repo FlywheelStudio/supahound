@@ -1,5 +1,5 @@
 import type { Severity } from "../detectors/finding.js";
-import { countBySeverity, dedupePosture, exposedTables, type SeverityCounts } from "../posture/findings.js";
+import { anonDefinerFunctions, countBySeverity, dedupePosture, exposedTables, type DefinerExposure, type SeverityCounts } from "../posture/findings.js";
 import type { PostureFinding, PostureSource, SourceStatus } from "../posture/types.js";
 import { projectId, type ProjectId } from "../tenancy/scope.js";
 import type { TenantTx } from "./tenant.js";
@@ -165,6 +165,17 @@ export async function postureExposedTables(tx: TenantTx, project: ProjectId): Pr
     [tx.tenantId, project],
   );
   return exposedTables(rows.map(toFinding));
+}
+
+// SECURITY DEFINER functions anon can execute, by the stored findings (issue #131).
+export async function postureAnonDefinerFunctions(tx: TenantTx, project: ProjectId): Promise<Map<string, DefinerExposure>> {
+  const rows = await tx.query<FindingRow>(
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
+     FROM supahound.posture_findings
+     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public'`,
+    [tx.tenantId, project],
+  );
+  return anonDefinerFunctions(rows.map(toFinding));
 }
 
 export interface PostureSummary {

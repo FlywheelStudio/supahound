@@ -8,7 +8,7 @@ import { INCIDENT_WINDOW_MINUTES, type Incident } from "../incidents/incident.js
 
 export interface IncidentFeatures {
   actor: "actor A";
-  actorKind: "signed_in_user" | "service_role_key";
+  actorKind: "signed_in_user" | "service_role_key" | "anon_key";
   severity: Severity;
   detectors: Finding["detector"][];
   signals: string[];
@@ -33,6 +33,15 @@ export interface IncidentFeatures {
     declaredNetwork: boolean;
     tables: string[];
   };
+  rpcExposure?: {
+    functions: string[];
+    postureChecks: string[];
+    postureSeverities: Severity[];
+    methods: string[];
+    callerClasses: string[];
+    networkTypes: string[];
+    asns: number[];
+  };
 }
 
 const SIGNALS = new Set([
@@ -40,11 +49,17 @@ const SIGNALS = new Set([
   "browser_caller", "mobile_app_caller", "non_hosting_network", "manual_tool", "new_network",
   // The table's posture is exposed (decision 038): RLS off, or a policy that opens writes.
   "posture_exposed",
+  // Anon calls to a SECURITY DEFINER function posture shows anon-executable (issue #131).
+  "definer_rpc_call", "rpc_burst",
 ]);
 const METHODS = new Set(["GET", "HEAD", "PATCH", "PUT", "DELETE", "POST"]);
 const OUTCOMES = new Set(["rejected", "empty", "rows_returned", "unknown"]);
 const CALLER_CLASSES = new Set(["browser", "mobile_app", "manual_tool", "server", "unknown"]);
 const NETWORK_TYPES = new Set(["hosting", "other", "unknown"]);
+const SEVERITIES = new Set(["critical", "high", "medium", "low"]);
+const RPC_METHODS = new Set(["GET", "HEAD", "POST", "mixed"]);
+// A posture check name: a catalog check or an Advisor lint, both plain snake_case.
+const check = (v: unknown): string | null => (typeof v === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(v) ? v : null);
 
 const pick = (set: Set<string>, v: unknown): string | null => (typeof v === "string" && set.has(v) ? v : null);
 const count = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null);
@@ -58,11 +73,13 @@ function uniq<T>(values: (T | null)[]): T[] {
 export function buildFeatures(incident: Incident, findings: Finding[]): IncidentFeatures {
   const cross = findings.filter((f) => f.detector === "cross_tenant");
   const service = findings.filter((f) => f.detector === "service_role_misuse");
+  const rpc = findings.filter((f) => f.detector === "rpc_exposure");
   const durationMs = incident.lastSeenAt.getTime() - incident.openedAt.getTime();
 
   const features: IncidentFeatures = {
     actor: "actor A",
-    actorKind: incident.actor.startsWith("service_role:") ? "service_role_key" : "signed_in_user",
+    actorKind: incident.actor.startsWith("service_role:") ? "service_role_key"
+      : incident.actor.startsWith("anon:") ? "anon_key" : "signed_in_user",
     severity: incident.severity,
     detectors: [...incident.detectors].sort(),
     signals: uniq(incident.signals.map((s) => pick(SIGNALS, s))),
@@ -93,6 +110,17 @@ export function buildFeatures(incident: Incident, findings: Finding[]): Incident
       asns: uniq(service.map((f) => count(f.evidence.asn))),
       declaredNetwork: service.some((f) => f.evidence.expectedNetwork === true),
       tables: uniq(service.map((f) => ident(f.evidence.table))),
+    };
+  }
+  if (rpc.length > 0) {
+    features.rpcExposure = {
+      functions: uniq(rpc.map((f) => ident(f.evidence.function))),
+      postureChecks: uniq(rpc.map((f) => check(f.evidence.postureCheck))),
+      postureSeverities: uniq(rpc.map((f) => pick(SEVERITIES, f.evidence.postureSeverity) as Severity | null)),
+      methods: uniq(rpc.map((f) => pick(RPC_METHODS, f.evidence.method))),
+      callerClasses: uniq(rpc.map((f) => pick(CALLER_CLASSES, f.evidence.callerClass))),
+      networkTypes: uniq(rpc.map((f) => pick(NETWORK_TYPES, f.evidence.networkType))),
+      asns: uniq(rpc.map((f) => count(f.evidence.asn))),
     };
   }
   return features;

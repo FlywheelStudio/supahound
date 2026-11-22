@@ -41,6 +41,32 @@ export function exposedTables(findings: PostureFinding[]): Map<string, string> {
   return out;
 }
 
+// SECURITY DEFINER functions anon can execute (issue #131). Supahound's catalog check
+// (`function_definer_exposed`, #135) and the Advisor's lint report them; either may be absent.
+export const DEFINER_EXPOSED_CHECKS: ReadonlySet<string> = new Set([
+  "function_definer_exposed",
+  "anon_security_definer_function_executable",
+]);
+
+export interface DefinerExposure {
+  check: string;
+  severity: Severity;
+}
+
+// Functions in `public` (the schema PostgREST serves under /rpc) that posture shows as SECURITY
+// DEFINER and executable by anon: function → the worst such finding's check and severity. A catalog
+// finding whose stored exposure names another role (authenticated only) is left out.
+export function anonDefinerFunctions(findings: PostureFinding[]): Map<string, DefinerExposure> {
+  const out = new Map<string, DefinerExposure>();
+  // dedupePosture sorts worst first, so the first finding kept per function is the worst.
+  for (const f of dedupePosture(findings)) {
+    if (f.schema !== "public" || f.object === null || !DEFINER_EXPOSED_CHECKS.has(f.check)) continue;
+    if (typeof f.evidence.exposure === "string" && f.evidence.exposure !== "anon") continue;
+    if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
+  }
+  return out;
+}
+
 const RAISED: Record<Severity, Severity> = { low: "medium", medium: "high", high: "critical", critical: "critical" };
 export const POSTURE_SIGNAL = "posture_exposed";
 

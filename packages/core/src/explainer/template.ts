@@ -40,6 +40,16 @@ export function templateExplanation(f: IncidentFeatures): Explanation {
     steps.push("Remove the service-role key from any client-side code.");
   }
 
+  if (f.rpcExposure) {
+    const r = f.rpcExposure;
+    parts.push(
+      `Signed-out callers using the \`anon\` key called ${list(r.functions)}, which the posture scan shows runs as SECURITY DEFINER and anyone with that key may execute.`,
+    );
+    impact = "A SECURITY DEFINER function runs with its owner's rights and skips row-level security, so whatever it reads or changes is open to anyone with the `anon` key.";
+    steps.unshift(`Revoke EXECUTE on ${list(r.functions)} from \`anon\`, or make it SECURITY INVOKER. The project's Posture page has the details.`);
+    steps.push("Check that the function validates its arguments and the caller before it reads or changes data.");
+  }
+
   parts.push(`Supahound saw ${f.hits} request(s) over ${f.durationMinutes} minute(s).`);
   return { summary: parts.join(" "), likelyImpact: impact, nextSteps: steps.slice(0, 5) };
 }
