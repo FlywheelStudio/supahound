@@ -92,7 +92,7 @@ prints the wrangler output. Prove each new check can fail before you trust it (d
 | `supabase/setup/` | Not migrations: the login-user SQL for self-hosters (passwords never go in git) |
 | `packages/core/test/db/`, `test/uat/` | Postgres suites; detection UAT scenarios (UAT-D*) |
 | `apps/web/e2e/` | Playwright: signed-out checks, web UAT journey (UAT-W*), fake Auth, Postgres setup |
-| `.github/` | CI (with the gitleaks secret scan, `.gitleaks.toml`), PR hygiene, CLA check, labeler, Claude Action, Dependabot, templates |
+| `.github/` | CI (with the gitleaks secret scan, `.gitleaks.toml`), code scanning (CodeQL, dependency review), PR hygiene, CLA check, labeler, Claude Action, Dependabot, templates |
 | `docs/` | INDEX, STATE, ARCHITECTURE, ROADMAP, TESTING, WORKFLOW, decisions, WIP and feature docs |
 
 ## Environment

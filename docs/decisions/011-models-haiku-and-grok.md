@@ -2,6 +2,8 @@
 
 Date: 2026-10-27 · Supersedes the model choice in [005](005-zdr-only-model-calls.md) (ZDR rules stand)
 
+> Providers pinned by [043](043-us-zdr-model-providers.md): Haiku only on `anthropic`, Grok only on `xai`.
+
 ## Decision
 
 - Primary `anthropic/claude-haiku-5.5` with `reasoning: 'low'`.

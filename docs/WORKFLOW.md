@@ -67,6 +67,7 @@ One more, Scan funnel, holds the hackme.si work (decision 016). It is not a PRD 
 | --- | --- | --- |
 | `ci.yml` | PR, push to `develop` or `main` | gitleaks secret scan; zizmor workflow lint (fails on high); osv-scanner on `pnpm-lock.yaml`; typecheck, lint, tests, build; E2E + UAT job |
 | `scorecard.yml` | Push to `develop` (the default branch), weekly, branch protection changes | OpenSSF Scorecard: alerts in the Security tab, results published to the Scorecard API |
+| `code-scanning.yml` | PR, push to `develop` or `main`, weekly | CodeQL (`security-extended`) to the Security tab; on PRs, dependency review fails on high/critical advisories and GPL/AGPL licences (#127) |
 | `cla.yml` | PR, or a signing comment | Fails until every outside author has signed `CLA.md` (decision 025). Signatures on the `cla-signatures` branch |
 | `pr-hygiene.yml` | PR opened or edited | Fails if the PR does not close an issue |
 | `labeler.yml` | PR | Adds `area:*` labels by path |

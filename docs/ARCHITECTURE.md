@@ -187,6 +187,9 @@ tenant's row counts stay the same.
   Only `llm.ts` may call a model, and ESLint blocks model imports everywhere else (`zdrGuard.test.ts`).
 - **ZDR on every call** (decision 005). `providerOptions.gateway.zeroDataRetention = true` is set
   after any merge, so nothing can override it. A routing report without ZDR discards the output.
+- **US providers only** (decision 043). The same frozen options pin `only: ["anthropic", "xai"]`:
+  Haiku 5.5 runs on Anthropic's API, the Grok fallback on xAI's, both in the US. No logs or
+  derived data ever go to a Chinese model provider, or to any provider not on that list.
 - **Web hardening.** Users come only from `getClaims()`. The middleware rejects cross-origin
   non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. It also sends
   security headers on every response (`apps/web/lib/security.ts`, #143): HSTS, `nosniff`,

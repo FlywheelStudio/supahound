@@ -1,6 +1,7 @@
 # 005: Every model call uses zero data retention
 
 > Model choice superseded by [011](011-models-haiku-and-grok.md): Luna dropped, Grok fallback. The ZDR rules stand.
+> Providers pinned to US first-party APIs by [043](043-us-zdr-model-providers.md).
 
 Date: 2026-10-27
 

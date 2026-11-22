@@ -36,9 +36,21 @@ const MODELS: readonly ModelSettings[] = [
   { id: FALLBACK_MODEL },
 ];
 
-// Frozen, and applied last, so no caller and no future edit of a call site can drop ZDR.
+// US first-party providers only (decision 043). Each model runs on its maker's own API: Haiku on
+// `anthropic`, Grok on `xai`. This rules out resellers that can serve outside the US (Bedrock in
+// EU/AU/JP regions, Vertex in the EU) and any provider not named here. Supahound never sends
+// data to a Chinese model provider. If neither listed provider can serve a request with ZDR, the
+// gateway fails it and the alert uses template text.
+export const ALLOWED_PROVIDERS = Object.freeze(["anthropic", "xai"] as const);
+
+// Frozen, and applied last, so no caller and no future edit of a call site can drop ZDR or the
+// provider allowlist.
 const ZDR_PROVIDER_OPTIONS = Object.freeze({
-  gateway: Object.freeze({ zeroDataRetention: true, disallowPromptTraining: true }),
+  gateway: Object.freeze({
+    zeroDataRetention: true,
+    disallowPromptTraining: true,
+    only: ALLOWED_PROVIDERS as unknown as string[],
+  }),
 });
 
 const SYSTEM = `You explain one security incident in a Supabase app to its developer.
