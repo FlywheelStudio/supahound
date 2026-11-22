@@ -11,7 +11,7 @@ import { applyFindings } from "../incidents/engine.js";
 import type { Incident } from "../incidents/incident.js";
 import { LogsApiError, MAX_WINDOW_MS, type LogsQuery } from "../logs/client.js";
 import { normalizeRow } from "../logs/event.js";
-import { edgeRollupSql } from "../logs/sql.js";
+import { edgeRequestCountSql, edgeRollupSql } from "../logs/sql.js";
 import { parsePolicyRows, SqlQueryError, type ReadOnlyQuery } from "../ownership/client.js";
 import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap } from "../ownership/ownership.js";
 import { POSTURE_SQL } from "../config/posture.js";
@@ -50,6 +50,9 @@ export interface PollDeps {
   // Posture scan (issue #11, decision 038). Null or absent: no scan runs; stored findings still
   // raise detections.
   posture?: PostureDeps | null;
+  // Log gap (issue #133): also count the window's edge-log requests (the billing count query, one
+  // number) and store it on the run. Off by default; the poller Worker turns it on.
+  countRequests?: boolean;
 }
 
 export interface PostureDeps {
@@ -254,6 +257,7 @@ async function refreshPosture(
 export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<PollOutcome> {
   const now = deps.now?.() ?? new Date();
   const sql = edgeRollupSql(deps.env ? { env: deps.env } : {});
+  const countSql = deps.countRequests ? edgeRequestCountSql(deps.env) : null;
 
   // 1. Claim, load and record intent. The audit row is written before the query runs.
   const loaded = await withTenant(deps.app, scope.tenantId, async (tx) => {
@@ -274,6 +278,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       action: "logs_query",
       detail: {
         sql_sha256: sha256(sql),
+        ...(countSql ? { count_sql_sha256: sha256(countSql) } : {}),
         window_start: window.start.toISOString(),
         window_end: window.end.toISOString(),
         window_truncated: window.truncated,
@@ -326,6 +331,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
     return { status: "unable_to_assess", errorCode: code };
   }
+  // The request count feeds the log gap only: a failure leaves it unknown and never fails the poll.
+  const edgeRequests = countSql ? await countRequests(project.supabaseRef, countSql, window, token, deps) : null;
 
   // 3. Detect and group, in memory, for this project only.
   const networks = new ServiceRoleNetworks();
@@ -389,13 +396,25 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       }
     }
     await repo.saveNetworks(tx, scope.projectId, networks.known(scope));
-    await repo.finishPollRun(tx, runId, { status: "ok", templates: events.length, findings: findings.length, unassessedDetectors });
+    await repo.finishPollRun(tx, runId, { status: "ok", templates: events.length, findings: findings.length, unassessedDetectors, edgeRequests });
   });
 
   // 6. Email pending alerts, after the save, so an email never describes unsaved state.
   const emailed = await sendPendingAlerts(scope, deps);
 
   return { status: "ok", findings: findings.length, notified: explained.size, emailed };
+}
+
+async function countRequests(
+  projectRef: string, sql: string, window: { start: Date; end: Date }, token: string, deps: PollDeps,
+): Promise<number | null> {
+  try {
+    const rows = await deps.queryLogs({ projectRef, sql, start: window.start, end: window.end }, { token });
+    const n = Number(rows[0]?.requests);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
+  } catch {
+    return null;
+  }
 }
 
 const severityRank = { low: 1, medium: 2, high: 3, critical: 4 } as const;
