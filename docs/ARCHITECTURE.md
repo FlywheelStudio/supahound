@@ -78,6 +78,11 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    that succeeds replaces its findings (decision 038). It never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
+   The rollup keeps the busiest `ROLLUP_LIMIT` (5000) templates and the poller asks for one more. A
+   full answer has dropped its quietest templates, so the poller halves the window, keeping its start,
+   and asks again (at most `MAX_ROLLUP_QUERIES`, 4, queries a poll). The run then covers that shorter
+   window and the next poll continues from its end. If no half fits, or one minute alone is full, the
+   run is `unable_to_assess` with `rollup_saturated` (issue #129).
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.

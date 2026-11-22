@@ -109,6 +109,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D7 | A scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet |
 | UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
 | UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
+| UAT-D10 | A lone probe in a window too busy to read whole still raises its incident (#129) |
+| UAT-D11 | A minute with more traffic than one poll can read is "unable to assess", never an all-clear (#129) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -363,5 +365,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Removal: Keep needs a scheduled removal (042) | `keepOutcome` always "kept" | `apps/web/test/picker.test.ts` fails |
 | Removal: the CHECK holds across daylight saving (042) | CHECK uses `interval '7 days'` instead of `'168 hours'` | `removalGrace.test.ts` fails (session in `America/New_York`, window over 2027-03-14) |
 | Removal: the words before and after the period (042) | `removalSentence` ignores the date | `apps/web/test/removal.test.ts` fails |
+| A saturated rollup is never clean (#129) | The poller asks for `ROLLUP_LIMIT` rows and never checks the count | 5 tests fail, including UAT-D10 and UAT-D11 |
+| A saturated poll spends a bounded budget (#129) | `queryRollup` drops the `MAX_ROLLUP_QUERIES` check | 1 Postgres test fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

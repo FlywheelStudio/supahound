@@ -208,14 +208,17 @@ export async function finishPollRun(
     status: "ok" | "unable_to_assess"; errorCode?: string; templates?: number; findings?: number;
     // Detectors this run could not check (decision 024). Meaningful on "ok" runs only.
     unassessedDetectors?: Finding["detector"][];
+    // The end of the span actually assessed, when a saturated rollup cut the window short (#129).
+    windowEnd?: Date;
   },
 ): Promise<void> {
   await tx.query(
     `UPDATE supahound.poll_runs
-     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, finished_at = now()
+     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7,
+         window_end = coalesce($8, window_end), finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null,
-      result.unassessedDetectors ?? []],
+      result.unassessedDetectors ?? [], result.windowEnd ?? null],
   );
 }
 
