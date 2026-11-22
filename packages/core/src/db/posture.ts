@@ -1,5 +1,9 @@
 import type { Severity } from "../detectors/finding.js";
-import { anonDefinerFunctions, anonReadableTables, countBySeverity, dedupePosture, exposedTables, type AnonReadable, type DefinerExposure, type SeverityCounts } from "../posture/findings.js";
+import {
+  anonDefinerFunctions, anonReadableTables, authenticatedDefinerFunctions, countBySeverity, dedupePosture, exposedTables, gateGraphql,
+  GRAPHQL_ACTIVITY_DAYS, LISTABLE_BUCKET_CHECK, listableBuckets, NO_GRAPHQL_ACTIVITY,
+  type AnonReadable, type DefinerExposure, type GraphqlActivity, type SeverityCounts,
+} from "../posture/findings.js";
 import type { PostureFinding, PostureSource, SourceStatus } from "../posture/types.js";
 import { projectId, type ProjectId } from "../tenancy/scope.js";
 import type { TenantTx } from "./tenant.js";
@@ -144,19 +148,57 @@ const toFinding = (r: FindingRow): StoredPostureFinding => ({
   objectType: r.object_type, evidence: r.evidence, foundAt: r.found_at,
 });
 
-// One project's findings, Advisor duplicates of catalog findings dropped, worst first.
-export async function listPostureFindings(tx: TenantTx, project: ProjectId): Promise<StoredPostureFinding[]> {
+// GraphQL calls per role over the project's recent polls (issue #157), as the poll's count query
+// stored them on poll_runs. Runs that did not count (an older run, a failed count, a deployment
+// that does not count) add nothing, so no counts at all reads as no GraphQL traffic.
+const ACTIVITY_SQL = `SELECT project_id,
+         coalesce(sum(graphql_anon_calls), 0) > 0 AS anon,
+         coalesce(sum(graphql_authenticated_calls), 0) > 0 AS authenticated
+  FROM supahound.poll_runs
+  WHERE tenant_id = $1 AND started_at >= now() - make_interval(days => ${GRAPHQL_ACTIVITY_DAYS})`;
+
+export async function graphqlActivity(tx: TenantTx, project: ProjectId): Promise<GraphqlActivity> {
+  const rows = await tx.query<{ anon: boolean; authenticated: boolean }>(
+    `${ACTIVITY_SQL} AND project_id = $2 GROUP BY project_id`,
+    [tx.tenantId, project],
+  );
+  return rows[0] ? { anon: rows[0].anon, authenticated: rows[0].authenticated } : NO_GRAPHQL_ACTIVITY;
+}
+
+async function graphqlActivityByProject(tx: TenantTx): Promise<Map<string, GraphqlActivity>> {
+  const rows = await tx.query<{ project_id: string; anon: boolean; authenticated: boolean }>(
+    `${ACTIVITY_SQL} GROUP BY project_id`,
+    [tx.tenantId],
+  );
+  return new Map(rows.map((r) => [r.project_id, { anon: r.anon, authenticated: r.authenticated }]));
+}
+
+export interface PostureView {
+  // Advisor duplicates of catalog findings dropped, worst first, GraphQL findings gated.
+  findings: StoredPostureFinding[];
+  // GraphQL findings kept but hidden: no GraphQL calls from their role in the recent polls.
+  hiddenGraphql: StoredPostureFinding[];
+}
+
+// One project's findings as the Posture page shows them.
+export async function postureView(tx: TenantTx, project: ProjectId): Promise<PostureView> {
   const rows = await tx.query<FindingRow>(
     `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
      FROM supahound.posture_findings WHERE tenant_id = $1 AND project_id = $2`,
     [tx.tenantId, project],
   );
-  return dedupePosture(rows.map(toFinding));
+  const { shown, hidden } = gateGraphql(dedupePosture(rows.map(toFinding)), await graphqlActivity(tx, project));
+  return { findings: shown, hiddenGraphql: hidden };
+}
+
+// One project's shown findings (see postureView).
+export async function listPostureFindings(tx: TenantTx, project: ProjectId): Promise<StoredPostureFinding[]> {
+  return (await postureView(tx, project)).findings;
 }
 
 // The tables whose posture raises detections on them (decision 038). No severity filter here:
 // exposedTables dedupes first, so a low catalog finding hides the Advisor's high duplicate, as on
-// the Posture page.
+// the Posture page. Hidden GraphQL findings raise nothing (#157).
 export async function postureExposedTables(tx: TenantTx, project: ProjectId): Promise<Map<string, string>> {
   const rows = await tx.query<FindingRow>(
     `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
@@ -164,7 +206,29 @@ export async function postureExposedTables(tx: TenantTx, project: ProjectId): Pr
      WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public'`,
     [tx.tenantId, project],
   );
-  return exposedTables(rows.map(toFinding));
+  return exposedTables(gateGraphql(rows.map(toFinding), await graphqlActivity(tx, project)).shown);
+}
+
+// SECURITY DEFINER functions signed-in users can execute, by the stored findings (issue #157).
+export async function postureAuthenticatedDefinerFunctions(tx: TenantTx, project: ProjectId): Promise<Map<string, DefinerExposure>> {
+  const rows = await tx.query<FindingRow>(
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
+     FROM supahound.posture_findings
+     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public'`,
+    [tx.tenantId, project],
+  );
+  return authenticatedDefinerFunctions(rows.map(toFinding));
+}
+
+// Buckets anyone may list, by the stored Advisor findings (issue #157).
+export async function postureListableBuckets(tx: TenantTx, project: ProjectId): Promise<Set<string>> {
+  const rows = await tx.query<FindingRow>(
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
+     FROM supahound.posture_findings
+     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'storage' AND check_id = $3`,
+    [tx.tenantId, project, LISTABLE_BUCKET_CHECK],
+  );
+  return listableBuckets(rows.map(toFinding));
 }
 
 // SECURITY DEFINER functions anon can execute, by the stored findings (issue #131).
@@ -203,19 +267,22 @@ export async function postureSummaries(tx: TenantTx): Promise<Map<ProjectId, Pos
     [tx.tenantId],
   );
   const findings = await tx.query<FindingRow>(
-    // Evidence: only the keys dedupePosture reads (a policy or a function's arguments), so the
-    // overview counts what the Posture page shows.
+    // Evidence: only the keys dedupePosture reads (a policy or a function's arguments) and the
+    // GraphQL gate reads (exposure, roles), so the overview counts what the Posture page shows.
     `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type,
-            jsonb_strip_nulls(jsonb_build_object('policy', evidence->'policy', 'arguments', evidence->'arguments')) AS evidence, found_at
+            jsonb_strip_nulls(jsonb_build_object('policy', evidence->'policy', 'arguments', evidence->'arguments',
+              'exposure', evidence->'exposure', 'roles', evidence->'roles')) AS evidence, found_at
      FROM supahound.posture_findings WHERE tenant_id = $1`,
     [tx.tenantId],
   );
+  const activity = await graphqlActivityByProject(tx);
   const byProject = new Map<string, StoredPostureFinding[]>();
   for (const r of findings) byProject.set(r.project_id, [...(byProject.get(r.project_id) ?? []), toFinding(r)]);
   const out = new Map<ProjectId, PostureSummary>();
   for (const s of scans) {
     const id = projectId(s.project_id);
-    out.set(id, { projectId: id, scan: toScan(s), counts: countBySeverity(byProject.get(s.project_id) ?? []) });
+    const shown = gateGraphql(byProject.get(s.project_id) ?? [], activity.get(s.project_id) ?? NO_GRAPHQL_ACTIVITY).shown;
+    out.set(id, { projectId: id, scan: toScan(s), counts: countBySeverity(shown) });
   }
   return out;
 }

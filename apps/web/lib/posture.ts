@@ -1,6 +1,6 @@
 import type { PostureScanRecord, PostureSummary, ScanRequest } from "@supahound/core/db/posture";
 import type { ProjectRole } from "@supahound/core/db/people";
-import type { SeverityCounts } from "@supahound/core/posture/findings";
+import { GRAPHQL_ACTIVITY_DAYS, type SeverityCounts } from "@supahound/core/posture/findings";
 import type { SourceStatus } from "@supahound/core/posture/types";
 import type { ProjectId, TenantId } from "@supahound/core/tenancy/scope";
 import { projectPath, utc } from "./nav";
@@ -125,3 +125,11 @@ export function postureLine(summary: PostureSummary | undefined): { tone: "warn"
 }
 
 export const SOURCE_LABEL = { catalog: "Supahound check", advisor: "Security Advisor" } as const;
+
+// GraphQL posture gating (issue #157, decision 038 addendum): the note under the findings when
+// GraphQL findings are hidden. Null when none are.
+export function graphqlHiddenNote(hidden: number): string | null {
+  if (hidden === 0) return null;
+  const what = hidden === 1 ? "1 GraphQL finding is" : `${hidden} GraphQL findings are`;
+  return `${what} hidden: pg_graphql shows these objects' columns to API roles, but the last ${GRAPHQL_ACTIVITY_DAYS} days of logs show no GraphQL calls from those roles. They appear here, and count, as soon as a poll sees one.`;
+}

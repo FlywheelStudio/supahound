@@ -4,6 +4,7 @@ import { EXPOSED_READ_SIGNALS, type ExposedReadSignal } from "./exposedRead.js";
 import { RPC_EXPOSURE_SIGNALS, type RpcExposureSignal } from "./rpcExposure.js";
 import type { Finding } from "./finding.js";
 import { SERVICE_ROLE_SIGNALS, type ServiceRoleSignal } from "./serviceRole.js";
+import { STORAGE_LISTING_SIGNALS, type StorageListingSignal } from "./storageListing.js";
 
 // Detection rules: one stable ID per detector signal, tagged with MITRE ATT&CK techniques and
 // OWASP API Security Top 10 (2023) categories, so findings map onto the frameworks SIEMs and
@@ -25,6 +26,9 @@ export const ATTACK_TECHNIQUES = {
   T1213: { name: "Data from Information Repositories", tactic: { uid: "TA0009", name: "Collection" } },
   T1552: { name: "Unsecured Credentials", tactic: { uid: "TA0006", name: "Credential Access" } },
   "T1552.001": { name: "Unsecured Credentials: Credentials In Files", tactic: { uid: "TA0006", name: "Credential Access" } },
+  // Issue #157: Storage listing.
+  T1530: { name: "Data from Cloud Storage", tactic: { uid: "TA0009", name: "Collection" } },
+  T1619: { name: "Cloud Storage Object Discovery", tactic: { uid: "TA0007", name: "Discovery" } },
 } as const;
 
 export type AttackTechniqueId = keyof typeof ATTACK_TECHNIQUES;
@@ -65,6 +69,7 @@ export interface DetectorSignals {
   service_role_misuse: ServiceRoleSignal;
   exposed_read: ExposedReadSignal;
   rpc_exposure: RpcExposureSignal;
+  storage_listing: StorageListingSignal;
 }
 
 export const DETECTOR_SIGNALS: { readonly [D in Detector]: readonly DetectorSignals[D][] } = {
@@ -72,6 +77,7 @@ export const DETECTOR_SIGNALS: { readonly [D in Detector]: readonly DetectorSign
   service_role_misuse: SERVICE_ROLE_SIGNALS,
   exposed_read: EXPOSED_READ_SIGNALS,
   rpc_exposure: RPC_EXPOSURE_SIGNALS,
+  storage_listing: STORAGE_LISTING_SIGNALS,
 };
 
 const RULES = {
@@ -222,6 +228,42 @@ const RULES = {
       owaspApi: ["API5:2023", "API8:2023"],
       confidence: "high",
       falsePositives: "A busy public endpoint that is meant to run as its owner.",
+    },
+    // Issue #157 (decision 6 of #131): always low, never pages.
+    authenticated_definer_call: {
+      id: "SH-D12-003",
+      title: "Signed-in user called a SECURITY DEFINER function that authenticated may execute",
+      attack: ["T1078"],
+      owaspApi: ["API5:2023"],
+      confidence: "low",
+      falsePositives: "The app's own signed-in features that call a SECURITY DEFINER helper, which is most such calls.",
+    },
+  },
+  // Detector 13: anon calls to Storage's list endpoint (issue #157).
+  storage_listing: {
+    anon_bucket_list: {
+      id: "SH-D13-001",
+      title: "Anon key listed the files of a Storage bucket",
+      attack: ["T1530"],
+      owaspApi: ["API8:2023"],
+      confidence: "low",
+      falsePositives: "A signed-out page that lists a bucket's files, such as a public gallery.",
+    },
+    listable_bucket: {
+      id: "SH-D13-002",
+      title: "Anon key listed a public bucket that posture shows anyone may list",
+      attack: ["T1530", "T1619"],
+      owaspApi: ["API8:2023", "API3:2023"],
+      confidence: "medium",
+      falsePositives: "A public bucket whose file list is meant to be public.",
+    },
+    list_burst: {
+      id: "SH-D13-003",
+      title: "Anon key listed a bucket 100 times or more in one poll",
+      attack: ["T1530", "T1619"],
+      owaspApi: ["API8:2023", "API4:2023"],
+      confidence: "medium",
+      falsePositives: "A busy signed-out page that lists a bucket on every view.",
     },
   },
 } as const satisfies { [D in Detector]: Record<DetectorSignals[D], RuleSpec> };

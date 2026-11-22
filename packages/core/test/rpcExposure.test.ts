@@ -164,7 +164,7 @@ describe("RPC exposure in incidents, explanations and alerts", () => {
   });
 
   it("labels the detector, its signals and the anon actor", () => {
-    expect(detectorLabel("rpc_exposure")).toBe("Anon calls to an exposed SECURITY DEFINER function");
+    expect(detectorLabel("rpc_exposure")).toBe("Calls to an exposed SECURITY DEFINER function");
     expect(signalLabel("rpc_burst")).not.toBe("rpc burst");
     expect(actorAlias("anon:asn:14061")).toBe("Signed-out callers (anon key) on AS14061");
   });

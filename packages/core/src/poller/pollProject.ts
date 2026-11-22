@@ -12,7 +12,7 @@ import { applyFindings } from "../incidents/engine.js";
 import type { Incident } from "../incidents/incident.js";
 import { LogsApiError, MAX_WINDOW_MS, type LogsQuery } from "../logs/client.js";
 import { normalizeRow } from "../logs/event.js";
-import { authCoverageSql, edgeRequestCountSql, edgeRollupSql, ROLLUP_LIMIT } from "../logs/sql.js";
+import { authCoverageSql, edgeRollupSql, pollCountSql, ROLLUP_LIMIT } from "../logs/sql.js";
 import { parsePolicyRows, SqlQueryError, type ReadOnlyQuery } from "../ownership/client.js";
 import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap } from "../ownership/ownership.js";
 import { POSTURE_SQL } from "../config/posture.js";
@@ -288,7 +288,7 @@ async function refreshPosture(
 
 export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<PollOutcome> {
   const now = deps.now?.() ?? new Date();
-  const countSql = deps.countRequests ? edgeRequestCountSql(deps.env) : null;
+  const countSql = deps.countRequests ? pollCountSql(deps.env) : null;
 
   // 1. Claim, load and record intent. The audit row is written before the query runs.
   const loaded = await withTenant(deps.app, scope.tenantId, async (tx) => {
@@ -309,6 +309,10 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     // (#131). A scan that runs later in this poll takes effect from the next poll: the SQL is audited here.
     const anonReadable = await postureRepo.postureAnonReadableTables(tx, scope.projectId);
     const anonDefiners = await postureRepo.postureAnonDefinerFunctions(tx, scope.projectId);
+    // Signed-in definer calls and anon Storage listings need no SQL of their own (#157): the
+    // rollup already holds every REST call with a user subject, and every anon list call.
+    const authenticatedDefiners = await postureRepo.postureAuthenticatedDefinerFunctions(tx, scope.projectId);
+    const listableBuckets = await postureRepo.postureListableBuckets(tx, scope.projectId);
     const sql = edgeRollupSql({
       limit: ROLLUP_LIMIT + 1, ...(deps.env ? { env: deps.env } : {}),
       anonReadTables: anonReadable.keys(), anonRpcFunctions: anonDefiners.keys(),
@@ -325,7 +329,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       },
     });
     return {
-      project, runId, window, sql, anonReadable, anonDefiners,
+      project, runId, window, sql, anonReadable, anonDefiners, authenticatedDefiners, listableBuckets,
       networks: await repo.loadNetworks(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
       exposed: await postureRepo.postureExposedTables(tx, scope.projectId),
@@ -374,9 +378,10 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     return { status: "unable_to_assess", errorCode: code };
   }
   const rows = rollup.rows;
-  // The request count feeds the log gap only: a failure leaves it unknown and never fails the poll.
-  // It counts the span the rollup assessed, which a saturated window shortens (#129).
-  const edgeRequests = countSql
+  // The counts feed the log gap and the GraphQL posture gate only: a failure leaves them unknown and
+  // never fails the poll. They cover the span the rollup assessed, which a saturated window
+  // shortens (#129).
+  const counts = countSql
     ? await countRequests(project.supabaseRef, countSql, { start: window.start, end: rollup.end }, token, deps)
     : null;
 
@@ -412,6 +417,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
     anonReadable: loaded.anonReadable,
     anonDefiners: loaded.anonDefiners,
+    authenticatedDefiners: loaded.authenticatedDefiners,
+    listableBuckets: loaded.listableBuckets,
   }), exposed);
   const openIncidents: Incident[] = loaded.open.map((i) => ({
     ...i, scope, status: "open", detectors: i.detectors as Incident["detectors"],
@@ -466,7 +473,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     }
     await repo.saveNetworks(tx, scope.projectId, networks.known(scope));
     await repo.finishPollRun(tx, runId, {
-      status: "ok", templates: events.length, findings: findings.length, unassessedDetectors, edgeRequests, windowEnd: rollup.end,
+      status: "ok", templates: events.length, findings: findings.length, unassessedDetectors,
+      edgeRequests: counts?.requests ?? null, graphqlCalls: counts?.graphql ?? null, windowEnd: rollup.end,
     });
   });
 
@@ -478,14 +486,20 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
 
 async function countRequests(
   projectRef: string, sql: string, window: { start: Date; end: Date }, token: string, deps: PollDeps,
-): Promise<number | null> {
+): Promise<{ requests: number | null; graphql: { anon: number; authenticated: number } | null } | null> {
+  let row: Record<string, unknown> | undefined;
   try {
-    const rows = await deps.queryLogs({ projectRef, sql, start: window.start, end: window.end }, { token });
-    const n = Number(rows[0]?.requests);
-    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
+    [row] = await deps.queryLogs({ projectRef, sql, start: window.start, end: window.end }, { token });
   } catch {
     return null;
   }
+  const n = (v: unknown): number | null => {
+    const x = Number(v);
+    return v !== null && v !== undefined && v !== "" && Number.isFinite(x) && x >= 0 ? Math.trunc(x) : null;
+  };
+  const anon = n(row?.graphql_anon);
+  const authenticated = n(row?.graphql_authenticated);
+  return { requests: n(row?.requests), graphql: anon !== null && authenticated !== null ? { anon, authenticated } : null };
 }
 
 const severityRank = { low: 1, medium: 2, high: 3, critical: 4 } as const;

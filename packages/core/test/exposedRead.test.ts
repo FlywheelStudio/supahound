@@ -86,7 +86,8 @@ describe("anonReadableTables (posture → watched tables)", () => {
 describe("rollup SQL anon-read branch", () => {
   it("adds no branch when no table is exposed", () => {
     expect(edgeRollupSql({ env: {} })).toBe(edgeRollupSql({ env: {}, anonReadTables: [] }));
-    expect(edgeRollupSql({ env: {} })).not.toContain("'anon'");
+    expect(edgeRollupSql({ env: {} })).not.toContain("IN ('GET', 'HEAD')");
+    expect(edgeRollupSql({ env: {} })).not.toContain("'/rest/v1/");
   });
 
   it("matches anon GET/HEAD on exactly the exposed table paths", () => {

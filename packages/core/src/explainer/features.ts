@@ -35,6 +35,8 @@ export interface IncidentFeatures {
   };
   rpcExposure?: {
     functions: string[];
+    // Who called: "anon" (issue #131) and/or "authenticated" (#157).
+    roles: string[];
     postureChecks: string[];
     postureSeverities: Severity[];
     methods: string[];
@@ -52,6 +54,15 @@ export interface IncidentFeatures {
     networkTypes: string[];
     asns: number[];
   };
+  storageListing?: {
+    // Only buckets posture named (public_bucket_allows_listing); others are counted, never named.
+    buckets: string[];
+    unnamedBuckets: number;
+    postureChecks: string[];
+    callerClasses: string[];
+    networkTypes: string[];
+    asns: number[];
+  };
 }
 
 const SIGNALS = new Set([
@@ -63,7 +74,13 @@ const SIGNALS = new Set([
   "definer_rpc_call", "rpc_burst",
   // Anon reads of a table posture shows readable by anon (issue #132).
   "exposed_table_read", "rows_returned", "bulk_read",
+  // Signed-in calls to a SECURITY DEFINER function (#157), and anon Storage listing (#157).
+  "authenticated_definer_call", "anon_bucket_list", "listable_bucket", "list_burst",
 ]);
+const RPC_ROLES = new Set(["anon", "authenticated"]);
+// A Storage bucket id as posture stores it (Advisor object names pass safeName).
+const bucketName = (v: unknown): string | null => (typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(v) ? v : null);
+const hex12 = (v: unknown): string | null => (typeof v === "string" && /^[0-9a-f]{12}$/.test(v) ? v : null);
 const METHODS = new Set(["GET", "HEAD", "PATCH", "PUT", "DELETE", "POST"]);
 const OUTCOMES = new Set(["rejected", "empty", "rows_returned", "unknown"]);
 const CALLER_CLASSES = new Set(["browser", "mobile_app", "manual_tool", "server", "unknown"]);
@@ -87,6 +104,7 @@ export function buildFeatures(incident: Incident, findings: Finding[]): Incident
   const service = findings.filter((f) => f.detector === "service_role_misuse");
   const rpc = findings.filter((f) => f.detector === "rpc_exposure");
   const anonReads = findings.filter((f) => f.detector === "exposed_read");
+  const listings = findings.filter((f) => f.detector === "storage_listing");
   const durationMs = incident.lastSeenAt.getTime() - incident.openedAt.getTime();
 
   const features: IncidentFeatures = {
@@ -128,6 +146,8 @@ export function buildFeatures(incident: Incident, findings: Finding[]): Incident
   if (rpc.length > 0) {
     features.rpcExposure = {
       functions: uniq(rpc.map((f) => ident(f.evidence.function))),
+      // Findings saved before #157 carry no role: they were all anon.
+      roles: uniq(rpc.map((f) => (f.evidence.role === undefined ? "anon" : pick(RPC_ROLES, f.evidence.role)))),
       postureChecks: uniq(rpc.map((f) => check(f.evidence.postureCheck))),
       postureSeverities: uniq(rpc.map((f) => pick(SEVERITIES, f.evidence.postureSeverity) as Severity | null)),
       methods: uniq(rpc.map((f) => pick(RPC_METHODS, f.evidence.method))),
@@ -146,6 +166,17 @@ export function buildFeatures(incident: Incident, findings: Finding[]): Incident
       callerClasses: uniq(anonReads.map((f) => pick(CALLER_CLASSES, f.evidence.callerClass))),
       networkTypes: uniq(anonReads.map((f) => pick(NETWORK_TYPES, f.evidence.networkType))),
       asns: uniq(anonReads.map((f) => count(f.evidence.asn))),
+    };
+  }
+  if (listings.length > 0) {
+    const named = listings.filter((f) => bucketName(f.evidence.bucket) !== null);
+    features.storageListing = {
+      buckets: uniq(named.map((f) => bucketName(f.evidence.bucket))),
+      unnamedBuckets: uniq(listings.filter((f) => !named.includes(f)).map((f) => hex12(f.evidence.bucketFingerprint))).length,
+      postureChecks: uniq(listings.map((f) => check(f.evidence.postureCheck))),
+      callerClasses: uniq(listings.map((f) => pick(CALLER_CLASSES, f.evidence.callerClass))),
+      networkTypes: uniq(listings.map((f) => pick(NETWORK_TYPES, f.evidence.networkType))),
+      asns: uniq(listings.map((f) => count(f.evidence.asn))),
     };
   }
   return features;

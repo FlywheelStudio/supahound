@@ -75,8 +75,9 @@ const SEVERITY_MEANING: Record<Severity, string> = {
 const DETECTOR_LABEL: Record<Finding["detector"], string> = {
   cross_tenant: "Cross-tenant data access",
   service_role_misuse: "Service-role key misuse",
-  rpc_exposure: "Anon calls to an exposed SECURITY DEFINER function",
+  rpc_exposure: "Calls to an exposed SECURITY DEFINER function",
   exposed_read: "Anon reads of an exposed table",
+  storage_listing: "Anon listing of a Storage bucket",
 };
 
 const SIGNAL_LABEL: Record<string, string> = {
@@ -97,6 +98,10 @@ const SIGNAL_LABEL: Record<string, string> = {
   exposed_table_read: "Read a table the anon key can read in full",
   rows_returned: "Rows came back",
   bulk_read: "Read 1,000 rows or more in one poll",
+  authenticated_definer_call: "A signed-in user called a SECURITY DEFINER function",
+  anon_bucket_list: "Listed the files of a Storage bucket",
+  listable_bucket: "The bucket is public and anyone may list it",
+  list_burst: "Listed it 100 times or more in one poll",
 };
 
 const MAX_SUMMARY = 600;
@@ -149,6 +154,8 @@ export function actorAlias(actor: string): string {
   // anon:asn:<number|unknown>. The ASN is a public network number, not personal data.
   const anon = /^anon:asn:(\d{1,10}|unknown)$/.exec(actor);
   if (anon) return anon[1] === "unknown" ? "Signed-out callers (anon key)" : `Signed-out callers (anon key) on AS${anon[1]}`;
+  // Signed-in calls to a SECURITY DEFINER function (#157): the actor is the function, not a user.
+  if (actor.startsWith("definer:fn:")) return "Signed-in users";
   return `User ${fingerprint(actor).slice(0, 8)}`;
 }
 

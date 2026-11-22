@@ -1,10 +1,10 @@
-import { getPostureScan, listPostureFindings } from "@supahound/core/db/posture";
+import { getPostureScan, postureView } from "@supahound/core/db/posture";
 import { countBySeverity } from "@supahound/core/posture/findings";
 import { fixPrompt } from "@supahound/core/posture/fix";
 import { Notice, SeverityBadge, Shell } from "../../../../../../components/Shell";
 import { mode } from "../../../../../../lib/billing";
 import {
-  canScan, countsText, isPending, postureState, scanNoticeFrom, SOURCE_LABEL, sourceNotes, stateText,
+  canScan, countsText, graphqlHiddenNote, isPending, postureState, scanNoticeFrom, SOURCE_LABEL, sourceNotes, stateText,
 } from "../../../../../../lib/posture";
 import { loadProjectPage } from "../../../../../../lib/projectPage";
 import { scanNowAction } from "./actions";
@@ -22,13 +22,14 @@ export default async function ProjectPosture({
 }) {
   const d = await loadProjectPage(params, async (tx, p) => ({
     scan: await getPostureScan(tx, p.id),
-    findings: await listPostureFindings(tx, p.id),
+    view: await postureView(tx, p.id),
   }));
   const { tenant, project: p } = d;
-  const { scan, findings } = d.extra;
+  const { scan, view: { findings, hiddenGraphql } } = d.extra;
   const notice = scanNoticeFrom(await searchParams);
   const state = postureState(scan);
   const notes = sourceNotes(scan);
+  const graphqlNote = state.kind === "scanned" ? graphqlHiddenNote(hiddenGraphql.length) : null;
 
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={mode() !== "off"} active={{ kind: "project", project: p, page: "posture" }}>
@@ -96,6 +97,7 @@ export default async function ProjectPosture({
       ) : (
         state.kind === "scanned" && <p className="text-slate-600">No posture findings in the last scan.</p>
       )}
+      {graphqlNote && <p aria-label="Hidden GraphQL findings" className="mt-4 text-sm text-slate-600">{graphqlNote}</p>}
     </Shell>
   );
 }
