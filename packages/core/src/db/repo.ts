@@ -210,15 +210,17 @@ export async function finishPollRun(
     unassessedDetectors?: Finding["detector"][];
     // Edge-log requests in the window (issue #133); null or absent when not counted.
     edgeRequests?: number | null;
+    // The end of the span actually assessed, when a saturated rollup cut the window short (#129).
+    windowEnd?: Date;
   },
 ): Promise<void> {
   await tx.query(
     `UPDATE supahound.poll_runs
      SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, edge_requests = $8,
-         finished_at = now()
+         window_end = coalesce($9, window_end), finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null,
-      result.unassessedDetectors ?? [], result.edgeRequests ?? null],
+      result.unassessedDetectors ?? [], result.edgeRequests ?? null, result.windowEnd ?? null],
   );
 }
 

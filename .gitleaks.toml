@@ -32,6 +32,16 @@ description = "Supabase OAuth app client secret"
 regex = '''\bsba_[a-f0-9]{40}\b'''
 keywords = ["sba_"]
 
+# A legacy Supabase service_role key is a JWT whose payload holds "role":"service_role"; an anon key
+# holds "role":"anon". gitleaks cannot decode the payload, so the regex matches the base64url text of
+# "service_role" (with its quotes) at each of the three byte alignments a base64 encoding can give it.
+# The default `jwt` rule still catches every JWT; this one names the dangerous key.
+[[rules]]
+id = "supabase-service-role-jwt"
+description = "Supabase service_role key (legacy JWT API key, bypasses RLS)"
+regex = '''\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]*(?:InNlcnZpY2Vfcm9s|JzZXJ2aWNlX3JvbGUi|ic2VydmljZV9yb2xl)[A-Za-z0-9_-]*\.[A-Za-z0-9_-]{20,}'''
+keywords = ["eyj"]
+
 [[rules]]
 id = "stripe-webhook-secret"
 description = "Stripe webhook signing secret"

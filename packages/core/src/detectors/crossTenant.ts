@@ -6,13 +6,17 @@ import { fingerprint, maxSeverity, type Finding, type Severity } from "./finding
 // Detector 2: a signed-in user filters an ownership column by someone else's ID.
 // Baseline-free: the caller's JWT subject is the expected value, so it alerts from day one.
 
-export type MismatchKind =
-  | "other_owner" // user_id=eq.B sent by A
-  | "all_but_self" // user_id=neq.A: every tenant except the caller
-  | "excludes_other" // user_id=neq.B: every tenant except one
-  | "pattern" // like / ilike / match on an owner column
-  | "range" // gt / lt sweeps over owner IDs
-  | "any_owner"; // user_id=not.is.null
+// The signals this detector emits. Each one needs a rule in `rules.ts` (rules.test.ts checks).
+export const MISMATCH_KINDS = [
+  "other_owner", // user_id=eq.B sent by A
+  "all_but_self", // user_id=neq.A: every tenant except the caller
+  "excludes_other", // user_id=neq.B: every tenant except one
+  "pattern", // like / ilike / match on an owner column
+  "range", // gt / lt sweeps over owner IDs
+  "any_owner", // user_id=not.is.null
+] as const;
+
+export type MismatchKind = (typeof MISMATCH_KINDS)[number];
 
 export type Outcome = "rejected" | "empty" | "rows_returned" | "unknown";
 

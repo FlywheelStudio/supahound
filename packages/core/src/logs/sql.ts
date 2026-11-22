@@ -11,12 +11,17 @@ function attr(field: EdgeField): string {
   return `log_attributes[${quote(EDGE_FIELDS[field].key)}]`;
 }
 
+// The most templates one poll reads. The rollup keeps the busiest, so a window with more would drop
+// its quietest ones: often the single probe detector 2 looks for. The poller asks for one more and
+// treats a full answer as saturated (issue #129).
+export const ROLLUP_LIMIT = 5000;
+
 // Rolls identical requests up inside ClickHouse so a poll returns templates, not raw rows.
 // Only two kinds of traffic can trip the baseline-free detectors, so everything else is
 // filtered out before it leaves Supabase: PostgREST calls that carry a user subject, and
 // any call (REST, Auth admin, Storage) made with the service-role key.
 export function edgeRollupSql(options: { limit?: number; env?: EnvVars } = {}): string {
-  const limit = options.limit ?? 5000;
+  const limit = options.limit ?? ROLLUP_LIMIT;
   const fields = Object.keys(EDGE_FIELDS) as EdgeField[];
   const columns = fields.map((f) => `  ${attr(f)} AS ${f}`).join(",\n");
   return `SELECT
