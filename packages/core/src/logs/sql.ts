@@ -1,4 +1,7 @@
-import { EDGE_FIELDS, sourceColumn, type EdgeField, type EnvVars } from "../config/fields.js";
+import {
+  EDGE_FIELDS, KEY_KIND_COLUMNS, KEY_KIND_MARKERS, KEY_PREFIX_FIELDS, sourceColumn,
+  type EdgeField, type EnvVars, type KeyKindColumn,
+} from "../config/fields.js";
 import { safeIdentifier } from "../detectors/finding.js";
 import { safeName } from "../posture/catalog.js";
 
@@ -12,6 +15,17 @@ function quote(value: string): string {
 function attr(field: EdgeField): string {
   return `log_attributes[${quote(EDGE_FIELDS[field].key)}]`;
 }
+
+// Issue #154: the key kind, worked out inside ClickHouse from a key-prefix field. The prefix holds
+// key material after the type marker, so it is only ever read here, inside startsWith, and never
+// selected or grouped on: only the enum leaves Supabase.
+export function keyKindSql(column: KeyKindColumn): string {
+  const prefix = `log_attributes[${quote(KEY_PREFIX_FIELDS[KEY_KIND_COLUMNS[column]].key)}]`;
+  const branches = KEY_KIND_MARKERS.map(([kind, marker]) => `startsWith(${prefix}, ${quote(marker)}), '${kind}'`);
+  return `multiIf(${branches.join(", ")}, ${prefix} = '', 'none', 'other')`;
+}
+
+const KIND_COLUMNS = Object.keys(KEY_KIND_COLUMNS) as KeyKindColumn[];
 
 // The most templates one poll reads. The rollup keeps the busiest, so a window with more would drop
 // its quietest ones: often the single probe detector 2 looks for. The poller asks for one more and
@@ -44,9 +58,19 @@ export function anonRpcFunctions(functions: Iterable<string>): string[] {
     .slice(0, MAX_ANON_RPC_FUNCTIONS);
 }
 
-// The role as effectiveRole reads it: the user JWT's role, else the API key's.
+// The role as effectiveRole reads it: the user JWT's role, else the legacy API key's, else the
+// new key's kind (#154: a publishable key is anon; authenticated always needs a user JWT).
 function roleIs(role: "anon" | "authenticated"): string {
-  return `(${attr("jwtRole")} = '${role}' OR (${attr("jwtRole")} = '' AND ${attr("apiKeyRole")} = '${role}'))`;
+  const jwt = `${attr("jwtRole")} = '${role}' OR (${attr("jwtRole")} = '' AND ${attr("apiKeyRole")} = '${role}')`;
+  if (role === "authenticated") return `(${jwt})`;
+  return `(${jwt} OR (${attr("jwtRole")} = '' AND ${attr("apiKeyRole")} = '' AND ${keyKindSql("apiKeyKind")} = 'publishable'))`;
+}
+
+// Service-role traffic: a legacy JWT with the service_role role, or a new sb_secret_ key (#154).
+function serviceRole(): string {
+  return `${attr("jwtRole")} = 'service_role'
+    OR ${attr("apiKeyRole")} = 'service_role'
+    OR ${keyKindSql("apiKeyKind")} = 'secret'`;
 }
 
 // Anon calls to the given RPC functions. Empty when there are none, so the SQL is unchanged.
@@ -70,10 +94,15 @@ export const STORAGE_LIST_PREFIX = "/storage/v1/object/list/";
 // with the service-role key, anon-key reads of the tables the posture scan shows readable by anon
 // (`anonReadTables`, issue #132), anon calls to the RPC functions posture shows as SECURITY DEFINER
 // and anon-executable (`anonRpcFunctions`, #131), and anon calls to Storage's list endpoint (#157).
+// Service role and anon include the new sb_secret_ and sb_publishable_ keys (#154): the rollup
+// selects their key kinds, never their prefixes.
 export function edgeRollupSql(options: { limit?: number; env?: EnvVars; anonReadTables?: Iterable<string>; anonRpcFunctions?: Iterable<string> } = {}): string {
   const limit = options.limit ?? ROLLUP_LIMIT;
   const fields = Object.keys(EDGE_FIELDS) as EdgeField[];
-  const columns = fields.map((f) => `  ${attr(f)} AS ${f}`).join(",\n");
+  const columns = [
+    ...fields.map((f) => `  ${attr(f)} AS ${f}`),
+    ...KIND_COLUMNS.map((k) => `  ${keyKindSql(k)} AS ${k}`),
+  ].join(",\n");
   const rpcBranch = anonRpcBranch(anonRpcFunctions(options.anonRpcFunctions ?? []));
   const watched = anonReadTables(options.anonReadTables ?? []);
   const anonBranch = watched.length === 0 ? "" : `
@@ -93,10 +122,9 @@ FROM logs
 WHERE ${sourceColumn(options.env)} = 'edge_logs'
   AND (
     (match(${attr("path")}, '^/rest/v1/') AND ${attr("jwtSubject")} != '')
-    OR ${attr("jwtRole")} = 'service_role'
-    OR ${attr("apiKeyRole")} = 'service_role'${anonBranch}${rpcBranch}${storageBranch}
+    OR ${serviceRole()}${anonBranch}${rpcBranch}${storageBranch}
   )
-GROUP BY ${fields.join(", ")}
+GROUP BY ${[...fields, ...KIND_COLUMNS].join(", ")}
 ORDER BY hits DESC
 LIMIT ${Math.trunc(limit)}`;
 }
@@ -126,14 +154,17 @@ WHERE ${sourceColumn(env)} = 'edge_logs'`;
 }
 
 // Issue #130: the rollup keeps only traffic with a user subject or a service-role key, so if
-// Supabase leaves those fields empty (sb_secret_ keys are not JWTs) it returns nothing and both
-// detectors would read as clean. This counts the window's PostgREST requests, and those with any
-// auth field filled. Two numbers, never a log row.
+// Supabase leaves those fields empty it returns nothing and both detectors would read as clean.
+// This counts the window's PostgREST requests, those with a JWT field filled (a user subject can
+// only come from a JWT: detector 2), and those whose API key is of a known kind (#154: an
+// sb_secret_ or sb_publishable_ key fills no JWT field, but its kind gives the role: detector 4).
+// Three numbers, never a log row.
 export function authCoverageSql(env?: EnvVars): string {
   const rest = `match(${attr("path")}, '^/rest/v1/')`;
   return `SELECT
   countIf(${rest}) AS rest_requests,
-  countIf(${rest} AND (${attr("jwtSubject")} != '' OR ${attr("jwtRole")} != '' OR ${attr("apiKeyRole")} != '')) AS rest_with_auth
+  countIf(${rest} AND (${attr("jwtSubject")} != '' OR ${attr("jwtRole")} != '' OR ${attr("apiKeyRole")} != '')) AS rest_with_auth,
+  countIf(${rest} AND ${keyKindSql("apiKeyKind")} IN ('secret', 'publishable', 'jwt')) AS rest_with_key_kind
 FROM logs
 WHERE ${sourceColumn(env)} = 'edge_logs'`;
 }
@@ -150,4 +181,16 @@ GROUP BY key
 HAVING match(key, '(sb|jwt|apikey|role|auth|subject|client_info|user_agent|content_range|search)')
 ORDER BY hits DESC
 LIMIT 200`;
+}
+
+// Issue #154: how many edge-log requests carried each kind of API key and Authorization header.
+// Kinds are worked out inside ClickHouse; the prefixes themselves never leave Supabase.
+export function keyKindCountsSql(env?: EnvVars): string {
+  return `SELECT
+${KIND_COLUMNS.map((k) => `  ${keyKindSql(k)} AS ${k}`).join(",\n")},
+  count() AS hits
+FROM logs
+WHERE ${sourceColumn(env)} = 'edge_logs'
+GROUP BY ${KIND_COLUMNS.join(", ")}
+ORDER BY hits DESC`;
 }

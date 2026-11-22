@@ -402,6 +402,44 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     expect(run).toEqual([{ unassessed_detectors: ["cross_tenant", "service_role_misuse"] }]);
   });
 
+  // Issue #154: sb_secret_ and sb_publishable_ keys are not JWTs, so their requests carry no role
+  // field; the logs give only the key's prefix, which the rollup turns into a kind inside Supabase.
+  // These fakes answer like the real rollup: a row comes back only when the SQL's WHERE keeps it.
+  it("UAT-D20 an sb_secret_ key used from a browser on a home network raises a critical incident", async () => {
+    const s = await watchProject("Secret key app");
+    const leaked = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/notes", search: "?select=*", userAgent: CHROME_UA, asn: "7922", asOrganization: "Comcast",
+      apiKeyKind: "secret", authorizationKind: "secret", hits: "2",
+    });
+    logs = (now, q) => (q.sql.includes("LIMIT") && /\) = 'secret'/.test(q.sql) ? [leaked(new Date(now.getTime() - 200_000))] : []);
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "critical", detectors: ["service_role_misuse"], hits: 2 }]);
+    const run = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ unassessed_detectors: string[] }>(
+      "SELECT unassessed_detectors FROM supahound.poll_runs"));
+    expect(run).toEqual([{ unassessed_detectors: [] }]);
+  });
+
+  it("UAT-D21 sb_publishable_ key reads of a table the posture scan shows open raise a paging incident", async () => {
+    const s = await watchProject("Publishable key app");
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "customers", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    const dump = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/customers", search: "?select=*", userAgent: "curl/8.7.1", contentRange: "0-999/*",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", apiKeyKind: "publishable", authorizationKind: "publishable", hits: "4",
+    });
+    const watched = (sql: string) => sql.includes("'/rest/v1/customers'") && /\) = 'publishable'\)\)\n\s+AND log_attributes\['request.path'\] IN \('\/rest\/v1\/customers'\)/.test(sql);
+    logs = (now, q) => (watched(q.sql) ? [dump(new Date(now.getTime() - 130_000))] : []);
+
+    // First poll: the scan runs. Next poll: the anon branch watches customers and the dump pages.
+    expect(await poll(s, T0, { posture })).toMatchObject({ status: "ok", findings: 0 });
+    expect(await poll(s, at(60), { posture })).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "critical", detectors: ["exposed_read"], hits: 4 }]);
+  });
+
   // Issue #129: the rollup keeps its busiest 5000 templates, so a burst of normal traffic could push
   // a single probe out of the answer and still read as clean.
   // A fake Supabase that, like the real rollup, returns the window's busiest templates up to the query's LIMIT.
