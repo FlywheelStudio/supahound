@@ -10,9 +10,9 @@ import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
 import { SqlQueryError } from "../../src/ownership/client.js";
 import { ownershipFromPolicies } from "../../src/ownership/ownership.js";
-import { AdvisorApiError, parseLints, type AdvisorLint } from "../../src/posture/advisor.js";
+import { AdvisorApiError, advisorFindings, parseLints, type AdvisorLint } from "../../src/posture/advisor.js";
 import { catalogFindings, parseCatalogRows } from "../../src/posture/catalog.js";
-import { POSTURE_SIGNAL } from "../../src/posture/findings.js";
+import { dedupePosture, POSTURE_SIGNAL } from "../../src/posture/findings.js";
 import {
   pollProject, POSTURE_REFRESH_SECONDS, POSTURE_RETRY_SECONDS, type PollDeps,
 } from "../../src/poller/pollProject.js";
@@ -337,6 +337,34 @@ describe.skipIf(pgInfo === null)("posture storage and RLS for signed-in users", 
   it("counts findings per project for the overview", async () => {
     const m = await as(u.owner, A, (tx) => posture.postureSummaries(tx));
     expect(m.get(p1)).toMatchObject({ counts: { critical: 1, high: 0, medium: 0, low: 0 }, scan: { catalogStatus: "ok" } });
+  });
+
+  it("counts an Advisor always-true policy the catalog did not flag, as the Posture page shows it (#134)", async () => {
+    const p = await withTenant(db.app, A, async (tx) => {
+      const conn = await repo.createConnection(tx, db.vault, { label: "z", token: "t" });
+      const p = await repo.createProject(tx, { connectionId: conn, supabaseRef: "ffffffffffffffffffff", name: "Policies" });
+      const scanId = (await posture.claimPostureScan(tx, p, T0, { refreshSeconds: 1, retrySeconds: 1 }))!;
+      const policyRow = {
+        kind: "policy", schema_name: "public", object_name: "notes", rls_enabled: null, rls_forced: null, policy_count: null,
+        security_invoker: null, grants: null, policy_name: "a", permissive: "PERMISSIVE", roles: "anon", cmd: "UPDATE", qual: "true", with_check: null,
+      };
+      const always = (policy: string) => ({
+        name: "rls_policy_always_true", title: "t", level: "WARN", facing: "EXTERNAL", categories: ["SECURITY"], description: "d",
+        detail: "d", remediation: "r", metadata: { schema: "public", name: "notes", type: "table", policy_name: policy, command: "UPDATE" },
+        cache_key: `x_${policy}`,
+      });
+      const adv = advisorFindings(parseLints([always("a"), always("b")]));
+      await posture.savePostureScan(tx, p, scanId, {
+        catalog: { status: "ok", findings: catalogFindings(parseCatalogRows([tableRow("notes", true, 1), policyRow])) },
+        advisor: { status: "ok", findings: adv.status === "ok" ? adv.findings : [] },
+      }, T0);
+      return p;
+    });
+    // Catalog flags policy a (critical); the Advisor repeats a (hidden) and adds b (high).
+    const page = await withTenant(db.app, A, (tx) => posture.listPostureFindings(tx, p));
+    expect(dedupePosture(page).map((f) => `${f.source}:${String(f.evidence.policy)}:${f.severity}`)).toEqual(["catalog:a:critical", "advisor:b:high"]);
+    const m = await as(u.owner, A, (tx) => posture.postureSummaries(tx));
+    expect(m.get(p)!.counts).toEqual({ critical: 1, high: 1, medium: 0, low: 0 });
   });
 
   it("lets owners and editors ask for a scan; RLS refuses a viewer and a stranger", async () => {

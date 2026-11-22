@@ -27,13 +27,17 @@ copyable SQL built from a template. The scan runs on the first poll, then daily,
    - `deps.posture.queryAdvisor` calls the Security Advisor (`posture/advisor.ts`,
      `querySecurityAdvisor`).
 4. `parseCatalogRows` and `catalogFindings` (`posture/catalog.ts`) run the four checks.
-   `parseLints` and `advisorFindings` keep the Advisor's security lints.
+   `parseLints` and `advisorFindings` keep the Advisor's security lints, with the checked
+   metadata of the newer splinter lints (`ADVISOR_METADATA`, issue #134) as evidence and the
+   per-lint severity overrides of `LINT_SEVERITY`.
 5. `savePostureScan` replaces the findings of each source that succeeded and records each
    source's status. A failed source keeps its last good findings.
 6. `raiseForPosture` (`posture/findings.ts`) raises cross-tenant findings on exposed tables. It
    uses the fresh scan, else the stored findings loaded in the poll's first transaction.
 7. The web app reads `postureSummaries` (overview), `getPostureScan` and `listPostureFindings`
-   (dashboard and Posture tab). `dedupePosture` hides Advisor lints that repeat a catalog finding.
+   (dashboard and Posture tab). `dedupePosture` hides Advisor lints that repeat a catalog finding
+   (for `rls_policy_always_true`, only on the same policy). `postureSummaries` reads just the
+   policy and arguments keys of the evidence, so the overview counts what the page shows.
    `fixPrompt` (`posture/fix.ts`) renders each prompt when the page renders.
 8. Scan now: `scanNowAction` (`apps/web/app/w/[tenantId]/p/[projectId]/posture/actions.ts`) checks
    `canScan` (owners, admins, editors) in the project transaction, then `requestPostureScan` sets
@@ -75,17 +79,20 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
 
 ## Testing
 
-- `packages/core/test/posture.test.ts` (53): every check on fixtures, including RLS on with no
+- `packages/core/test/posture.test.ts` (62): every check on fixtures, including RLS on with no
   policies, FORCE and not, views with `security_invoker` true and false, restrictive policies,
   grants; the Advisor client (request shape, every error status, bodies without lints, free
-  text dropped, the unavailable lint); dedupe; the severity raise; fix prompts.
-- `packages/core/test/db/posture.test.ts` (21, Postgres): first poll, audit before the calls, both
+  text dropped, the unavailable lint); dedupe; the severity raise; fix prompts. Issue #134 adds
+  9: the 12 newer splinter lints (metadata kept and refused, severities, one finding per policy
+  and overload, dedupe on the policy, the raise, a specific fix for each).
+- `packages/core/test/db/posture.test.ts` (22, Postgres): first poll, audit before the calls, both
   sources stored; 24-hour refresh; 1-hour retry keeping the last good findings; Advisor failure
   and its unavailable lint; a crash never fails the poll; the raise from a fresh and from a
   stored scan; a table the catalog rates low is not raised even when the Advisor rates it high; no deps, no scan; a scan in the first poll after a pick (`runDuePolls`); Scan now
   (queued, already queued, cooldown, before the first scan); RLS for owner, editor, viewer,
   member without a role and another tenant; findings never writable by signed-in users; CHECKs;
-  cross-tenant foreign keys; cascade on removal; `POSTURE_SQL` on a real Postgres 17 catalog.
+  cross-tenant foreign keys; cascade on removal; `POSTURE_SQL` on a real Postgres 17 catalog;
+  the overview counts an Advisor always-true policy the catalog did not flag (#134).
 - `isolation.test.ts` and `people.test.ts` list both tables.
 - `apps/web/test/posture.test.ts` (10) and `apps/web/test/nav.test.ts`: roles, notices, states, the
   overview line never says "no findings" for a scan that did not run.

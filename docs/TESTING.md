@@ -266,6 +266,9 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | No Advisor free text is kept (#11) | `parseLints` keeps `title` | 2 unit tests fail |
 | Names with control characters are dropped (#11) | `safeName` allows them | 3 unit tests fail |
 | Advisor duplicates show once (#11) | `dedupePosture` keeps all | 2 tests fail (unit and Postgres) |
+| Always-true policies dedupe per policy (#134) | `dedupePosture` ignores the policy name / `postureSummaries` reads no evidence | 1 unit test fails / 1 Postgres test fails |
+| The newer lints rate by exposure (#134) | `sensitive_columns_exposed` override removed | 2 unit tests fail |
+| Each newer lint has its own fix (#134) | `fixPrompt` skips `newerLint` | 1 unit test fails |
 | Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
 | The raise agrees with the Posture page (#11) | `postureExposedTables` filters by severity before dedupe | 1 Postgres test fails |
 | Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |
