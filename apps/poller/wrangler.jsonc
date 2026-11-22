@@ -67,7 +67,7 @@
   "tail_consumers": [{ "service": "supahound-log-sink" }],
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
     "traces": { "enabled": true, "head_sampling_rate": 0.1 }
   }
 }

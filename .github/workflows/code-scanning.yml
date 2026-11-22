@@ -34,6 +34,13 @@ jobs:
           languages: javascript-typescript
           build-mode: none
           queries: security-extended
+          # js/insufficient-password-hash flags sha256() of the logs query text that goes into the audit
+          # log (pollProject.ts). That is not a password: Supahound stores no passwords (sign-in is
+          # Supabase Auth magic links, decision 009). Revisit this exclusion if that ever changes (#172).
+          config: |
+            query-filters:
+              - exclude:
+                  id: js/insufficient-password-hash
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           category: /language:javascript-typescript

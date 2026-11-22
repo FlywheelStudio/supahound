@@ -107,3 +107,10 @@ cron, `logs/<today>/<hour>/` holds an object with a `polls_enqueued` line.
   failed and where; the matching `*_crashed` event names the tenant or project.
 - Cost: tail Workers bill by CPU time; R2 by stored bytes and one write per kept invocation,
   deleted after 90 days.
+
+## Addendum (2026-11-22, #172)
+
+Cloudflare's own invocation logs and traces record full request URLs, including the sign-in
+`token_hash` query string. All three Workers set `observability.logs.invocation_logs: false`, and
+the web Worker turns traces off. Workers Logs still receives our `opsLog` events (7 days), and R2
+keeps the filtered copy for 90 days.
