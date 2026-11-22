@@ -222,7 +222,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       const inWindow = (rows: Record<string, unknown>[]) => (q: LogsQuery) =>
         rows.filter((r) => Date.parse(r.first_seen as string) >= q.start.getTime() && Date.parse(r.first_seen as string) < q.end.getTime())
           .sort((a, b) => Number(b.hits) - Number(a.hits))
-          .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)![1]));
+          .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)?.[1] ?? 0)); // a query without LIMIT (the #130 coverage count) gets no rows
       const burst = (seen: Date) => Array.from({ length: ROLLUP_LIMIT + 1 }, (_, i) => ({
         ...benignRows[0], search: `?user_id=eq.${BOB}&offset=${i}`, first_seen: seen.toISOString(), last_seen: seen.toISOString(),
       }));

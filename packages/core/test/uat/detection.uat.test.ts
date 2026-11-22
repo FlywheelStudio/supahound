@@ -211,7 +211,7 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
   const inWindow = (rows: Record<string, unknown>[]) => (_now: Date, q: LogsQuery) => rows
     .filter((r) => Date.parse(r.first_seen as string) >= q.start.getTime() && Date.parse(r.first_seen as string) < q.end.getTime())
     .sort((a, b) => Number(b.hits) - Number(a.hits))
-    .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)![1]));
+    .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)?.[1] ?? 0)); // a query without LIMIT (the #130 coverage count) gets no rows
   const busyMinute = (seen: Date) => Array.from({ length: ROLLUP_LIMIT + 1 }, (_, i) => row(seen, {
     method: "GET", path: "/rest/v1/notes", search: `?user_id=eq.${BOB}&offset=${i}`, userAgent: CHROME_UA, asn: "7922",
     asOrganization: "Comcast", jwtSubject: BOB, jwtRole: "authenticated", apiKeyRole: "anon", hits: "50",
