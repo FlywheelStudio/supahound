@@ -130,6 +130,7 @@ describe("explainIncident", () => {
     expect(r).toMatchObject({ source: "model", model: PRIMARY_MODEL, explanation: GOOD });
     const call = created[PRIMARY_MODEL]!.doGenerateCalls[0]!;
     expect(call.providerOptions?.gateway).toMatchObject({ zeroDataRetention: true, disallowPromptTraining: true });
+    expect(call.providerOptions?.gateway?.only).toEqual(["anthropic", "xai"]);
     expect(call.reasoning).toBe("low");
     expect(call.temperature).toBeUndefined();
     expect(call.tools ?? []).toEqual([]);
@@ -145,6 +146,7 @@ describe("explainIncident", () => {
     expect(r.attempts.map((a) => [a.model, a.outcome])).toEqual([[PRIMARY_MODEL, "refused"], [FALLBACK_MODEL, "ok"]]);
     const fallbackCall = created[FALLBACK_MODEL]!.doGenerateCalls[0]!;
     expect(fallbackCall.providerOptions?.gateway).toMatchObject({ zeroDataRetention: true });
+    expect(fallbackCall.providerOptions?.gateway?.only).toEqual(["anthropic", "xai"]);
     expect(fallbackCall.reasoning ?? "provider-default").toBe("provider-default");
     expect(fallbackCall.temperature).toBeUndefined();
   });
@@ -203,7 +205,10 @@ describe("explainIncident over the real gateway client", () => {
     const models = new Set(modelCalls.map((b) => b.headers["ai-language-model-id"] ?? b.body.match(/"modelId":"([^"]+)"/)?.[1]));
     expect(models).toEqual(new Set([PRIMARY_MODEL, FALLBACK_MODEL]));
     for (const call of modelCalls) {
-      expect(JSON.parse(call.body).providerOptions?.gateway?.zeroDataRetention).toBe(true);
+      const gateway = JSON.parse(call.body).providerOptions?.gateway;
+      expect(gateway?.zeroDataRetention).toBe(true);
+      // Decision 043: US first-party providers only, never a reseller or a non-US provider.
+      expect(gateway?.only).toEqual(["anthropic", "xai"]);
       expect(call.body).not.toContain(ALICE);
     }
   });

@@ -62,7 +62,8 @@ project for it.
 
 Without `AI_GATEWAY_API_KEY`, incident summaries use template text and no model is called. With
 it, every call asks for zero data retention (decision 005), which needs a Vercel Pro or
-Enterprise team. Billing (Stripe) is part of the hosted product only.
+Enterprise team. Calls go only to Anthropic and xAI, the US first-party providers (decision 043).
+Billing (Stripe) is part of the hosted product only.
 
 Check Cloudflare's and Supabase's current pricing pages for plan limits on Workers, Queues,
 Hyperdrive, Email Service and database size.
