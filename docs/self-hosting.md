@@ -49,9 +49,9 @@ project for it.
 | `SEND_EMAIL_HOOK_SECRET` | That project: Auth → Hooks → Send Email Hook | web | secret | yes |
 | A Supabase OAuth app: `SUPABASE_OAUTH_CLIENT_ID`, `SUPABASE_OAUTH_CLIENT_SECRET` | Your Supabase org: Settings → OAuth Apps | both Workers | var, secret | yes |
 | A Cloudflare account with Workers, Queues and Hyperdrive | dash.cloudflare.com | both Workers | account | yes |
-| Two Hyperdrive configs, caching off | `wrangler hyperdrive create` (step 4) | `HYPERDRIVE_APP` (both), `HYPERDRIVE_SCHEDULER` (poller) | binding | yes |
+| Two Hyperdrive configs, caching off | `wrangler hyperdrive create` (step 4) | `HYPERDRIVE_APP` and `HYPERDRIVE_SCHEDULER` (both Workers) | binding | yes |
 | A queue and a dead-letter queue | `wrangler queues create` (step 5) | poller | binding | yes |
-| A sending domain on Cloudflare Email Service, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `wrangler email sending enable` (step 6) | web (sign-in), poller (incident alerts) | binding, var | yes |
+| A sending domain on Cloudflare Email Service, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | `wrangler email sending enable` (step 6) | web (sign-in, heartbeat), poller (incident alerts, heartbeat) | binding, var | yes |
 | `SUPAHOUND_MASTER_KEYS` | `pnpm -s master-key` (step 2) | both Workers, the same value | secret | yes |
 | `APP_URL` | Your app's origin, for example `https://supahound.example.com` | both Workers | var | yes |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | poller | secret | no |
@@ -59,7 +59,7 @@ project for it.
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO` | Your Stripe account, only with `SUPAHOUND_BILLING=stripe` | web (all), poller (key and prices) | secret, var | no |
 | `SUPAHOUND_BILLING_EXEMPT_DOMAINS` | Your staff email domains, comma-separated; workspaces whose only owner uses one need no card (decision 029). Empty: none | web | var | no |
 | `SUPPORT_EMAIL`, `TERMS_URL`, `PRIVACY_URL` | Your own | web | var | no |
-| `SUPAHOUND_STAFF_ALERT_EMAIL` | Your operator address, or a comma-separated list. Emailed when polling stops or mostly fails (see [Heartbeat](#heartbeat)). Empty: off | poller | var | no |
+| `SUPAHOUND_STAFF_ALERT_EMAIL` | Your operator address, or a comma-separated list. Emailed when polling stops or mostly fails (see [Heartbeat](#heartbeat)). Empty: off | both Workers, the same value | var | no |
 
 Without `AI_GATEWAY_API_KEY`, incident summaries use template text and no model is called. With
 it, every call asks for zero data retention (decision 005), which needs a Vercel Pro or
@@ -140,9 +140,11 @@ wrangler hyperdrive create supahound-scheduler --caching-disabled \
 Test each login with `psql` before you create the config. `hyperdrive create` also connects
 once and fails on a wrong host or password.
 
-Put the IDs in `apps/web/wrangler.jsonc` (`HYPERDRIVE_APP`) and `apps/poller/wrangler.jsonc`
-(`HYPERDRIVE_APP` and `HYPERDRIVE_SCHEDULER`). Caching must stay off (decision 008): a cached
-query result could serve one tenant's rows to another.
+Put both IDs in `apps/web/wrangler.jsonc` and `apps/poller/wrangler.jsonc` (`HYPERDRIVE_APP` and
+`HYPERDRIVE_SCHEDULER`). The web Worker uses the scheduler config only for its cron's heartbeat
+check (aggregates, see [Heartbeat](#heartbeat)). Caching must stay off (decision 008): a cached
+query result could serve one tenant's rows to another. For `wrangler dev`, set
+`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_SCHEDULER` as well as `_HYPERDRIVE_APP`.
 
 ### 5. Queues
 
@@ -232,25 +234,31 @@ the cron that polls every minute runs it.
 
 ## Heartbeat
 
-Set `SUPAHOUND_STAFF_ALERT_EMAIL` in `apps/poller/wrangler.jsonc` to hear when Supahound itself
-stops watching (issue #133). Every minute the poller's cron reads, across all workspaces, when poll
-runs finished and whether they could assess (two columns, through the scheduler role). It emails
-that address when:
+Set `SUPAHOUND_STAFF_ALERT_EMAIL` to the same value in `apps/web/wrangler.jsonc` and
+`apps/poller/wrangler.jsonc` to hear when Supahound itself stops watching (issues #133 and #159).
+Both Workers have a cron that fires every minute and reads, across all workspaces, when poll runs
+finished and whether they could assess (two columns, through the scheduler role). Each Worker owns
+one check:
 
-- no poll run has finished for 15 minutes while some project is due to be polled (the cron, the
-  queue consumer or Hyperdrive is down), or
-- at least 10 runs finished in the last hour and half or more of them could not assess (expired
-  grants, rate limits, a Management API outage).
+- **The web Worker** emails when no poll run has finished for 15 minutes while some project is due
+  to be polled (the poller's cron, the queue consumer or Hyperdrive is down). Because it runs
+  outside the poller, it still fires when the poller's cron has stopped.
+- **The poller** emails when at least 10 runs finished in the last hour and half or more of them
+  could not assess (expired grants, rate limits, a Management API outage).
+
+Neither Worker stores whether it has emailed, and neither can see whether the other did, so they
+split the checks instead of both running them: a problem gets one email per slot, not two. Set the
+address on only one Worker and you get only that Worker's check.
 
 The email holds counts only. It goes out at most once per 6-hour slot (00:00, 06:00, 12:00 and
 18:00 UTC): in the first minute a problem shows, and again at the start of each later slot while it
 lasts. Nothing is stored; each minute works this out again from `poll_runs`. If the cron fails or
 the send fails in that first minute, the next email waits for the next slot.
 
-**Limit.** The check runs inside the poller's own cron. If that cron stops firing, or the poller
-Worker cannot start, nothing emails. The web Worker has no cron to run it from. To cover that case,
-add a check outside the poller: any log alert or monitor that fires when the cron's
-`polls_enqueued` log line (Workers Logs, once a minute) stops arriving.
+**Limit.** If the web Worker's cron stops firing (or the web Worker cannot start) at the same
+time as polling stops, nothing emails, and the poller cannot report a stop on its own. To cover
+that case, add a check outside both Workers: any log alert or monitor that fires when the poller
+cron's `polls_enqueued` log line (Workers Logs, once a minute) stops arriving.
 
 Customers see their side of it as a **log gap**: the project page shows one when the newest 60
 polls counted no edge-log request after earlier traffic. Each poll counts the window's requests with
