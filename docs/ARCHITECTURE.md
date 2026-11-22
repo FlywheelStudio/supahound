@@ -80,7 +80,9 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
    Anon traffic is left out, except anon GET/HEAD on the tables the stored posture shows readable by
    anon (at most 200 plain identifiers, issue #132). The SQL is fixed before that poll's posture scan, so
-   a new scan's tables are watched from the next poll.
+   a new scan's tables are watched from the next poll. Tables an Owner or Admin marked intentionally
+   public (`public_tables`, decision 045) are dropped from that list, so their reads are never fetched;
+   a mark or unmark takes effect from the next poll.
    The rollup keeps the busiest `ROLLUP_LIMIT` (5000) templates and the poller asks for one more. A
    full answer has dropped its quietest templates, so the poller halves the window, keeping its start,
    and asks again (at most `MAX_ROLLUP_QUERIES`, 4, queries a poll). The run then covers that shorter
@@ -88,11 +90,16 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    run is `unable_to_assess` with `rollup_saturated` (issue #129).
    Anon calls to `/rest/v1/rpc/<fn>` are kept too, for the functions the stored posture shows as
    SECURITY DEFINER and anon-executable (at most 200 plain identifiers, issue #131), on the same
-   next-poll basis.
-   A second query counts the window's edge-log requests (`edgeRequestCountSql`, one number) into
-   `poll_runs.edge_requests`; its hash is in the same audit row. A failed count leaves it NULL. The
-   project page shows a **log gap** when the newest 60 counted windows are all zero after earlier
-   traffic (issue #133).
+   next-poll basis. Anon calls to Storage's list endpoint (`/storage/v1/object/list/`, one fixed
+   prefix whatever the bucket) are kept too (#157). Signed-in calls to definer functions need no
+   branch: every REST call with a user subject is already in.
+   A second query (`pollCountSql`) counts the window's edge-log requests into
+   `poll_runs.edge_requests`, and its `/graphql/v1` calls by anon and by authenticated into
+   `graphql_anon_calls` and `graphql_authenticated_calls` (#157): three numbers, never a row. Its
+   hash is in the same audit row. A failed count leaves them NULL. The project page shows a **log
+   gap** when the newest 60 counted windows are all zero after earlier traffic (issue #133); the
+   Posture page shows GraphQL findings only for a role with calls in the last 7 days (decision 038,
+   addendum of #157).
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
@@ -101,9 +108,21 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
    `detectors/exposedRead.ts` (#132) flags anon reads of those anon-readable tables, one finding per
    table, ASN and caller class (actor `anon:asn:<n>`): rows from a critical-posture table rate high,
-   1,000 rows or more in one poll critical; elsewhere low, or medium for 1,000 rows or more.
+   1,000 rows or more in one poll critical; elsewhere low, or medium for 1,000 rows or more. It never
+   sees a table marked intentionally public (decision 045).
    `detectors/rpcExposure.ts` (#131) flags anon calls to those functions, one finding per function,
-   ASN and caller class (actor `anon:asn:<n>`): medium, or high at 100 calls or more in one poll.
+   ASN and caller class (actor `anon:asn:<n>`): medium, or high (signal `rpc_burst`) at the project's
+   RPC burst threshold or more in one poll. The threshold is `projects.rpc_burst_hits`: default 100,
+   10 to 10,000, set by the project's Owners, Admins and Editors on its Notifications page; the
+   finding records it as `burstThreshold` (decision 045).
+   It also records signed-in calls to functions posture shows authenticated-executable (#157):
+   always low, actor `definer:fn:<name>` (the function, never the user, so it never stacks onto a
+   user's incident and never pages), evidence counts the distinct users.
+   `detectors/storageListing.ts` (detector 13, #157) flags anon list calls per bucket, ASN and
+   caller class: medium for a bucket posture flags `public_bucket_allows_listing`, high at 100 list
+   calls in one poll; low for any other bucket, which evidence names only by fingerprint.
+   Low signed-in definer calls and low anon listings of unflagged buckets are dashboard-only: they
+   show in incidents and history but never email, at any alert threshold (`dashboardOnly`).
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
@@ -116,12 +135,19 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    project's threshold that has not been emailed at its severity, one email per member, and marks it
    (decision 030; `alerts/email.ts` renders it). A failed send stays pending for the next poll.
 
-**Heartbeat** (issue #133, `poller/heartbeat.ts`). Each cron run also checks Supahound's own
+**Heartbeat** (issues #133 and #159, `poller/heartbeat.ts`). Two crons check Supahound's own
 polling through the scheduler role, which reads `poll_runs (status, finished_at)` and no other
-column: aggregates only. When no run has finished for 15 minutes while projects are due, or half of
-the last hour's runs (10 or more) could not assess, it emails `SUPAHOUND_STAFF_ALERT_EMAIL`. The
-throttle keeps no state: in each 6-hour slot only the first breached minute emails. A dead cron
-cannot report itself; `docs/self-hosting.md` names the external check that covers it.
+column: aggregates only. Each owns one check and emails `SUPAHOUND_STAFF_ALERT_EMAIL`:
+
+- **Stale**, on the web Worker's cron (`apps/web/worker/index.ts`, `lib/heartbeat.ts`): no run has
+  finished for 15 minutes while projects are due. It runs outside the poller, so a dead poller cron
+  is still reported.
+- **Failing**, on the poller's cron: half of the last hour's runs (10 or more) could not assess.
+
+The throttle keeps no state: in each 6-hour slot only the first breached minute emails. Neither cron
+can see whether the other has emailed, so one owner per check is what keeps a slot to one email per
+condition. A dead web cron leaves staleness unreported; `docs/self-hosting.md` names the external
+check that covers it.
 
 ## Detection rules
 
@@ -149,6 +175,10 @@ known false positives. Rule IDs are derived from a finding's or incident's detec
 | SH-D11-003 | exposed_read / bulk_read | T1190, T1213 | API8, API1 | high |
 | SH-D12-001 | rpc_exposure / definer_rpc_call | T1190 | API5, API8 | medium |
 | SH-D12-002 | rpc_exposure / rpc_burst | T1190 | API5, API8 | high |
+| SH-D12-003 | rpc_exposure / authenticated_definer_call | T1078 | API5 | low |
+| SH-D13-001 | storage_listing / anon_bucket_list | T1530 | API8 | low |
+| SH-D13-002 | storage_listing / listable_bucket | T1530, T1619 | API8, API3 | medium |
+| SH-D13-003 | storage_listing / list_burst | T1530, T1619 | API8, API4 | medium |
 
 A new signal or detector needs an entry: the registry's type fails the typecheck without one, and
 `rules.test.ts` checks every signal at runtime. `incidents/ocsf.ts` turns an incident into an OCSF
@@ -215,7 +245,7 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `project_members` | A workspace member's role on one project: owner / admin / editor / viewer (decision 036) |
 | `project_invites` | An email invite to one project: token hash, role, expiry, accepted or canceled |
 | `connections` | One Supabase OAuth grant; sealed token |
-| `projects` | One watched Supabase project; ownership map and when it last loaded; paused flag |
+| `projects` | One watched Supabase project; ownership map and when it last loaded; paused flag; email alert level and RPC burst threshold |
 | `poll_runs` | One poll: window, status, error code, detectors it could not check, edge-log request count |
 | `findings` | Detector output: structured evidence only |
 | `incidents` | Grouped findings per actor; severity, hits, summary and its source |
@@ -225,6 +255,7 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `posture_findings` | Latest posture findings per source: check, severity, object, structured evidence |
 | `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
 | `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
+| `public_tables` | Tables in `public` a project's Owners or Admins marked intentionally public: detector 11 skips them, the Posture page shows their read findings as accepted (decision 045) |
 | `audit_log` | Every query and model call, append-only |
 | `security_events` | Supahound's own security events: sign-ins, invites, role changes, connections, project changes, closing, data deletion; actor, action, target, result; IDs and enums only. Workspace owners read it (RLS); append-only for signed-in users; 90 days once the workspace stops paying (decision 044) |
 | `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project); processed Stripe events; requests per project per day (decisions 028, 041) |

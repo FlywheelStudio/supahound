@@ -367,6 +367,52 @@ describe.skipIf(pgInfo === null)("posture storage and RLS for signed-in users", 
     expect(m.get(p)!.counts).toEqual({ critical: 1, high: 1, medium: 0, low: 0 });
   });
 
+  it("hides GraphQL findings until the last 7 days of runs counted GraphQL calls from their role (#157)", async () => {
+    const p = await withTenant(db.app, A, async (tx) => {
+      const conn = await repo.createConnection(tx, db.vault, { label: "g", token: "t" });
+      const p = await repo.createProject(tx, { connectionId: conn, supabaseRef: "gggggggggggggggggggg", name: "GraphQL" });
+      const scanId = (await posture.claimPostureScan(tx, p, T0, { refreshSeconds: 1, retrySeconds: 1 }))!;
+      await posture.savePostureScan(tx, p, scanId, {
+        catalog: { status: "ok", findings: catalogFindings(parseCatalogRows([
+          { ...tableRow("notes", true, 1), graphql_roles: "authenticated" },
+          { ...tableRow("posts", true, 1), graphql_roles: "anon,authenticated" },
+        ])) },
+        advisor: { status: "ok", findings: [] },
+      }, T0);
+      return p;
+    });
+    const view = () => withTenant(db.app, A, (tx) => posture.postureView(tx, p));
+    const counts = async () => (await as(u.owner, A, (tx) => posture.postureSummaries(tx))).get(p)!.counts;
+    const run = (calls: { anon: number; authenticated: number } | null, daysAgo = 0) => withTenant(db.app, A, async (tx) => {
+      const id = await repo.startPollRun(tx, p, { start: T0, end: after(60) });
+      await repo.finishPollRun(tx, id, { status: "ok", graphqlCalls: calls });
+      await tx.query("UPDATE supahound.poll_runs SET started_at = now() - make_interval(days => $3) WHERE tenant_id = $1 AND id = $2", [A, id, daysAgo]);
+    });
+
+    // No counted run: both GraphQL findings hidden, and the overview counts neither.
+    expect((await view()).findings).toEqual([]);
+    expect((await view()).hiddenGraphql.map((f) => f.object).sort()).toEqual(["notes", "posts"]);
+    expect(await counts()).toEqual({ critical: 0, high: 0, medium: 0, low: 0 });
+
+    // Uncounted runs, zero counts, and anon calls older than 7 days change nothing.
+    await run(null);
+    await run({ anon: 0, authenticated: 0 });
+    await run({ anon: 40, authenticated: 0 }, 8);
+    expect((await view()).findings).toEqual([]);
+
+    // Recent anon calls show posts (anon may see it), not notes (authenticated only).
+    await run({ anon: 3, authenticated: 0 }, 1);
+    expect((await view()).findings.map((f) => `${f.object}:${f.severity}`)).toEqual(["posts:medium"]);
+    expect((await view()).hiddenGraphql.map((f) => f.object)).toEqual(["notes"]);
+    expect(await counts()).toEqual({ critical: 0, high: 0, medium: 1, low: 0 });
+
+    // Signed-in calls show notes too.
+    await run({ anon: 0, authenticated: 9 });
+    expect((await view()).hiddenGraphql).toEqual([]);
+    expect(await counts()).toEqual({ critical: 0, high: 0, medium: 1, low: 1 });
+    expect(await withTenant(db.app, B, (tx) => posture.graphqlActivity(tx, p))).toEqual({ anon: false, authenticated: false });
+  });
+
   it("lets owners and editors ask for a scan; RLS refuses a viewer and a stranger", async () => {
     expect(await as(u.editor, A, (tx) => posture.requestPostureScan(tx, p1, u.editor, 0))).toBe("queued");
     await expect(as(u.viewer, A, (tx) => posture.requestPostureScan(tx, p1, u.viewer, 0))).rejects.toThrow(/row-level security/);

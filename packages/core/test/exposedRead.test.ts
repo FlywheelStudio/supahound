@@ -7,7 +7,7 @@ import { validateExplanation } from "../src/explainer/validate.js";
 import { applyFindings } from "../src/incidents/engine.js";
 import { anonReadTables, edgeRollupSql, MAX_ANON_READ_TABLES } from "../src/logs/sql.js";
 import { catalogFindings, parseCatalogRows } from "../src/posture/catalog.js";
-import { anonReadableTables, type AnonReadable } from "../src/posture/findings.js";
+import { acceptedAsPublic, anonReadableTables, countBySeverity, withoutPublicTables, type AnonReadable } from "../src/posture/findings.js";
 import type { PostureFinding } from "../src/posture/types.js";
 import { scan } from "../src/scan.js";
 import { ServiceRoleNetworks } from "../src/detectors/serviceRole.js";
@@ -83,10 +83,57 @@ describe("anonReadableTables (posture → watched tables)", () => {
   });
 });
 
+describe("intentionally public tables (issue #160, decision 045)", () => {
+  const PUBLIC = new Set(["prices"]);
+
+  it("drops marked tables from the watch list, so the rollup never fetches them and nothing is raised", () => {
+    const watched = withoutPublicTables(
+      anonReadableTables([pf({}), pf({ object: "prices", severity: "critical" })]),
+      PUBLIC,
+    );
+    expect([...watched.keys()]).toEqual(["customers"]);
+    const sql = edgeRollupSql({ env: {}, anonReadTables: watched.keys() });
+    expect(sql).toContain("'/rest/v1/customers'");
+    expect(sql).not.toContain("prices");
+    expect(detectExposedReads([anonRead({ path: "/rest/v1/prices" })], watched)).toEqual([]);
+    // Unmarked: the same read is watched and raised again.
+    const unmarked = withoutPublicTables(anonReadableTables([pf({ object: "prices" })]), new Set());
+    expect(detectExposedReads([anonRead({ path: "/rest/v1/prices" })], unmarked)).toHaveLength(1);
+  });
+
+  it("accepts a marked table's read findings and keeps its write findings open", () => {
+    const accepted = (f: PostureFinding) => acceptedAsPublic(f, PUBLIC);
+    // RLS off, SELECT only for the API roles; a read-all policy; the Advisor's RLS lint (no grants known).
+    expect(accepted(pf({ object: "prices", evidence: { exposure: "anon", anonPrivileges: ["SELECT"], authenticatedPrivileges: ["SELECT"] } }))).toBe(true);
+    expect(accepted(pf({ object: "prices", check: "permissive_policy", severity: "medium", evidence: { openCommands: ["SELECT"], readExposure: "anon" } }))).toBe(true);
+    expect(accepted(pf({ object: "prices", source: "advisor", check: "rls_disabled_in_public", evidence: {} }))).toBe(true);
+    // Writes stay open: RLS off with Supabase's default grants, or a policy that opens INSERT.
+    expect(accepted(pf({ object: "prices", evidence: { exposure: "anon", anonPrivileges: ["SELECT", "INSERT"], authenticatedPrivileges: [] } }))).toBe(false);
+    expect(accepted(pf({ object: "prices", evidence: { exposure: "anon", anonPrivileges: ["SELECT"], authenticatedPrivileges: ["UPDATE"] } }))).toBe(false);
+    expect(accepted(pf({ object: "prices", check: "permissive_policy", evidence: { openCommands: ["SELECT", "INSERT"] } }))).toBe(false);
+    expect(accepted(pf({ object: "prices", check: "permissive_policy", evidence: { openCommands: [] } }))).toBe(false);
+    // Other checks, other tables, other schemas, views: never.
+    expect(accepted(pf({ object: "prices", check: "graphql_table_exposed", evidence: {} }))).toBe(false);
+    expect(accepted(pf({ object: "customers", evidence: { anonPrivileges: ["SELECT"] } }))).toBe(false);
+    expect(accepted(pf({ object: "prices", schema: "private", evidence: { anonPrivileges: ["SELECT"] } }))).toBe(false);
+    expect(accepted(pf({ object: "prices", objectType: "view", evidence: { anonPrivileges: ["SELECT"] } }))).toBe(false);
+  });
+
+  it("leaves accepted findings out of the counts", () => {
+    const list = [
+      pf({ object: "prices", evidence: { anonPrivileges: ["SELECT"], authenticatedPrivileges: [] } }),
+      pf({ object: "customers", severity: "high" }),
+    ];
+    expect(countBySeverity(list)).toEqual({ critical: 1, high: 1, medium: 0, low: 0 });
+    expect(countBySeverity(list, PUBLIC)).toEqual({ critical: 0, high: 1, medium: 0, low: 0 });
+  });
+});
+
 describe("rollup SQL anon-read branch", () => {
   it("adds no branch when no table is exposed", () => {
     expect(edgeRollupSql({ env: {} })).toBe(edgeRollupSql({ env: {}, anonReadTables: [] }));
-    expect(edgeRollupSql({ env: {} })).not.toContain("'anon'");
+    expect(edgeRollupSql({ env: {} })).not.toContain("IN ('GET', 'HEAD')");
+    expect(edgeRollupSql({ env: {} })).not.toContain("'/rest/v1/");
   });
 
   it("matches anon GET/HEAD on exactly the exposed table paths", () => {

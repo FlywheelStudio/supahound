@@ -54,4 +54,4 @@ Events with no workspace go to Workers logs as `{"event":"security_event","kind"
 | `packages/core/test/db/isolation.test.ts` | The table is in the catalog with forced RLS and `project_access`; each tenant sees only its rows |
 | `packages/core/test/db/dataControls.test.ts` | The purge empties it (it is not in the kept list) |
 | `apps/web/test/securityLog.test.ts` | Owner check, cursor, a sentence for every action, result labels; rejected OAuth state and bad hook signature log one JSON line with no personal data |
-| UAT-W51 (`apps/web/e2e/specs/securityLog.uat.spec.ts`) | The owner reads a member's sign-in and an invite in the log; the member gets no log and no link; rows hold no address |
+| UAT-W53 (`apps/web/e2e/specs/securityLog.uat.spec.ts`) | The owner reads a member's sign-in and an invite in the log; the member gets no log and no link; rows hold no address |

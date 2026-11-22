@@ -6,7 +6,7 @@ import { createPaidWorkspace, settled, signIn, tenantFromUrl, uniqueEmail } from
 // recorded in the workspace, only its owners can read them, and a row holds no address.
 
 test.describe("UAT: security log", () => {
-  test("UAT-W51 the owner reads sign-ins and invites in the security log; a member cannot; rows hold no address", async ({ page, browser }) => {
+  test("UAT-W53 the owner reads sign-ins and invites in the security log; a member cannot; rows hold no address", async ({ page, browser }) => {
     const ownerEmail = uniqueEmail("w51");
     await signIn(page, ownerEmail);
     await page.getByLabel("Workspace name").fill("w51 Co");

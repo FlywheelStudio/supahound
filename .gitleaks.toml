@@ -22,8 +22,10 @@ keywords = ["sb_secret_"]
 
 [[rules]]
 id = "supabase-personal-access-token"
-description = "Supabase personal access token or OAuth token"
-regex = '''\bsbp_(?:oauth_)?[a-f0-9]{40}\b'''
+description = "Supabase personal access token (classic or scoped) or OAuth token"
+# Classic and OAuth tokens are 40 hex. A scoped token starts with `sbp_fc` and its length is not
+# published, so its body only has a floor; same pattern as packages/core/src/scan/secrets.ts.
+regex = '''\bsbp_(?:oauth_[a-f0-9]{40}|fc[A-Za-z0-9]{32,}|[a-f0-9]{40})\b'''
 keywords = ["sbp_"]
 
 [[rules]]

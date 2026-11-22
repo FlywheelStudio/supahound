@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  actorAlias, alertDue, cleanText, meetsThreshold, proseHtml, renderIncidentEmail, stripLinks, truncate,
+  actorAlias, alertDue, dashboardOnly, cleanText, meetsThreshold, proseHtml, renderIncidentEmail, stripLinks, truncate,
   type AlertEmailInput,
 } from "../src/alerts/email.js";
 import { ALICE } from "./helpers.js";
@@ -152,5 +152,19 @@ describe("untrusted text", () => {
     expect(proseHtml("use `a<b>`", 50)).toBe(
       'use <code style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#f1f5f9;padding:1px 4px;border-radius:4px">a&lt;b&gt;</code>',
     );
+  });
+});
+
+describe("dashboard-only incidents (Erik, 2026-11-22)", () => {
+  it("never emails low signed-in definer calls or unflagged anon bucket listings", () => {
+    expect(dashboardOnly({ severity: "low", signals: ["authenticated_definer_call"] })).toBe(true);
+    expect(dashboardOnly({ severity: "low", signals: ["anon_bucket_list", "list_burst"] })).toBe(true);
+  });
+  it("emails as usual once a signal is flagged, mixed in, or the incident is above low", () => {
+    expect(dashboardOnly({ severity: "medium", signals: ["anon_bucket_list", "listable_bucket"] })).toBe(false);
+    expect(dashboardOnly({ severity: "low", signals: ["anon_bucket_list", "listable_bucket"] })).toBe(false);
+    expect(dashboardOnly({ severity: "low", signals: ["authenticated_definer_call", "other_owner"] })).toBe(false);
+    expect(dashboardOnly({ severity: "medium", signals: ["authenticated_definer_call"] })).toBe(false);
+    expect(dashboardOnly({ severity: "low", signals: [] })).toBe(false);
   });
 });

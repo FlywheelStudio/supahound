@@ -70,16 +70,18 @@ export interface ProjectRecord {
   activeUntil: Date | null;
   // The lowest severity that emails members, or "off" (decision 030).
   emailAlerts: AlertLevel;
+  // Detector 12's paging threshold: anon calls from one network in one poll (decision 045).
+  rpcBurstHits: number;
 }
 
 export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRecord | null> {
   const rows = await tx.query<{
     connection_id: string; supabase_ref: string; ownership: OwnershipMap; expected_asns: number[]; paused: boolean;
     ownership_refreshed_at: Date | null; ownership_attempted_at: Date | null; ownership_error: string | null;
-    email_alerts: AlertLevel; name: string; active_until: Date | null;
+    email_alerts: AlertLevel; name: string; active_until: Date | null; rpc_burst_hits: number;
   }>(
     `SELECT name, connection_id, supabase_ref, ownership, expected_asns, paused, active_until,
-            ownership_refreshed_at, ownership_attempted_at, ownership_error, email_alerts
+            ownership_refreshed_at, ownership_attempted_at, ownership_error, email_alerts, rpc_burst_hits
      FROM supahound.projects WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, id],
   );
@@ -98,6 +100,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
     paused: r.paused,
     activeUntil: r.active_until,
     emailAlerts: r.email_alerts,
+    rpcBurstHits: r.rpc_burst_hits,
   };
 }
 
@@ -210,6 +213,8 @@ export async function finishPollRun(
     unassessedDetectors?: Finding["detector"][];
     // Edge-log requests in the window (issue #133); null or absent when not counted.
     edgeRequests?: number | null;
+    // GraphQL calls in the window per role (issue #157); null or absent when not counted.
+    graphqlCalls?: { anon: number; authenticated: number } | null;
     // The end of the span actually assessed, when a saturated rollup cut the window short (#129).
     windowEnd?: Date;
   },
@@ -217,10 +222,11 @@ export async function finishPollRun(
   await tx.query(
     `UPDATE supahound.poll_runs
      SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, edge_requests = $8,
-         window_end = coalesce($9, window_end), finished_at = now()
+         window_end = coalesce($9, window_end), graphql_anon_calls = $10, graphql_authenticated_calls = $11, finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null,
-      result.unassessedDetectors ?? [], result.edgeRequests ?? null, result.windowEnd ?? null],
+      result.unassessedDetectors ?? [], result.edgeRequests ?? null, result.windowEnd ?? null,
+      result.graphqlCalls?.anon ?? null, result.graphqlCalls?.authenticated ?? null],
   );
 }
 
@@ -311,7 +317,8 @@ export async function setIncidentSummary(
   );
 }
 
-export type AuditAction = "logs_query" | "policies_query" | "model_call" | "alert_email";
+// detection_setting: a person changed a per-project detection setting (decision 045).
+export type AuditAction = "logs_query" | "policies_query" | "model_call" | "alert_email" | "detection_setting";
 
 export async function appendAudit(
   tx: TenantTx,
@@ -398,6 +405,8 @@ export interface ProjectSummary {
   // unassessed; "no_owned_tables" when the policies loaded but scope no table to an owner.
   crossTenant: "assessed" | "unable_to_assess" | "no_owned_tables" | null;
   emailAlerts: AlertLevel;
+  // Detector 12's paging threshold (decision 045).
+  rpcBurstHits: number;
   // The signed-in user's role on this project (decision 036); null outside a user transaction.
   role: ProjectRole | null;
   // Decision 042: the scheduled removal, or null.
@@ -421,9 +430,9 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
     last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean; email_alerts: AlertLevel;
-    role: ProjectRole | null; active_until: Date | null; delete_after: Date | null; log_gap: boolean;
+    rpc_burst_hits: number; role: ProjectRole | null; active_until: Date | null; delete_after: Date | null; log_gap: boolean;
   }>(
-    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts, p.active_until, p.delete_after,
+    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts, p.rpc_burst_hits, p.active_until, p.delete_after,
             supahound.project_role(p.id) AS role,
             p.ownership_refreshed_at IS NOT NULL AS ownership_loaded,
             p.ownership = '{}'::jsonb AS ownership_empty,
@@ -448,6 +457,7 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     lastPolledAt: r.last_polled_at, openIncidents: r.open_incidents, lastRunStatus: r.last_run_status,
     crossTenant: crossTenantCoverage(r.last_unassessed, r.ownership_loaded, r.ownership_empty),
     emailAlerts: r.email_alerts,
+    rpcBurstHits: r.rpc_burst_hits,
     role: r.role,
     removal: r.active_until && r.delete_after ? { activeUntil: r.active_until, deleteAfter: r.delete_after } : null,
     logGap: r.log_gap,

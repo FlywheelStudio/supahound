@@ -77,6 +77,23 @@ describe.skipIf(pgInfo === null)("poller heartbeat and log gap", () => {
       const body = sent[0]!.text + sent[0]!.html;
       for (const banned of [a.tenantId, a.projectId, REF, "Agency"]) expect(body).not.toContain(banned);
     });
+
+    it("issue #159: of the two crons, only the web cron's stale check emails a stopped poller", async () => {
+      await run(a, new Date("2026-10-27T12:09:30Z"), "ok");
+      const sent: string[] = [];
+      const deps = (checks: "stale" | "failing") => ({
+        scheduler: db.scheduler, billing: "off" as const, staffEmail: "ops@example.com",
+        send: async () => { sent.push(checks); },
+        from: { email: "alerts@example.com", name: "Supahound alerts" }, appUrl: "https://app.example",
+        checks,
+      });
+      for (let m = 20; m < 40; m++) {
+        const now = new Date(Date.parse("2026-10-27T12:00:00Z") + m * 60_000);
+        await runHeartbeat(deps("failing"), now);
+        await runHeartbeat(deps("stale"), now);
+      }
+      expect(sent).toEqual(["stale"]);
+    });
   });
 
   describe("log gap", () => {

@@ -52,6 +52,30 @@ copyable SQL built from a template. The scan runs on the first poll, then daily,
 Severity rules and the Advisor mapping: decision 038, items 4 and 5, and its addendum for the
 function and GraphQL checks (#135).
 
+## Intentionally public tables and the RPC burst threshold (#160, decision 045)
+
+- **Intentionally public tables.** The Posture page's "Intentionally public tables" section lists
+  the marked tables (with Unmark) and the tables posture shows anyone can read
+  (`anonReadableTables`), each with "Mark intentionally public". Owners and Admins only
+  (`mark_public`); others see the list and a note. The poller drops marked tables from detector 11's
+  watch list before it builds the rollup SQL (`withoutPublicTables` in `posture/findings.ts`), so
+  their anon reads are never fetched. On the page, `acceptedAsPublic` turns a marked table's
+  read-only findings (RLS off with SELECT-only grants, a SELECT-only read-all policy, the Advisor's
+  RLS lint) into "Accepted (intentionally public)" and leaves them out of every count (Posture page,
+  dashboard, overview). A finding that also lets the Data API write stays open with a note. Storage:
+  `public_tables` (`db/detectionSettings.ts`); every mark and unmark writes a `detection_setting`
+  audit row.
+- **RPC burst threshold.** `projects.rpc_burst_hits` (default 100, 10 to 10,000), on the project's
+  Notifications page next to the email alert threshold; Owners, Admins and Editors change it, as
+  they change `email_alerts`. The poller passes it to `detectRpcExposure` through `scan()`; each
+  change writes a `detection_setting` audit row with the old and new value.
+- Migration `supabase/migrations/20261122150000_project_detection_settings.sql` (Erik applies it).
+- Tests: `packages/core/test/exposedRead.test.ts` and `rpcExposure.test.ts` (units),
+  `packages/core/test/db/detectionSettings.test.ts` (Postgres: roles in RLS, audit rows, CHECKs,
+  cross-tenant foreign key, cascade, overview counts), UAT-D15 and UAT-D16 (whole poll),
+  `apps/web/test/detectionSettings.test.ts`, UAT-W51 (`posture.uat.spec.ts`) and UAT-W52
+  (`alerts.uat.spec.ts`).
+
 ## Data model and RLS
 
 Migration `supabase/migrations/20261112020000_posture_scan.sql` (additive, no DROP):
@@ -124,5 +148,8 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
 - **pg_graphql exposure is broad.** On a default Supabase project every table the API roles can
   read shows in the GraphQL schema, so `graphql_table_exposed` rates medium (anon) or low and never
   raises detections. The Advisor reports the same objects (lints 0026/0027); dedupe shows one.
+  Since #157 these findings (and both Advisor lints) are shown and counted only for a role whose
+  GraphQL calls the last 7 days of polls counted; otherwise the Posture page hides them with a
+  note (decision 038, addendum of #157).
 - **Not verified live:** the Advisor's response shape, and `has_table_privilege` for other roles
   as `supabase_read_only_user`. Needs the OAuth app (#4).
