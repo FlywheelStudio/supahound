@@ -48,6 +48,16 @@ Erik approved the scope and asked for the calls below to be made and recorded wi
    An Advisor lint that repeats a catalog finding on the same object is hidden when read
    (`rls_disabled_in_public` and `policy_exists_rls_disabled` → `rls_disabled`,
    `rls_enabled_no_policy` → `rls_no_policies`, `security_definer_view` → `view_not_invoker`).
+   *Amended by issue #134 (2026-11-22):* the 12 newer security lints of splinter, the Advisor's
+   lint source (0019 to 0032), are known by name, each with its own fix prompt.
+   `rls_policy_always_true` → `permissive_policy`, matched on the policy name. A few lints carry
+   structured metadata (policy name and command, a function's identity arguments, SECURITY
+   DEFINER, sensitive column names, a foreign key or extension name, versions); each value is
+   checked as a catalog name, an enum, a boolean or a version before it is stored as evidence.
+   Severity overrides: `sensitive_columns_exposed` critical, `rls_policy_always_true` high,
+   `anon_security_definer_function_executable` high, `anon_dynamic_sql_function_executable`
+   critical (ERROR) or high (WARN), `pg_graphql_authenticated_table_exposed` low. A table lint at
+   high or above raises detections as in item 7; the function lints have no table to raise.
 6. **Storage.** `posture_scans`, one row per project (request, attempt, status and time per
    source, counts). `posture_findings`, the latest result per source. A source that succeeds
    replaces its rows; a source that fails keeps its last good rows and records an error code,

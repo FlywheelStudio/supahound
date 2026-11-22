@@ -51,7 +51,9 @@ const SIGNAL_SEVERITY = {
   new_network: "medium",
 } as const satisfies Record<string, Severity>;
 
-type Signal = keyof typeof SIGNAL_SEVERITY;
+// The signals this detector emits. Each one needs a rule in `rules.ts` (rules.test.ts checks).
+export type ServiceRoleSignal = keyof typeof SIGNAL_SEVERITY;
+export const SERVICE_ROLE_SIGNALS = Object.keys(SIGNAL_SEVERITY) as ServiceRoleSignal[];
 
 // Processes one poll's events. On a project's first poll, hosting networks are learned
 // without a `new_network` signal; every other signal fires from the first poll.
@@ -66,7 +68,7 @@ export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleCon
     const caller = classifyCaller(event.userAgent, event.clientInfo);
     const network = classifyNetwork(event.asn, event.asOrganization);
     const expected = event.asn !== null && (ctx.expectedAsns?.has(event.asn) ?? false);
-    const signals: Signal[] = [];
+    const signals: ServiceRoleSignal[] = [];
 
     if (caller.callerClass === "browser") signals.push("browser_caller");
     if (caller.callerClass === "mobile_app") signals.push("mobile_app_caller");

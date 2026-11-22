@@ -50,6 +50,9 @@ export interface FetchedDocument {
   contentType: string;
   text: string;
   truncated: boolean;
+  // The `SourceMap` (or legacy `X-SourceMap`) response header, unresolved. Callers fetch it only
+  // through `scopedGet`, like any other URL.
+  sourceMap: string | null;
 }
 
 export interface RefusedFetch {
@@ -175,6 +178,7 @@ export async function scopedGet(rawUrl: string, verifiedApex: string, opts: Scop
         contentType: (res.headers.get("content-type") ?? "").toLowerCase(),
         text,
         truncated,
+        sourceMap: res.headers.get("sourcemap") ?? res.headers.get("x-sourcemap"),
       };
     } catch (err) {
       const reason = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "read error";

@@ -20,9 +20,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       # The binary is pinned by version and SHA-256; no third-party action and no licence key.
       # Rules: .gitleaks.toml (decision 025). Scans every commit on the checked-out history.
       - name: Install gitleaks 8.30.1
@@ -32,14 +33,54 @@ jobs:
           tar -xzf gitleaks.tgz gitleaks
       - run: ./gitleaks git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
 
+  workflows:
+    name: Workflow lint (zizmor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned by version and SHA-256, like gitleaks. Fails on any high-severity finding; a finding
+      # that is safe by design carries `# zizmor: ignore[<audit>]` and a comment saying why.
+      # GH_TOKEN turns on the online audits (impostor commits, known-vulnerable actions).
+      - name: Install zizmor 1.32.0
+        run: |
+          curl -sSfL -o zizmor.tgz https://github.com/zizmorcore/zizmor/releases/download/v1.32.0/zizmor-x86_64-unknown-linux-gnu.tar.gz
+          echo "bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b  zizmor.tgz" | sha256sum -c -
+          tar -xzf zizmor.tgz zizmor
+      - name: Audit .github/workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./zizmor --format github --min-severity high .github/workflows
+
+  osv:
+    name: Dependency vulnerabilities (OSV)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned by version and SHA-256 (the release's osv-scanner_SHA256SUMS). Fails on any known
+      # vulnerability in pnpm-lock.yaml that osv-scanner.toml does not list with a reason and expiry.
+      - name: Install osv-scanner 2.7.1
+        run: |
+          curl -sSfL -o osv-scanner https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64
+          echo "fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+      - run: ./osv-scanner scan source --config osv-scanner.toml --lockfile pnpm-lock.yaml
+
   check:
     name: Typecheck, lint, test, build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -73,9 +114,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -96,7 +139,7 @@ jobs:
       - run: pnpm e2e
       - name: Upload the Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: |
