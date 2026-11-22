@@ -30,6 +30,53 @@ test.describe("signed out", () => {
     expect((await request.get("/login")).headers()["cache-control"]).toBe("private, no-store");
   });
 
+  // Issue #143: security headers on every response, and a nonce-based CSP that still lets the
+  // page hydrate. vinext reads the nonce from the middleware's CSP header and puts it on its
+  // inline scripts; if it stopped doing so, the browser would block them and React would never
+  // hydrate.
+  test("pages send the security headers and hydrate under the CSP", async ({ page, request }) => {
+    const violations: string[] = [];
+    page.on("console", (m) => {
+      if (/Content Security Policy/i.test(m.text())) violations.push(m.text());
+    });
+    await page.addInitScript(() => {
+      document.addEventListener("securitypolicyviolation", (e) => {
+        ((window as unknown as { __csp: string[] }).__csp ??= []).push(`${e.violatedDirective} ${e.blockedURI}`);
+      });
+    });
+
+    const res = await page.goto("/login");
+    const h = res!.headers();
+    expect(h["strict-transport-security"]).toBe("max-age=31536000; includeSubDomains");
+    expect(h["x-content-type-options"]).toBe("nosniff");
+    expect(h["x-frame-options"]).toBe("DENY");
+    expect(h["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+    expect(h["permissions-policy"]).toContain("camera=()");
+    const csp = h["content-security-policy"]!;
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("unsafe-eval");
+    const nonce = /script-src 'self' 'nonce-([A-Za-z0-9+/=]+)'/.exec(csp)?.[1];
+    expect(nonce).toBeTruthy();
+
+    // Every script on the page carries this response's nonce, and React hydrated the form.
+    const scriptNonces = await page.locator("script").evaluateAll((s) => s.map((el) => (el as HTMLScriptElement).nonce));
+    expect(scriptNonces.length).toBeGreaterThan(0);
+    expect(new Set(scriptNonces)).toEqual(new Set([nonce]));
+    await expect
+      .poll(() => page.getByLabel("Work email").evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactFiber$"))))
+      .toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? [])).toEqual([]);
+    expect(violations).toEqual([]);
+
+    // A new nonce per response; redirects and refusals get the headers too.
+    const again = (await request.get("/login")).headers()["content-security-policy"];
+    expect(again).not.toContain(`'nonce-${nonce}'`);
+    const redirect = await request.get("/app", { maxRedirects: 0 });
+    expect(redirect.headers()["x-frame-options"]).toBe("DENY");
+    const refused = await request.post("/login", { headers: { origin: "https://evil.example" }, form: { email: "a@b.co" } });
+    expect(refused.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  });
+
   for (const path of ["/app", "/onboarding", "/w/00000000-0000-4000-8000-000000000000"]) {
     test(`${path} redirects to /login and is never cached`, async ({ request }) => {
       const res = await request.get(path, { maxRedirects: 0 });

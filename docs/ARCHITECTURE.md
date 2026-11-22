@@ -126,7 +126,11 @@ tenant's row counts stay the same.
 - **ZDR on every call** (decision 005). `providerOptions.gateway.zeroDataRetention = true` is set
   after any merge, so nothing can override it. A routing report without ZDR discards the output.
 - **Web hardening.** Users come only from `getClaims()`. The middleware rejects cross-origin
-  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. The Send Email
+  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. It also sends
+  security headers on every response (`apps/web/lib/security.ts`, #143): HSTS, `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal `Permissions-Policy`, and a CSP with a fresh
+  nonce per response (`script-src 'self' 'nonce-…'`, `frame-ancestors 'none'`). vinext reads the
+  nonce back from that header and puts it on its inline hydration scripts. The Send Email
   Hook checks its Standard Webhooks signature. The OAuth state is single-use, bound to the user and
   the workspace, and stored only as a hash.
 
