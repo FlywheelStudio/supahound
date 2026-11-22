@@ -87,6 +87,31 @@ Erik asked for a secrets scanner and chose to probe leak paths as well as client
 - Not matched, on purpose: Cloudflare's older unprefixed tokens (40 alphanumerics, no distinct shape),
   `cfoat_` Wrangler tokens (length not published), Mailgun public validation keys (public by design).
 
+## Status — 2026-11-22: what the anon key exposes (#139, decision 046)
+
+Erik chose to build it; legal review was recommended before the public funnel calls it.
+
+- Done:
+  - `scan/scope.ts`: `supabaseHostInScope`, the one host outside the verified apex in scope:
+    `<ref>.supabase.co` for a 20-character ref the site's own client code names.
+  - `scan/fetch.ts`: `scopedGet` now runs on a shared loop (`guardedGet`) with a scope rule per
+    caller. `supabaseRestRootGet` sends one GET to `https://<ref>.supabase.co/rest/v1/` with the
+    anon key, no redirects, same byte and time caps.
+  - `scan/supabaseExposure.ts`: the collector (project URLs and anon JWTs whose `ref` matches, held
+    in memory), `exposedNames` (OpenAPI paths → names through `safeName`, counts), the probe (at
+    most two projects, one request each) and the entry point `scanClientCodeWithAnonExposure`.
+    `scanClientCode` gained an `onText` hook and otherwise behaves as before.
+  - Finding `anon-key-exposure:openapi` (medium with tables or views, low with functions only),
+    monitor `exposed_read`. Evidence: project ref, key fingerprint and last 4, counts, names.
+  - Security scan tab: names and counts through the allowlist, the fix, a link to the matching
+    project's Posture tab or to Projects.
+  - Tests: `test/scanSupabaseExposure.test.ts` (53, fake fetch), web `scanDomains.test.ts` (+5).
+    Mutations in TESTING.md.
+- **Gate:** nothing calls `scanClientCodeWithAnonExposure` yet. When #51 wires the funnel, it calls
+  `scanClientCode` until legal review clears this check, then switches the call.
+- Known gaps: publishable-key-only apps (no ref in the key) get no exposure check; the per-table
+  `HEAD` count from the issue is not built (it touches data).
+
 ## Approach
 
 - **Two gates, both in code.** Verification (`verify.ts`) proves control; scope (`scope.ts`) proves

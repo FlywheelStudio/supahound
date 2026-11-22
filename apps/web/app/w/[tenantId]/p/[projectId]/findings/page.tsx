@@ -3,7 +3,15 @@ import Link from "../../../../../../components/NavLink";
 import { SeverityBadge, Shell } from "../../../../../../components/Shell";
 import { mode } from "../../../../../../lib/billing";
 import { loadProjectPage } from "../../../../../../lib/projectPage";
-import { canLinkDomains, domainsPath, evidenceItems, findingCountsText, findingTitle, scanStateText } from "../../../../../../lib/scanDomains";
+import {
+  canLinkDomains,
+  domainsPath,
+  evidenceItems,
+  exposureFollowUp,
+  findingCountsText,
+  findingTitle,
+  scanStateText,
+} from "../../../../../../lib/scanDomains";
 
 // The project's Security scan tab (issue #100, decisions 034 and 040): the latest finished scan of
 // each verified domain attached to the project, findings most severe first, each with its fix.
@@ -20,8 +28,8 @@ export default async function ProjectFindings({ params }: { params: Promise<{ te
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={mode() !== "off"} active={{ kind: "project", project: p, page: "findings" }}>
       <h1 className="mb-2 text-2xl font-semibold">Security scan</h1>
       <p className="mb-6 text-sm text-slate-600">
-        What the security scan found on the domains attached to {p.name}: exposed keys in client code, public source maps and
-        leak paths, each with the fix.
+        What the security scan found on the domains attached to {p.name}: exposed keys in client code, public source maps,
+        leak paths and what the site&apos;s anon key can reach, each with the fix.
       </p>
 
       {results.length === 0 ? (
@@ -79,6 +87,22 @@ export default async function ProjectFindings({ params }: { params: Promise<{ te
                               {f.fix}
                             </p>
                           )}
+                          {(() => {
+                            const next = exposureFollowUp(tenant, f, d.projects);
+                            if (next === null) return null;
+                            return next.kind === "posture" ? (
+                              <p className="mt-2 text-sm text-slate-700">
+                                Supahound watches this Supabase project as {next.projectName}. Its{" "}
+                                <Link href={next.href} className="underline">Posture tab</Link> shows which of these tables
+                                have RLS off, who can reach each one, and the SQL to fix it.
+                              </p>
+                            ) : (
+                              <p className="mt-2 text-sm text-slate-700">
+                                <Link href={next.href} className="underline">Connect this Supabase project</Link> to see which of
+                                these tables have RLS off and get the SQL to fix each one.
+                              </p>
+                            );
+                          })()}
                         </li>
                       );
                     })}
