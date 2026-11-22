@@ -11,7 +11,7 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 | Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 289, within the 820 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
-| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
+| E2E, signed out | The built web Worker: redirects, CSRF, cache and security headers (CSP nonce, hydration with no violation), hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 12 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
 
 Totals on `feature/project-removal-grace` (2026-11-12): core 820, web 182, poller 15, E2E 72.
@@ -220,6 +220,7 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | `getClaims()` verifies the signature | Fake Auth signs with a key that is not in its JWKS | UAT-W1 fails |
 | Hook checks its signature | Fake Auth signs the hook with the wrong secret | UAT-W1 fails (401) |
 | No shared caching of signed-in pages | Middleware stops setting `private, no-store` | 3 E2E checks fail |
+| CSP blocks inline script without the nonce (#143) | `script-src` loses `'nonce-…'` | 3 unit tests fail; on the built Worker the headers E2E check fails and Chrome reports CSP violations on `/login` (2026-11-22) |
 | No second page for a repeat | Engine pages on every update at high or above | UAT-D4 fails |
 | Sign-in email HTML is escaped | `renderSignInEmail` drops `escapeHtml` | 2 unit tests fail |
 | Picks are checked against Supabase's list | `handleWatch` inserts the submitted refs | UAT-W12 fails |
