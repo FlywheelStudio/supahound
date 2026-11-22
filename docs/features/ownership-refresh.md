@@ -29,6 +29,12 @@ owner-scoped tables found".
    `repo.failOwnershipRefresh` stores an error code and keeps the old map.
 7. The scan runs. If no map has ever loaded, detector 2 gets an empty map and the run records
    `unassessed_detectors = {cross_tenant}`. Detector 4 always runs.
+   Auth field coverage (issue #130): every rollup row has a subject or role filled, so an empty
+   rollup is followed by `authCoverageSql` (`logs/sql.ts`), audited as `logs_query` with
+   `purpose: auth_coverage`. It counts the window's `/rest/v1/` requests and those with any auth
+   field. REST traffic with none filled (for example `sb_secret_` keys, which are not JWTs) records
+   `unassessed_detectors = {cross_tenant, service_role_misuse}`. A failed count makes the run
+   `unable_to_assess`.
 8. The overview (`apps/web/app/w/[tenantId]/page.tsx`) shows a line from `crossTenantNote`
    (`apps/web/lib/coverage.ts`) for the two gaps. `repo.listProjects` derives `crossTenant`:
    `unable_to_assess` if the latest `ok` run lists `cross_tenant`; `no_owned_tables` if a map

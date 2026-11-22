@@ -86,6 +86,8 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
+   An empty rollup is checked with one count query: REST traffic with no subject or role filled
+   lists both detectors in `unassessed_detectors`, not zero findings (issue #130).
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
