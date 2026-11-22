@@ -22,8 +22,10 @@ keywords = ["sb_secret_"]
 
 [[rules]]
 id = "supabase-personal-access-token"
-description = "Supabase personal access token or OAuth token"
-regex = '''\bsbp_(?:oauth_)?[a-f0-9]{40}\b'''
+description = "Supabase personal access token (classic or scoped) or OAuth token"
+# Classic and OAuth tokens are 40 hex. A scoped token starts with `sbp_fc` and its length is not
+# published, so its body only has a floor; same pattern as packages/core/src/scan/secrets.ts.
+regex = '''\bsbp_(?:oauth_[a-f0-9]{40}|fc[A-Za-z0-9]{32,}|[a-f0-9]{40})\b'''
 keywords = ["sbp_"]
 
 [[rules]]
@@ -31,6 +33,16 @@ id = "supabase-oauth-client-secret"
 description = "Supabase OAuth app client secret"
 regex = '''\bsba_[a-f0-9]{40}\b'''
 keywords = ["sba_"]
+
+# A legacy Supabase service_role key is a JWT whose payload holds "role":"service_role"; an anon key
+# holds "role":"anon". gitleaks cannot decode the payload, so the regex matches the base64url text of
+# "service_role" (with its quotes) at each of the three byte alignments a base64 encoding can give it.
+# The default `jwt` rule still catches every JWT; this one names the dangerous key.
+[[rules]]
+id = "supabase-service-role-jwt"
+description = "Supabase service_role key (legacy JWT API key, bypasses RLS)"
+regex = '''\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]*(?:InNlcnZpY2Vfcm9s|JzZXJ2aWNlX3JvbGUi|ic2VydmljZV9yb2xl)[A-Za-z0-9_-]*\.[A-Za-z0-9_-]{20,}'''
+keywords = ["eyj"]
 
 [[rules]]
 id = "stripe-webhook-secret"

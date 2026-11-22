@@ -2,6 +2,8 @@
 
 import { cancelRemoval, scheduleRemoval } from "@supahound/core/db/removal";
 import { listConnections, listProjects, watchProjects } from "@supahound/core/db/repo";
+import { recordSecurityEvent } from "@supahound/core/db/securityEvents";
+import type { TenantTx } from "@supahound/core/db/tenant";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { accessTokenInTx } from "@supahound/core/supabase/credentials";
 import { listSupabaseProjects } from "@supahound/core/supabase/management";
@@ -28,6 +30,13 @@ function memberOr404(err: unknown): never {
   throw err;
 }
 
+// The IDs of the projects with these refs in this workspace, for their security events.
+async function projectIdsFor(tx: TenantTx, refs: string[]): Promise<ProjectId[]> {
+  if (refs.length === 0) return [];
+  const rows = await tx.query<{ id: string }>("SELECT id FROM supahound.projects WHERE tenant_id = $1 AND supabase_ref = ANY($2::text[])", [tx.tenantId, refs]);
+  return rows.map((r) => projectId(r.id));
+}
+
 // Owners and admins add projects from a connection. Logic and tests: lib/picker.ts.
 export async function watchProjectsAction(formData: FormData): Promise<void> {
   const user = await requireUser();
@@ -37,13 +46,23 @@ export async function watchProjectsAction(formData: FormData): Promise<void> {
     handleWatch(tenant, connection, formData.getAll("ref"), {
       prepare: (conn) =>
         paidTenant(pool, user.id, tenant, async (tx, role) => {
-          if (role === "member") return { role, token: null };
+          if (role === "member") {
+            await recordSecurityEvent(tx, { action: "project_added", result: "denied", actor: user.id, target: conn, detail: { reason: "role" } });
+            return { role, token: null };
+          }
           const owned = (await listConnections(tx)).some((c) => c.id === conn);
           return { role, token: owned ? await accessTokenInTx(tx, vault(), conn, oauthClient(), new Date()) : null };
         }),
       list: (token) => listSupabaseProjects(token, { baseUrl: env.SUPABASE_API_URL }),
       insert: (conn, projects) =>
-        paidTenant(pool, user.id, tenant, (tx, role) => (role === "member" ? Promise.resolve(null) : watchProjects(tx, conn, projects))),
+        paidTenant(pool, user.id, tenant, async (tx, role) => {
+          if (role === "member") return null;
+          const added = await watchProjects(tx, conn, projects);
+          for (const id of await projectIdsFor(tx, added)) {
+            await recordSecurityEvent(tx, { action: "project_added", actor: user.id, project: id, target: id });
+          }
+          return added;
+        }),
     }).then(async (next) => {
       if (next.includes("added=")) await syncBillingAfterChange(pool, tenant);
       return next;
@@ -65,7 +84,11 @@ export async function removeProjectAction(formData: FormData): Promise<void> {
     paidTenant(pool, user.id, tenant, async (tx, role) => {
       const found = (await listProjects(tx)).find((p) => p.id === project) ?? null;
       const result = removalOutcome(role, found, typed);
-      if (result === "removed" && !(await scheduleRemoval(tx, project, new Date()))) return "missing" as const;
+      const event = { action: "project_removed", actor: user.id, project: found ? project : null, target: project } as const;
+      if (result === "role") await recordSecurityEvent(tx, { ...event, result: "denied", detail: { reason: "role" } });
+      if (result !== "removed") return result;
+      if (!(await scheduleRemoval(tx, project, new Date()))) return "missing" as const;
+      await recordSecurityEvent(tx, event);
       return result;
     }).then(async (r) => {
       if (r === "removed") await syncBillingAfterChange(pool, tenant);
@@ -86,7 +109,11 @@ export async function keepProjectAction(formData: FormData): Promise<void> {
     paidTenant(pool, user.id, tenant, async (tx, role) => {
       const found = (await listProjects(tx)).find((p) => p.id === project) ?? null;
       const result = keepOutcome(role, found);
-      if (result === "kept" && !(await cancelRemoval(tx, project))) return "missing" as const;
+      const event = { action: "project_kept", actor: user.id, project: found ? project : null, target: project } as const;
+      if (result === "role") await recordSecurityEvent(tx, { ...event, result: "denied", detail: { reason: "role" } });
+      if (result !== "kept") return result;
+      if (!(await cancelRemoval(tx, project))) return "missing" as const;
+      await recordSecurityEvent(tx, event);
       return result;
     }).then(async (r) => {
       if (r === "kept") await syncBillingAfterChange(pool, tenant);

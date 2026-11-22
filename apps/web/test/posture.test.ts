@@ -2,7 +2,7 @@ import type { PostureScanRecord } from "@supahound/core/db/posture";
 import { projectId, tenantId } from "@supahound/core/tenancy/scope";
 import { describe, expect, it } from "vitest";
 import {
-  canScan, countsText, handleScanNow, isPending, postureLine, postureState, scanNoticeFrom, sourceNotes, stateText,
+  canScan, countsText, graphqlHiddenNote, handleScanNow, isPending, postureLine, postureState, scanNoticeFrom, sourceNotes, stateText,
 } from "../lib/posture";
 
 // Posture scan in the web app (issue #11, decision 038). A scan that could not run never reads
@@ -91,5 +91,13 @@ describe("scan state", () => {
       "Security Advisor: unable to assess on the last scan (the check is not available for this project). Its results are from 2026-11-11 10:00 UTC.",
     ]);
     expect(sourceNotes(scan())).toEqual([]);
+  });
+});
+
+describe("graphqlHiddenNote (#157)", () => {
+  it("says how many GraphQL findings are hidden and why, and nothing when none are", () => {
+    expect(graphqlHiddenNote(0)).toBeNull();
+    expect(graphqlHiddenNote(1)).toMatch(/^1 GraphQL finding is hidden: .*last 7 days of logs show no GraphQL calls/);
+    expect(graphqlHiddenNote(12)).toMatch(/^12 GraphQL findings are hidden/);
   });
 });

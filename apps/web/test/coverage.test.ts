@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crossTenantNote } from "../lib/coverage";
+import { crossTenantNote, logGapNote } from "../lib/coverage";
 
 describe("crossTenantNote", () => {
   it("warns when detector 2 could not assess the project", () => {
@@ -14,5 +14,16 @@ describe("crossTenantNote", () => {
 
   it.each(["assessed", null] as const)("adds nothing for %s", (coverage) => {
     expect(crossTenantNote(coverage)).toBeNull();
+  });
+});
+
+describe("logGapNote (issue #133)", () => {
+  it("warns on a log gap and says detections need logs", () => {
+    expect(logGapNote({ logGap: true, paused: false })).toMatchObject({ tone: "warn", text: expect.stringMatching(/Log gap.*nothing can be detected/) });
+  });
+
+  it("adds nothing without a gap, or for a paused project (it is not polled)", () => {
+    expect(logGapNote({ logGap: false, paused: false })).toBeNull();
+    expect(logGapNote({ logGap: true, paused: true })).toBeNull();
   });
 });

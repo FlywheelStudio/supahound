@@ -2,6 +2,7 @@
 
 import { closeWorkspace, disconnectConnection, sendDisconnectEmails } from "@supahound/core/datacontrols/flow";
 import { NotAMemberError } from "@supahound/core/db/user";
+import { opsLog } from "@supahound/core/logging/opsLog";
 import { revokeGrant } from "@supahound/core/supabase/oauth";
 import { connectionId, tenantId as parseTenantId, type ConnectionId, type TenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
@@ -68,7 +69,7 @@ export async function closeWorkspaceAction(formData: FormData): Promise<void> {
     if (err instanceof NotAMemberError) notFound();
     // Stripe or the database failed before the closure was saved: nothing was closed. IDs only
     // in the log, never error text.
-    console.log(JSON.stringify({ event: "close_workspace_failed", tenant_id: tenant }));
+    opsLog("close_workspace_failed", { tenant_id: tenant });
     return "failed" as const;
   });
   redirect(closeRedirect(tenant, result));

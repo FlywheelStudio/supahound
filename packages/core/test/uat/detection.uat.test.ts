@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
+import * as postureRepo from "../../src/db/posture.js";
+import * as settings from "../../src/db/detectionSettings.js";
 import * as repo from "../../src/db/repo.js";
 import { withTenant } from "../../src/db/tenant.js";
 import type { IncidentFeatures } from "../../src/explainer/features.js";
 import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
-import { LogsApiError } from "../../src/logs/client.js";
+import { LogsApiError, type LogsQuery } from "../../src/logs/client.js";
+import { ROLLUP_LIMIT } from "../../src/logs/sql.js";
 import { SqlQueryError } from "../../src/ownership/client.js";
 import { ownershipFromColumns } from "../../src/ownership/ownership.js";
 import { pollProject, type PollDeps } from "../../src/poller/pollProject.js";
@@ -46,7 +49,8 @@ const normalTraffic = (seen: Date) => [
 
 describe.skipIf(pgInfo === null)("UAT: detection", () => {
   const db = useDb();
-  let logs: (now: Date) => Record<string, unknown>[];
+  // `q` is the window Supabase was asked for; most scenarios place every row inside it.
+  let logs: (now: Date, q: LogsQuery) => Record<string, unknown>[];
   // The project's pg_policies rows, read through the read-only SQL endpoint. Only projects that
   // start without a hand-set map (pickProject) read them.
   let policies: () => Record<string, unknown>[];
@@ -72,13 +76,14 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     });
   }
 
-  function poll(scope: ProjectScope, now: Date) {
+  function poll(scope: ProjectScope, now: Date, extra: Partial<PollDeps> = {}) {
     const deps: PollDeps = {
       app: db.app, vault: db.vault, now: () => now, intervalSeconds: 0,
-      queryLogs: async () => logs(now),
+      queryLogs: async (q) => logs(now, q),
       queryPolicies: async () => policies(),
       explain: async (f: IncidentFeatures): Promise<ExplainResult> =>
         ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
+      ...extra,
     };
     return pollProject(scope, deps);
   }
@@ -190,5 +195,341 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     logs = (now) => normalTraffic(new Date(now.getTime() - 200_000));
     expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
     expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "no_owned_tables" }]);
+  });
+  it("UAT-D14 a burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll", async () => {
+    const s = await watchProject("Credits app");
+    // Posture: the Advisor reports grant_credits as SECURITY DEFINER and anon-executable.
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 0, grants: "" },
+      ],
+      queryAdvisor: async () => [
+        { name: "anon_security_definer_function_executable", level: "WARN", security: true, schema: "public", object: "grant_credits", type: "function", evidence: {} },
+      ],
+    };
+    const sqls: string[] = [];
+    const calls = (seen: Date) => [
+      row(seen, {
+        method: "POST", path: "/rest/v1/rpc/grant_credits", search: "", userAgent: "curl/8.7.1", contentRange: "",
+        asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "250",
+      }),
+      // The same anon key on a function posture does not flag: not watched, never a finding.
+      row(seen, {
+        method: "POST", path: "/rest/v1/rpc/public_stats", search: "", userAgent: "curl/8.7.1", contentRange: "",
+        asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "5",
+      }),
+    ];
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, queryLogs: async (q) => { sqls.push(q.sql); return calls(new Date(now.getTime() - 130_000)); },
+    });
+
+    // First poll: the scan runs; the logs query was fixed (and audited) before it, so nothing yet.
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    expect(sqls[0]).not.toContain("/rest/v1/rpc/");
+
+    // Next poll: the branch watches grant_credits only, and the burst pages.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(sqls[1]).toContain("'/rest/v1/rpc/grant_credits'");
+    expect(sqls[1]).not.toContain("public_stats");
+    const open = await dashboard(s);
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ severity: "high", detectors: ["rpc_exposure"], hits: 250 });
+    expect(open[0]!.summary?.summary).toContain("`grant_credits`");
+  });
+
+  it("UAT-D17 GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role", async () => {
+    const s = await watchProject("GraphQL app");
+    // Posture: pg_graphql shows accounts to signed-in users (authenticated may SELECT it).
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 1, grants: "authenticated:SELECT", graphql_roles: "authenticated" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    let graphqlAuthenticated = "0";
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, countRequests: true,
+      queryLogs: async (q) => (/count\(\) AS requests/.test(q.sql)
+        ? [{ requests: "500", graphql_anon: "0", graphql_authenticated: graphqlAuthenticated }]
+        : []),
+    });
+    const view = () => withTenant(db.app, s.tenantId, (tx) => postureRepo.postureView(tx, s.projectId));
+    const overview = async () => (await withTenant(db.app, s.tenantId, (tx) => postureRepo.postureSummaries(tx))).get(s.projectId)!.counts;
+
+    // The app uses REST only: the GraphQL finding is kept but hidden, and counts nowhere.
+    expect(await pollAt(T0)).toMatchObject({ status: "ok" });
+    expect((await view()).findings).toEqual([]);
+    expect((await view()).hiddenGraphql).toMatchObject([{ check: "graphql_table_exposed", object: "accounts", severity: "low" }]);
+    expect(await overview()).toEqual({ critical: 0, high: 0, medium: 0, low: 0 });
+
+    // A poll counts signed-in GraphQL calls: the finding shows and counts.
+    graphqlAuthenticated = "12";
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok" });
+    expect((await view()).findings).toMatchObject([{ check: "graphql_table_exposed", object: "accounts" }]);
+    expect((await view()).hiddenGraphql).toEqual([]);
+    expect(await overview()).toEqual({ critical: 0, high: 0, medium: 0, low: 1 });
+  });
+
+  it("UAT-D18 anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed", async () => {
+    const s = await watchProject("Gallery app");
+    // Email from medium up, so `notified` counts pages (and medium+ emails) only, not low records.
+    await withTenant(db.app, s.tenantId, (tx) => repo.setEmailAlerts(tx, s.projectId, "medium"));
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 1, grants: "" },
+      ],
+      queryAdvisor: async () => [
+        { name: "public_bucket_allows_listing", level: "WARN", security: true, schema: "storage", object: "avatars", type: null, evidence: { policies: ["List all"] } },
+      ],
+    };
+    const sqls: string[] = [];
+    let traffic = false;
+    const lists = (seen: Date) => [
+      row(seen, {
+        method: "POST", path: "/storage/v1/object/list/avatars", search: "", userAgent: "python-httpx/0.28.1", contentRange: "",
+        asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "150",
+      }),
+      row(seen, {
+        method: "POST", path: "/storage/v1/object/list/private-docs", search: "", userAgent: "curl/8.7.1", contentRange: "",
+        asn: "7922", asOrganization: "Comcast", jwtRole: "anon", apiKeyRole: "anon", hits: "2",
+      }),
+    ];
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, queryLogs: async (q) => { sqls.push(q.sql); return traffic ? lists(new Date(now.getTime() - 130_000)) : []; },
+    });
+
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    traffic = true;
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 2, notified: 1 });
+    // One fixed branch: no bucket name is ever in the SQL.
+    expect(sqls.at(-1)).toContain("'^/storage/v1/object/list/'");
+    expect(sqls.join("\n")).not.toMatch(/avatars|private-docs/);
+    const open = await dashboard(s);
+    expect(open.map((i) => `${i.severity}:${i.detectors.join(",")}:${i.hits}`).sort()).toEqual([
+      "high:storage_listing:150", "low:storage_listing:2",
+    ]);
+    const high = open.find((i) => i.severity === "high")!;
+    expect(high.summary?.summary).toContain("`avatars`");
+    const low = open.find((i) => i.severity === "low")!;
+    expect(JSON.stringify(low)).not.toContain("private-docs");
+    const stored = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ evidence: Record<string, unknown> }>(
+      "SELECT evidence FROM supahound.findings WHERE tenant_id = $1 AND detector = 'storage_listing'", [s.tenantId]));
+    expect(stored.map((r) => r.evidence.bucket).sort()).toEqual(["avatars", null]);
+    expect(JSON.stringify(stored)).not.toContain("private-docs");
+  });
+
+  it("UAT-D19 signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page", async () => {
+    const s = await watchProject("Coupons app");
+    // Email from medium up, so `notified` counts pages (and medium+ emails) only, not low records.
+    await withTenant(db.app, s.tenantId, (tx) => repo.setEmailAlerts(tx, s.projectId, "medium"));
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 1, grants: "" },
+      ],
+      queryAdvisor: async () => [
+        { name: "authenticated_security_definer_function_executable", level: "WARN", security: true, schema: "public", object: "redeem_code", type: "function", evidence: {} },
+      ],
+    };
+    let traffic = false;
+    const calls = (seen: Date) => [
+      row(seen, {
+        method: "POST", path: "/rest/v1/rpc/redeem_code", search: "", userAgent: "python-httpx/0.28.1", contentRange: "",
+        asn: "14061", asOrganization: "DigitalOcean, LLC", jwtSubject: ALICE, jwtRole: "authenticated", apiKeyRole: "anon", hits: "900",
+      }),
+      // The same user also probes another user's notes: that incident stands on its own.
+      scrape(seen),
+    ];
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, queryLogs: async () => (traffic ? calls(new Date(now.getTime() - 130_000)) : []),
+    });
+
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    traffic = true;
+    // Two findings; only the cross-tenant one pages.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 2, notified: 1 });
+    const open = await dashboard(s);
+    expect(open.map((i) => `${i.severity}:${i.detectors.join(",")}`).sort()).toEqual(["critical:cross_tenant", "low:rpc_exposure"]);
+    const definer = open.find((i) => i.detectors.includes("rpc_exposure"))!;
+    // Below the email threshold and never paged, so no model call was spent on it.
+    expect(definer.summary ?? null).toBeNull();
+    expect(JSON.stringify(definer)).not.toContain(ALICE);
+  });
+
+  it("UAT-D13 anon-key reads of a table the posture scan shows open raise a paging incident from the next poll", async () => {
+    const s = await watchProject("Shop app");
+    // Posture: customers has RLS off and anon may SELECT it; orders is locked down.
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "customers", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+        { kind: "table", schema_name: "public", object_name: "orders", rls_enabled: true, policy_count: 1, grants: "anon:SELECT,authenticated:SELECT" },
+        { kind: "policy", schema_name: "public", object_name: "orders", policy_name: "own", permissive: "PERMISSIVE", roles: "{authenticated}", cmd: "SELECT", qual: "(auth.uid() = user_id)" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    const sqls: string[] = [];
+    const dump = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/customers", search: "?select=*", userAgent: "curl/8.7.1", contentRange: "0-999/*",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "4",
+    });
+    logs = (now) => [dump(new Date(now.getTime() - 130_000))];
+    const capture = { queryLogs: async (q: LogsQuery) => { sqls.push(q.sql); return logs(T0, q); } };
+
+    // First poll: the scan runs; the logs query was fixed (and audited) before it, so nothing yet.
+    expect(await poll(s, T0, { posture, ...capture })).toMatchObject({ status: "ok", findings: 0 });
+    expect(sqls[0]).not.toContain("/rest/v1/customers");
+
+    // Next poll: the anon branch watches customers only, and the dump pages.
+    logs = (now) => [dump(new Date(now.getTime() - 130_000))];
+    const capture2 = { queryLogs: async (q: LogsQuery) => { sqls.push(q.sql); return logs(at(60), q); } };
+    expect(await poll(s, at(60), { posture, ...capture2 })).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(sqls[1]).toContain("'/rest/v1/customers'");
+    expect(sqls[1]).not.toContain("/rest/v1/orders");
+    const open = await dashboard(s);
+    expect(open).toHaveLength(1);
+    // 4 requests of 1,000 rows from an RLS-off table: a bulk read, critical.
+    expect(open[0]).toMatchObject({ severity: "critical", detectors: ["exposed_read"], hits: 4 });
+    expect(open[0]!.summary?.summary).toContain("`customers`");
+  });
+
+  it("UAT-D12 REST traffic whose logs carry no user or key role reads both detectors as 'unable to assess', not clean", async () => {
+    const s = await watchProject("New keys app");
+    // sb_secret_ keys are not JWTs (#130): the rollup finds nothing, the coverage count finds REST traffic.
+    logs = (_now, q) => (q.sql.includes("rest_with_auth") ? [{ rest_requests: 240, rest_with_auth: 0 }] : []);
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
+    expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "unable_to_assess" }]);
+    const run = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ unassessed_detectors: string[] }>(
+      "SELECT unassessed_detectors FROM supahound.poll_runs"));
+    expect(run).toEqual([{ unassessed_detectors: ["cross_tenant", "service_role_misuse"] }]);
+  });
+
+  // Issue #154: sb_secret_ and sb_publishable_ keys are not JWTs, so their requests carry no role
+  // field; the logs give only the key's prefix, which the rollup turns into a kind inside Supabase.
+  // These fakes answer like the real rollup: a row comes back only when the SQL's WHERE keeps it.
+  it("UAT-D20 an sb_secret_ key used from a browser on a home network raises a critical incident", async () => {
+    const s = await watchProject("Secret key app");
+    const leaked = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/notes", search: "?select=*", userAgent: CHROME_UA, asn: "7922", asOrganization: "Comcast",
+      apiKeyKind: "secret", authorizationKind: "secret", hits: "2",
+    });
+    logs = (now, q) => (q.sql.includes("LIMIT") && /\) = 'secret'/.test(q.sql) ? [leaked(new Date(now.getTime() - 200_000))] : []);
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "critical", detectors: ["service_role_misuse"], hits: 2 }]);
+    const run = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ unassessed_detectors: string[] }>(
+      "SELECT unassessed_detectors FROM supahound.poll_runs"));
+    expect(run).toEqual([{ unassessed_detectors: [] }]);
+  });
+
+  it("UAT-D21 sb_publishable_ key reads of a table the posture scan shows open raise a paging incident", async () => {
+    const s = await watchProject("Publishable key app");
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "customers", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    const dump = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/customers", search: "?select=*", userAgent: "curl/8.7.1", contentRange: "0-999/*",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", apiKeyKind: "publishable", authorizationKind: "publishable", hits: "4",
+    });
+    const watched = (sql: string) => sql.includes("'/rest/v1/customers'") && /\) = 'publishable'\)\)\n\s+AND log_attributes\['request.path'\] IN \('\/rest\/v1\/customers'\)/.test(sql);
+    logs = (now, q) => (watched(q.sql) ? [dump(new Date(now.getTime() - 130_000))] : []);
+
+    // First poll: the scan runs. Next poll: the anon branch watches customers and the dump pages.
+    expect(await poll(s, T0, { posture })).toMatchObject({ status: "ok", findings: 0 });
+    expect(await poll(s, at(60), { posture })).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "critical", detectors: ["exposed_read"], hits: 4 }]);
+  });
+
+  // Issue #129: the rollup keeps its busiest 5000 templates, so a burst of normal traffic could push
+  // a single probe out of the answer and still read as clean.
+  // A fake Supabase that, like the real rollup, returns the window's busiest templates up to the query's LIMIT.
+  const inWindow = (rows: Record<string, unknown>[]) => (_now: Date, q: LogsQuery) => rows
+    .filter((r) => Date.parse(r.first_seen as string) >= q.start.getTime() && Date.parse(r.first_seen as string) < q.end.getTime())
+    .sort((a, b) => Number(b.hits) - Number(a.hits))
+    .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)?.[1] ?? 0)); // a query without LIMIT (the #130 coverage count) gets no rows
+  const busyMinute = (seen: Date) => Array.from({ length: ROLLUP_LIMIT + 1 }, (_, i) => row(seen, {
+    method: "GET", path: "/rest/v1/notes", search: `?user_id=eq.${BOB}&offset=${i}`, userAgent: CHROME_UA, asn: "7922",
+    asOrganization: "Comcast", jwtSubject: BOB, jwtRole: "authenticated", apiKeyRole: "anon", hits: "50",
+  }));
+
+  it("UAT-D10 a lone probe in a window too busy to read whole still raises its incident", async () => {
+    const s = await watchProject("Busy app");
+    logs = inWindow([scrape(at(-400), "1"), ...busyMinute(at(-140))]);
+    expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect((await dashboard(s)).map((i) => i.severity)).toEqual(["critical"]);
+  });
+
+  it("UAT-D11 a minute with more traffic than one poll can read is 'unable to assess', never an all-clear", async () => {
+    const s = await watchProject("Flooded app");
+    logs = inWindow([scrape(at(-140), "1"), ...busyMinute(at(-400))]);
+    expect(await poll(s, T0)).toEqual({ status: "unable_to_assess", errorCode: "rollup_saturated" });
+    expect((await projects(s))[0]!.lastRunStatus).toBe("unable_to_assess");
+  });
+
+  it("UAT-D15 a table marked intentionally public is not watched and raises nothing; unmarking restores the alert", async () => {
+    const s = await watchProject("Catalog app");
+    // Posture: prices and customers both have RLS off and an anon SELECT grant.
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "prices", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+        { kind: "table", schema_name: "public", object_name: "customers", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    const sqls: string[] = [];
+    const read = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/prices", search: "?select=*", userAgent: "curl/8.7.1", contentRange: "0-999/*",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "4",
+    });
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, queryLogs: async (q) => { sqls.push(q.sql); return [read(new Date(now.getTime() - 130_000))]; },
+    });
+    // The owner marks prices intentionally public (decision 045).
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.markPublicTable(tx, s.projectId, "prices", null))).toBe("marked");
+
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    // Next poll: customers is watched, prices is never fetched, and the read of prices raises nothing.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 0, notified: 0 });
+    expect(sqls[1]).toContain("'/rest/v1/customers'");
+    expect(sqls[1]).not.toContain("prices");
+    expect(await dashboard(s)).toEqual([]);
+
+    // Unmarked: prices is watched again from the next poll, and the same read pages.
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.unmarkPublicTable(tx, s.projectId, "prices", null))).toBe(true);
+    expect(await pollAt(at(120))).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(sqls[2]).toContain("'/rest/v1/prices'");
+    expect((await dashboard(s))[0]).toMatchObject({ severity: "critical", detectors: ["exposed_read"] });
+  });
+
+  it("UAT-D16 the project's RPC burst threshold decides when anon calls to an exposed function page", async () => {
+    const s = await watchProject("Points app");
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 0, grants: "" },
+      ],
+      queryAdvisor: async () => [
+        { name: "anon_security_definer_function_executable", level: "WARN", security: true, schema: "public", object: "grant_credits", type: "function", evidence: {} },
+      ],
+    };
+    const calls = (seen: Date) => [row(seen, {
+      method: "POST", path: "/rest/v1/rpc/grant_credits", search: "", userAgent: "curl/8.7.1", contentRange: "",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "250",
+    })];
+    const pollAt = (now: Date) => poll(s, now, { posture, queryLogs: async () => calls(new Date(now.getTime() - 130_000)) });
+    // An editor raises the threshold to 300 for this project (decision 045).
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.setRpcBurstHits(tx, s.projectId, 300, null))).toBe(true);
+
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    // 250 calls stay under 300: a finding, but no burst.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "medium", detectors: ["rpc_exposure"] }]);
+    const [stored] = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ signals: string[]; evidence: { burstThreshold: number } }>(
+      "SELECT signals, evidence FROM supahound.findings"));
+    expect(stored).toMatchObject({ signals: ["definer_rpc_call"], evidence: { burstThreshold: 300 } });
+
+    // Lowered to 200: the same traffic is a burst and pages.
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.setRpcBurstHits(tx, s.projectId, 200, null))).toBe(true);
+    expect(await pollAt(at(120))).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "high", detectors: ["rpc_exposure"] }]);
   });
 });

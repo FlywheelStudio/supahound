@@ -1,13 +1,16 @@
-import { getPostureScan, listPostureFindings } from "@supahound/core/db/posture";
-import { countBySeverity } from "@supahound/core/posture/findings";
+import { listPublicTables } from "@supahound/core/db/detectionSettings";
+import { getPostureScan, postureView } from "@supahound/core/db/posture";
+import { anonReadableTables, countBySeverity } from "@supahound/core/posture/findings";
 import { fixPrompt } from "@supahound/core/posture/fix";
 import { Notice, SeverityBadge, Shell } from "../../../../../../components/Shell";
 import { mode } from "../../../../../../lib/billing";
+import { ACCEPTED_LABEL, canMarkPublic, publicNoticeFrom, publicStatus, WRITES_OPEN_TEXT } from "../../../../../../lib/detectionSettings";
+import { utc } from "../../../../../../lib/nav";
 import {
-  canScan, countsText, isPending, postureState, scanNoticeFrom, SOURCE_LABEL, sourceNotes, stateText,
+  canScan, countsText, graphqlHiddenNote, isPending, postureState, scanNoticeFrom, SOURCE_LABEL, sourceNotes, stateText,
 } from "../../../../../../lib/posture";
 import { loadProjectPage } from "../../../../../../lib/projectPage";
-import { scanNowAction } from "./actions";
+import { markPublicAction, scanNowAction, unmarkPublicAction } from "./actions";
 
 // The project's posture (issue #11, decision 038): RLS coverage, open policies, views that skip
 // RLS, and Security Advisor lints, each with a fix prompt built from a template and the finding's
@@ -22,13 +25,21 @@ export default async function ProjectPosture({
 }) {
   const d = await loadProjectPage(params, async (tx, p) => ({
     scan: await getPostureScan(tx, p.id),
-    findings: await listPostureFindings(tx, p.id),
+    view: await postureView(tx, p.id),
+    marks: await listPublicTables(tx, p.id),
   }));
   const { tenant, project: p } = d;
-  const { scan, findings } = d.extra;
-  const notice = scanNoticeFrom(await searchParams);
+  const { scan, view: { findings, hiddenGraphql }, marks } = d.extra;
+  const query = await searchParams;
+  const notice = scanNoticeFrom(query);
+  const publicNotice = publicNoticeFrom(query);
   const state = postureState(scan);
   const notes = sourceNotes(scan);
+  const graphqlNote = state.kind === "scanned" ? graphqlHiddenNote(hiddenGraphql.length) : null;
+  // Intentionally public tables (issue #160, decision 045).
+  const publicTables = new Set(marks.map((m) => m.table));
+  const readable = [...anonReadableTables(findings).keys()].filter((t) => !publicTables.has(t)).sort();
+  const canMark = canMarkPublic(d.projectRole);
 
   return (
     <Shell tenant={tenant} role={d.role} projects={d.projects} tiers={d.tiers} billingOn={mode() !== "off"} active={{ kind: "project", project: p, page: "posture" }}>
@@ -45,7 +56,7 @@ export default async function ProjectPosture({
             <p className={`text-sm font-medium ${state.kind === "unable" ? "text-amber-900" : "text-slate-900"}`}>{stateText(state)}</p>
             {state.kind === "scanned" && (
               <p className="mt-1 text-sm text-slate-600">
-                {countsText(countBySeverity(findings))}
+                {countsText(countBySeverity(findings, publicTables))}
                 {scan?.tablesChecked != null && ` · checked ${scan.tablesChecked} tables, ${scan.viewsChecked ?? 0} views, ${scan.policiesChecked ?? 0} policies`}
               </p>
             )}
@@ -74,15 +85,20 @@ export default async function ProjectPosture({
           {findings.map((f) => {
             const fix = fixPrompt(f);
             const object = f.schema && f.object ? `${f.schema}.${f.object}` : f.object ?? "Project";
+            const status = publicStatus(f, publicTables);
             return (
-              <li key={f.id} className="rounded-md border border-slate-200 bg-white p-4">
+              <li key={f.id} className={`rounded-md border border-slate-200 p-4 ${status === "accepted" ? "bg-slate-50" : "bg-white"}`}>
                 <div className="flex flex-wrap items-center gap-3">
                   <SeverityBadge severity={f.severity} />
                   <span className="font-medium">{fix.title}</span>
                   <span className="font-mono text-sm text-slate-700">{object}</span>
+                  {status === "accepted" && (
+                    <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900">{ACCEPTED_LABEL}</span>
+                  )}
                   <span className="ml-auto text-xs text-slate-500">{SOURCE_LABEL[f.source]}</span>
                 </div>
                 <p className="mt-2 text-sm text-slate-700">{fix.explanation}</p>
+                {status === "writes_open" && <p className="mt-2 text-sm text-amber-900">{WRITES_OPEN_TEXT}</p>}
                 {fix.sql && (
                   <div className="mt-3">
                     <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Fix prompt (SQL, review before you run it)</p>
@@ -96,6 +112,59 @@ export default async function ProjectPosture({
       ) : (
         state.kind === "scanned" && <p className="text-slate-600">No posture findings in the last scan.</p>
       )}
+      {graphqlNote && <p aria-label="Hidden GraphQL findings" className="mt-4 text-sm text-slate-600">{graphqlNote}</p>}
+
+      <section id="public-tables" aria-labelledby="public-heading" className="mt-10 rounded-md border border-slate-200 bg-white p-6">
+        <h2 id="public-heading" className="mb-2 font-semibold">Intentionally public tables</h2>
+        <p className="mb-4 text-sm text-slate-700">
+          Some tables are meant to be read by anyone, such as a price list or a country lookup. Mark one intentionally public
+          and Supahound stops alerting on anonymous reads of it from the next poll, and shows its read findings as accepted.
+          Findings that let anyone change the table stay open.
+        </p>
+        {publicNotice && <Notice tone={publicNotice.tone}>{publicNotice.text}</Notice>}
+        {marks.length > 0 ? (
+          <ul aria-label="Tables marked intentionally public" className="mb-4 divide-y divide-slate-200 rounded-md border border-slate-200">
+            {marks.map((m) => (
+              <li key={m.table} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <span className="font-mono">public.{m.table}</span>
+                <span className="text-slate-500">marked {utc(m.markedAt)}</span>
+                {canMark && (
+                  <form action={unmarkPublicAction} className="ml-auto">
+                    <input type="hidden" name="tenantId" value={tenant} />
+                    <input type="hidden" name="projectId" value={p.id} />
+                    <input type="hidden" name="table" value={m.table} />
+                    <button aria-label={`Unmark public.${m.table}`} className="rounded-md border border-slate-300 px-3 py-1 font-medium hover:bg-slate-50">Unmark</button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mb-4 text-sm text-slate-600">No table is marked intentionally public.</p>
+        )}
+        {canMark ? (
+          readable.length > 0 && (
+            <ul aria-label="Tables anyone can read" className="divide-y divide-slate-200 rounded-md border border-slate-200">
+              {readable.map((t) => (
+                <li key={t} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                  <span className="font-mono">public.{t}</span>
+                  <span className="text-slate-500">anyone with the anon key can read every row</span>
+                  <form action={markPublicAction} className="ml-auto">
+                    <input type="hidden" name="tenantId" value={tenant} />
+                    <input type="hidden" name="projectId" value={p.id} />
+                    <input type="hidden" name="table" value={t} />
+                    <button aria-label={`Mark public.${t} intentionally public`} className="rounded-md bg-slate-950 px-3 py-1 font-medium text-white hover:bg-slate-800">
+                      Mark intentionally public
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          <p className="text-sm text-slate-500">Only the project&apos;s owners and admins can mark a table intentionally public.</p>
+        )}
+      </section>
     </Shell>
   );
 }

@@ -53,6 +53,7 @@ message creates its own `pg` pool. Workers never share I/O across requests.
 | `packages/core` | Node and workerd | All logic: detectors, tenancy, vault, incidents, explainer, poller, OAuth, CLI |
 | `apps/poller` | Cloudflare Worker | Cron → queue → `pollProject`, through two Hyperdrive configs |
 | `apps/web` | Cloudflare Worker | Next.js App Router via vinext: sign-in, onboarding, overview, Supabase connect, Send Email Hook |
+| `apps/log-sink` | Cloudflare Worker | Tail consumer of web and poller: their own events to R2 for 90 days, personal data dropped (decision 047) |
 | `supabase/migrations` | Postgres 17 | Schema `supahound`, roles, forced RLS |
 
 `packages/core` exports its TypeScript source directly (`"./*": "./src/*.ts"`). The apps import it
@@ -78,10 +79,62 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    that succeeds replaces its findings (decision 038). It never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
+   Anon traffic is left out, except anon GET/HEAD on the tables the stored posture shows readable by
+   anon (at most 200 plain identifiers, issue #132). The SQL is fixed before that poll's posture scan, so
+   a new scan's tables are watched from the next poll. Tables an Owner or Admin marked intentionally
+   public (`public_tables`, decision 045) are dropped from that list, so their reads are never fetched;
+   a mark or unmark takes effect from the next poll.
+   The rollup keeps the busiest `ROLLUP_LIMIT` (5000) templates and the poller asks for one more. A
+   full answer has dropped its quietest templates, so the poller halves the window, keeping its start,
+   and asks again (at most `MAX_ROLLUP_QUERIES`, 4, queries a poll). The run then covers that shorter
+   window and the next poll continues from its end. If no half fits, or one minute alone is full, the
+   run is `unable_to_assess` with `rollup_saturated` (issue #129).
+   Anon calls to `/rest/v1/rpc/<fn>` are kept too, for the functions the stored posture shows as
+   SECURITY DEFINER and anon-executable (at most 200 plain identifiers, issue #131), on the same
+   next-poll basis. Anon calls to Storage's list endpoint (`/storage/v1/object/list/`, one fixed
+   prefix whatever the bucket) are kept too (#157). Signed-in calls to definer functions need no
+   branch: every REST call with a user subject is already in.
+   A second query (`pollCountSql`) counts the window's edge-log requests into
+   `poll_runs.edge_requests`, and its `/graphql/v1` calls by anon and by authenticated into
+   `graphql_anon_calls` and `graphql_authenticated_calls` (#157): three numbers, never a row. Its
+   hash is in the same audit row. A failed count leaves them NULL. The project page shows a **log
+   gap** when the newest 60 counted windows are all zero after earlier traffic (issue #133); the
+   Posture page shows GraphQL findings only for a role with calls in the last 7 days (decision 038,
+   addendum of #157).
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
+   An empty rollup is checked with one count query: REST traffic with no subject or role filled
+   lists both detectors in `unassessed_detectors`, not zero findings (issue #130). REST traffic
+   whose only auth signal is a key kind (below) lists detector 2 alone: a user subject only comes
+   from a JWT (#154).
+   **New API keys (#154).** `sb_secret_` and `sb_publishable_` keys are not JWTs, so their requests
+   fill no `request.sb.jwt.*` field. Edge logs carry the first 15 characters of the `apikey` and
+   Authorization headers instead (`request.sb.apikey.{apikey,authorization}.prefix`, seen live
+   2026-11-22). That prefix holds key material, so it never leaves Supabase: the SQL maps it to a
+   key kind (`secret`, `publishable`, `jwt`, `none`, `other`) inside ClickHouse (`keyKindSql`) and
+   selects and groups by the kind only. `effectiveRole` reads the JWT role first, then the legacy
+   key's role, then the kind: `secret` is service_role, `publishable` is anon. The rollup's
+   service-role branch and its anon branches (table reads, RPC, Storage, GraphQL counts) read roles
+   the same way. Detector 4's evidence names the key kind.
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
+   `detectors/exposedRead.ts` (#132) flags anon reads of those anon-readable tables, one finding per
+   table, ASN and caller class (actor `anon:asn:<n>`): rows from a critical-posture table rate high,
+   1,000 rows or more in one poll critical; elsewhere low, or medium for 1,000 rows or more. It never
+   sees a table marked intentionally public (decision 045).
+   `detectors/rpcExposure.ts` (#131) flags anon calls to those functions, one finding per function,
+   ASN and caller class (actor `anon:asn:<n>`): medium, or high (signal `rpc_burst`) at the project's
+   RPC burst threshold or more in one poll. The threshold is `projects.rpc_burst_hits`: default 100,
+   10 to 10,000, set by the project's Owners, Admins and Editors on its Notifications page; the
+   finding records it as `burstThreshold` (decision 045).
+   It also records signed-in calls to functions posture shows authenticated-executable (#157):
+   always low, actor `definer:fn:<name>` (the function, never the user, so it never stacks onto a
+   user's incident and never pages), evidence counts the distinct users.
+   `detectors/storageListing.ts` (detector 13, #157) flags anon list calls per bucket, ASN and
+   caller class: medium for a bucket posture flags `public_bucket_allows_listing`, high at 100 list
+   calls in one poll; low for any other bucket, which evidence names only by fingerprint.
+   Low signed-in definer calls and low anon listings of unflagged buckets are dashboard-only: they
+   show in incidents and history but never email, at any alert threshold (`dashboardOnly`).
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces
@@ -94,6 +147,57 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    project's threshold that has not been emailed at its severity, one email per member, and marks it
    (decision 030; `alerts/email.ts` renders it). A failed send stays pending for the next poll.
 
+**Heartbeat** (issues #133 and #159, `poller/heartbeat.ts`). Two crons check Supahound's own
+polling through the scheduler role, which reads `poll_runs (status, finished_at)` and no other
+column: aggregates only. Each owns one check and emails `SUPAHOUND_STAFF_ALERT_EMAIL`:
+
+- **Stale**, on the web Worker's cron (`apps/web/worker/index.ts`, `lib/heartbeat.ts`): no run has
+  finished for 15 minutes while projects are due. It runs outside the poller, so a dead poller cron
+  is still reported.
+- **Failing**, on the poller's cron: half of the last hour's runs (10 or more) could not assess.
+
+The throttle keeps no state: in each 6-hour slot only the first breached minute emails. Neither cron
+can see whether the other has emailed, so one owner per check is what keeps a slot to one email per
+condition. A dead web cron leaves staleness unreported; `docs/self-hosting.md` names the external
+check that covers it.
+
+## Detection rules
+
+`packages/core/src/detectors/rules.ts` gives each detector signal a stable rule ID, MITRE ATT&CK
+techniques (Enterprise v20.1), OWASP API Security Top 10 2023 categories, a confidence and the
+known false positives. Rule IDs are derived from a finding's or incident's detector and signals
+(`findingRuleIds`, `incidentRuleIds`), so nothing new is stored. IDs are never renumbered or reused.
+
+| Rule | Detector / signal | ATT&CK | OWASP API | Confidence |
+| --- | --- | --- | --- | --- |
+| SH-D2-001 | cross_tenant / other_owner | T1078 | API1 | high |
+| SH-D2-002 | cross_tenant / all_but_self | T1078, T1213 | API1 | high |
+| SH-D2-003 | cross_tenant / excludes_other | T1078, T1213 | API1 | medium |
+| SH-D2-004 | cross_tenant / pattern | T1078, T1213 | API1 | medium |
+| SH-D2-005 | cross_tenant / range | T1078, T1213 | API1 | medium |
+| SH-D2-006 | cross_tenant / any_owner | T1078, T1213 | API1 | medium |
+| SH-D2-007 | cross_tenant / posture_exposed | T1078, T1213 | API1, API8 | high |
+| SH-D4-001 | service_role_misuse / browser_caller | T1552.001, T1078.004 | API8, API5 | high |
+| SH-D4-002 | service_role_misuse / mobile_app_caller | T1552.001, T1078.004 | API8, API5 | high |
+| SH-D4-003 | service_role_misuse / non_hosting_network | T1078.004, T1552 | API2 | medium |
+| SH-D4-004 | service_role_misuse / manual_tool | T1078.004 | API2 | low |
+| SH-D4-005 | service_role_misuse / new_network | T1078.004 | API2 | low |
+| SH-D11-001 | exposed_read / exposed_table_read | T1190, T1213 | API8, API1 | medium |
+| SH-D11-002 | exposed_read / rows_returned | T1190, T1213 | API8, API1 | medium |
+| SH-D11-003 | exposed_read / bulk_read | T1190, T1213 | API8, API1 | high |
+| SH-D12-001 | rpc_exposure / definer_rpc_call | T1190 | API5, API8 | medium |
+| SH-D12-002 | rpc_exposure / rpc_burst | T1190 | API5, API8 | high |
+| SH-D12-003 | rpc_exposure / authenticated_definer_call | T1078 | API5 | low |
+| SH-D13-001 | storage_listing / anon_bucket_list | T1530 | API8 | low |
+| SH-D13-002 | storage_listing / listable_bucket | T1530, T1619 | API8, API3 | medium |
+| SH-D13-003 | storage_listing / list_burst | T1530, T1619 | API8, API4 | medium |
+
+A new signal or detector needs an entry: the registry's type fails the typecheck without one, and
+`rules.test.ts` checks every signal at runtime. `incidents/ocsf.ts` turns an incident into an OCSF
+1.5 Detection Finding (class 2004) for webhooks: a pure function, not yet wired to a transport. It
+carries rule IDs, ATT&CK and OWASP tags, severity, counts and times. The actor is a fingerprint (plus
+the ASN for the service-role key); the only UUIDs are the incident's own tenant, project and ID.
+
 ## Tenant isolation
 
 Decision 004. Six layers, each tested:
@@ -105,7 +209,7 @@ Decision 004. Six layers, each tested:
 | Composite `(tenant_id, id)` foreign keys | migrations | `isolation` (mutation checks) |
 | Per-tenant token keys: AES-256-GCM, HKDF, AAD bound to tenant + connection | `core/src/vault/` | `vault.test.ts`, `poller.test.ts` |
 | In-memory state keyed by `scopeKey`, never by Supabase ref | `core/src/tenancy/scope.ts` | `scope.test.ts` |
-| Scheduler role reads IDs only, through column grants | migrations, `poller/scheduler.ts` | `poller.test.ts` |
+| Scheduler role reads IDs only, through column grants (plus `poll_runs` status and finish time, for the heartbeat) | migrations, `poller/scheduler.ts` | `poller.test.ts`, `isolation.test.ts` |
 
 The web app adds a seventh: membership is checked in the same transaction that reads the data. A
 non-member gets the same 404 as a missing workspace (E2E UAT-W7). An eighth works inside the tenant
@@ -125,10 +229,78 @@ tenant's row counts stay the same.
   Only `llm.ts` may call a model, and ESLint blocks model imports everywhere else (`zdrGuard.test.ts`).
 - **ZDR on every call** (decision 005). `providerOptions.gateway.zeroDataRetention = true` is set
   after any merge, so nothing can override it. A routing report without ZDR discards the output.
+- **US providers only** (decision 043). The same frozen options pin `only: ["anthropic", "xai"]`:
+  Haiku 5.5 runs on Anthropic's API, the Grok fallback on xAI's, both in the US. No logs or
+  derived data ever go to a Chinese model provider, or to any provider not on that list.
 - **Web hardening.** Users come only from `getClaims()`. The middleware rejects cross-origin
-  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. The Send Email
+  non-GET requests and sets `Cache-Control: private, no-store` on signed-in paths. It also sends
+  security headers on every response (`apps/web/lib/security.ts`, #143): HSTS, `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal `Permissions-Policy`, and a CSP with a fresh
+  nonce per response (`script-src 'self' 'nonce-…'`, `frame-ancestors 'none'`). vinext reads the
+  nonce back from that header and puts it on its inline hydration scripts. The Send Email
   Hook checks its Standard Webhooks signature. The OAuth state is single-use, bound to the user and
   the workspace, and stored only as a hash.
+- **Security events** (decision 044, ASVS 16.3). Sign-ins, invites, role changes, connections,
+  project changes, closing and data deletion, with refusals by role, go to `security_events` in
+  the transaction that makes the change; workspace owners read them on Settings → Security log.
+  Events with no workspace (CSRF 403, bad hook signature, rejected OAuth state, non-member 404) go
+  to Workers logs as one `security_event` line through `opsLog` (and on to R2, decision 047).
+- **Logs hold no personal data** (decision 047). See the log inventory below.
+
+## Log inventory
+
+ASVS 16.1.1. Supahound's own Workers write log lines only through `opsLog`
+(`packages/core/src/logging/opsLog.ts`). Each line is one JSON object: an event from the table below
+and only that event's fields. Field values are checked: UUIDs for `tenant_id` and `project_id`,
+lowercase words for `status`, `type` and `reason`, `evt_` IDs for `stripe_event`, numbers and
+booleans for the rest. A value that fails its check is left out and counted in `dropped`. No line
+holds an email, IP, user agent, token, query string, error text or row content.
+`packages/core/test/opsLog.test.ts` fails if any other file in `apps/` or `packages/core/src` calls
+`console`, or if an event is missing from this table.
+
+**Where the lines go**
+
+| Destination | What | Retention | Who reads it |
+| --- | --- | --- | --- |
+| Workers Logs (Cloudflare dashboard, `observability` in each `wrangler.jsonc`) | Every invocation of `supahound-web` and `supahound-poller` with its console lines, and Cloudflare's invocation record (method, URL, status) | 7 days (Workers Paid) | Flywheel staff with access to the Cloudflare account |
+| R2 bucket `supahound-logs`, through the tail Worker `supahound-log-sink` (`apps/log-sink`) | One NDJSON line per invocation that logged an event, threw, ended other than `ok` or answered 5xx: time, Worker, trigger, outcome, CPU and wall time, method, scrubbed path (no query; a segment that is not a plain word or UUID becomes `:x`), HTTP status, cron or queue name and batch size, the `opsLog` events (checked again by the sink), exception names with only the plain words of their message, and a count of other console lines, which are dropped. Never headers, bodies, query strings or the `cf` object (client IP, location) | 90 days (bucket lifecycle rule) | Private bucket; Flywheel staff with R2 access in the Cloudflare account |
+| Postgres `supahound.security_events` | Security events of a workspace (decision 044): actor, action, target, result; IDs and enums only | 90 days once the workspace stops paying | Workspace owners, through RLS |
+| Postgres `supahound.audit_log` | Audit rows per tenant: queries and model calls (structured, append-only) | Not expired; the data job and a purge keep it (decision 037), its retention is a separate decision | Through RLS, per tenant |
+
+Objects are keyed `logs/YYYY/MM/DD/HH/<ms>-<uuid>.ndjson` (UTC). Self-hosters may skip the sink
+(docs/self-hosting.md); Workers Logs still holds the lines for its retention.
+
+**Events**
+
+| Event | Worker | Fields | When |
+| --- | --- | --- | --- |
+| `polls_enqueued` | poller (cron) | `count` | Every minute: project polls put on the queue |
+| `usage_enqueued` | poller (cron) | `count` | 00:20 UTC with billing on: usage counts queued |
+| `data_jobs_enqueued` | poller (cron) | `count` | 00:40 UTC: data jobs queued |
+| `heartbeat` | poller and web (cron) | `status`, `sent`, `failed` | The staff heartbeat found a problem: email sent or throttled |
+| `heartbeat_crashed` | poller and web (cron) | none | The heartbeat check threw |
+| `poll_done` | poller (queue) | `project_id`, `status` | A project poll finished |
+| `poll_crashed` | poller (queue) | `project_id` | A poll threw; the message is retried |
+| `poll_message_invalid` | poller (queue) | none | A malformed queue message was dropped |
+| `rollup_saturated` | poller (queue) | `project_id`, `templates` | The rollup hit its row limit in every window |
+| `posture_scan_crashed` | poller (queue) | `project_id` | The posture scan threw; the poll goes on |
+| `alert_email_crashed` | poller (queue) | `project_id` | Sending incident alert emails threw |
+| `usage_counted` | poller (queue) | `tenant_id`, `counted`, `failed` | Daily usage count of one workspace |
+| `usage_done` | poller (queue) | `tenant_id` | Usage count and tier update finished |
+| `usage_crashed` | poller (queue) | `tenant_id` | Usage count threw; retried |
+| `data_job` | poller (queue) | `tenant_id`, `paying`, `purged`, `connections_deleted`, `projects_deleted`, `resolved`, `incidents`, `findings`, `pollRuns`, `oauthStates` | Daily data job: retention and purge counts |
+| `data_job_done` | poller (queue) | `tenant_id` | Data job finished |
+| `data_job_crashed` | poller (queue) | `tenant_id` | Data job threw; retried |
+| `close_workspace_failed` | web | `tenant_id` | Closing a workspace failed before anything closed |
+| `billing_return_failed` | web | `tenant_id` | The Stripe return page could not sync billing |
+| `billing_sync_failed` | web | `tenant_id` | A billing sync after a change failed |
+| `stripe_webhook_rejected` | web | `reason` (`missing_signature`, `invalid_signature`) | A Stripe webhook failed its signature check |
+| `stripe_webhook_failed` | web | `stripe_event`, `type` | A verified Stripe webhook failed to process |
+| `email_hook_rejected` | web | `reason` (`malformed_payload`, `unsupported_type`, `send_failed`), `http_status` | The Send Email Hook refused a signed call or could not send (a bad signature is a `security_event`) |
+| `security_event` | web | `kind` (one of `TENANTLESS_EVENTS`: `csrf_rejected`, `email_hook_bad_signature`, `oauth_state_rejected`, `non_member`, `no_project_role`, `sign_in_failed`, `invite_token_invalid`), `method`, `reason` | A security event with no workspace to file it under (decision 044); events of a workspace go to `security_events` instead |
+| `sign_in_record_failed` | web | none | A verified sign-in could not be written to `security_events` |
+
+To add an event: add it to `OPS_EVENTS` with its fields, then a row here; the test enforces both.
 
 ## Data model
 
@@ -141,8 +313,8 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `project_members` | A workspace member's role on one project: owner / admin / editor / viewer (decision 036) |
 | `project_invites` | An email invite to one project: token hash, role, expiry, accepted or canceled |
 | `connections` | One Supabase OAuth grant; sealed token |
-| `projects` | One watched Supabase project; ownership map and when it last loaded; paused flag |
-| `poll_runs` | One poll: window, status, error code, detectors it could not check |
+| `projects` | One watched Supabase project; ownership map and when it last loaded; paused flag; email alert level and RPC burst threshold |
+| `poll_runs` | One poll: window, status, error code, detectors it could not check, edge-log request count |
 | `findings` | Detector output: structured evidence only |
 | `incidents` | Grouped findings per actor; severity, hits, summary and its source |
 | `service_role_networks` | Learned server ASNs per project (decision 003) |
@@ -151,14 +323,16 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `posture_findings` | Latest posture findings per source: check, severity, object, structured evidence |
 | `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
 | `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
+| `public_tables` | Tables in `public` a project's Owners or Admins marked intentionally public: detector 11 skips them, the Posture page shows their read findings as accepted (decision 045) |
 | `audit_log` | Every query and model call, append-only |
-| `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project); processed Stripe events; requests per project per day (decisions 028, 041) |
+| `security_events` | Supahound's own security events: sign-ins, invites, role changes, connections, project changes, closing, data deletion; actor, action, target, result; IDs and enums only. Workspace owners read it (RLS); append-only for signed-in users; 90 days (a year on Enterprise, decision 048) once the workspace stops paying (decision 044) |
+| `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project), Enterprise flag (decision 048); processed Stripe events; requests per project per day (decisions 028, 041) |
 | `project_subscriptions` | One Stripe subscription per watched project: tier, status, period end; kept as payment history when the project is removed (decision 041) |
 | `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |
 
 Data controls (decision 037): once a day at 00:40 UTC the poller enqueues a `data` message per
 tenant. For a workspace that does not pay, the job deletes incidents, findings and poll runs past
-the 30-day window, the history of a Supabase connection disconnected 30 days ago, and the logs and
+the plan's window (30 days, a year on Enterprise, decision 048), the history of a Supabase connection disconnected 30 days ago, and the logs and
 history of a workspace closed and unpaid for 30 days. It never deletes the workspace record, its
 billing and payment history or the audit log, and deletes nothing while a workspace pays.
 `supahound_notifier` is a third NOLOGIN role: it reads owners' addresses across tenants for the

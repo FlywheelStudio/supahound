@@ -1,4 +1,4 @@
-import type { EdgeField } from "../config/fields.js";
+import { KEY_KINDS, type EdgeField, type KeyKind, type KeyKindColumn } from "../config/fields.js";
 
 // One edge-log request template, after the SQL rollup. `hits` counts identical requests
 // in the window, so detectors see each distinct request shape once.
@@ -18,14 +18,22 @@ export interface EdgeEvent {
   jwtSubject: string | null;
   jwtRole: string | null;
   apiKeyRole: string | null;
+  // The kind of key in the apikey and Authorization headers, worked out in the SQL (#154). Never
+  // the key or its prefix. Null when the row did not say (an older rollup, a fixture).
+  apiKeyKind: KeyKind | null;
+  authorizationKind: KeyKind | null;
 }
 
 export type Role = "anon" | "authenticated" | "service_role" | "other" | "unknown";
 
-// The user JWT's role wins; with no user JWT the API key decides.
+// The role a new (non-JWT) API key stands for (#154). A JWT key's role is in its payload instead.
+const KEY_KIND_ROLE: Partial<Record<KeyKind, Role>> = { secret: "service_role", publishable: "anon" };
+
+// The user JWT's role wins; with no user JWT the legacy API key's role decides, and with neither
+// the new key's kind: sb_secret_ is service_role, sb_publishable_ is anon.
 export function effectiveRole(event: EdgeEvent): Role {
   const raw = event.jwtRole ?? event.apiKeyRole;
-  if (raw === null) return "unknown";
+  if (raw === null) return (event.apiKeyKind === null ? undefined : KEY_KIND_ROLE[event.apiKeyKind]) ?? "unknown";
   if (raw === "anon" || raw === "authenticated" || raw === "service_role") return raw;
   return "other";
 }
@@ -46,7 +54,13 @@ function num(row: Row, key: EdgeField): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Rows come back from the rollup query with columns aliased to EdgeField names.
+// A key-kind column: one of the known enums, or null. Anything else is dropped, not passed on.
+function kind(row: Row, key: KeyKindColumn): KeyKind | null {
+  const v = row[key];
+  return typeof v === "string" && (KEY_KINDS as readonly string[]).includes(v) ? (v as KeyKind) : null;
+}
+
+// Rows come back from the rollup query with columns aliased to EdgeField names (and the key kinds).
 export function normalizeRow(row: Row): EdgeEvent {
   const hits = Number(row.hits ?? 1);
   return {
@@ -65,6 +79,8 @@ export function normalizeRow(row: Row): EdgeEvent {
     jwtSubject: str(row, "jwtSubject"),
     jwtRole: str(row, "jwtRole"),
     apiKeyRole: str(row, "apiKeyRole"),
+    apiKeyKind: kind(row, "apiKeyKind"),
+    authorizationKind: kind(row, "authorizationKind"),
   };
 }
 

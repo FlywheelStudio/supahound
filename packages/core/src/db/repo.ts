@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { POLLABLE_STATUSES } from "../billing/policy.js";
+import { checkWindowDays, STANDARD_INCIDENT_DAYS } from "../billing/history.js";
 import type { AlertLevel } from "../alerts/email.js";
 import type { Finding, Severity } from "../detectors/finding.js";
 import type { OwnershipMap } from "../ownership/ownership.js";
@@ -70,16 +71,18 @@ export interface ProjectRecord {
   activeUntil: Date | null;
   // The lowest severity that emails members, or "off" (decision 030).
   emailAlerts: AlertLevel;
+  // Detector 12's paging threshold: anon calls from one network in one poll (decision 045).
+  rpcBurstHits: number;
 }
 
 export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRecord | null> {
   const rows = await tx.query<{
     connection_id: string; supabase_ref: string; ownership: OwnershipMap; expected_asns: number[]; paused: boolean;
     ownership_refreshed_at: Date | null; ownership_attempted_at: Date | null; ownership_error: string | null;
-    email_alerts: AlertLevel; name: string; active_until: Date | null;
+    email_alerts: AlertLevel; name: string; active_until: Date | null; rpc_burst_hits: number;
   }>(
     `SELECT name, connection_id, supabase_ref, ownership, expected_asns, paused, active_until,
-            ownership_refreshed_at, ownership_attempted_at, ownership_error, email_alerts
+            ownership_refreshed_at, ownership_attempted_at, ownership_error, email_alerts, rpc_burst_hits
      FROM supahound.projects WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, id],
   );
@@ -98,6 +101,7 @@ export async function getProject(tx: TenantTx, id: ProjectId): Promise<ProjectRe
     paused: r.paused,
     activeUntil: r.active_until,
     emailAlerts: r.email_alerts,
+    rpcBurstHits: r.rpc_burst_hits,
   };
 }
 
@@ -208,14 +212,22 @@ export async function finishPollRun(
     status: "ok" | "unable_to_assess"; errorCode?: string; templates?: number; findings?: number;
     // Detectors this run could not check (decision 024). Meaningful on "ok" runs only.
     unassessedDetectors?: Finding["detector"][];
+    // Edge-log requests in the window (issue #133); null or absent when not counted.
+    edgeRequests?: number | null;
+    // GraphQL calls in the window per role (issue #157); null or absent when not counted.
+    graphqlCalls?: { anon: number; authenticated: number } | null;
+    // The end of the span actually assessed, when a saturated rollup cut the window short (#129).
+    windowEnd?: Date;
   },
 ): Promise<void> {
   await tx.query(
     `UPDATE supahound.poll_runs
-     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, finished_at = now()
+     SET status = $3, error_code = $4, templates = $5, findings = $6, unassessed_detectors = $7, edge_requests = $8,
+         window_end = coalesce($9, window_end), graphql_anon_calls = $10, graphql_authenticated_calls = $11, finished_at = now()
      WHERE tenant_id = $1 AND id = $2`,
     [tx.tenantId, runId, result.status, result.errorCode ?? null, result.templates ?? null, result.findings ?? null,
-      result.unassessedDetectors ?? []],
+      result.unassessedDetectors ?? [], result.edgeRequests ?? null, result.windowEnd ?? null,
+      result.graphqlCalls?.anon ?? null, result.graphqlCalls?.authenticated ?? null],
   );
 }
 
@@ -306,7 +318,8 @@ export async function setIncidentSummary(
   );
 }
 
-export type AuditAction = "logs_query" | "policies_query" | "model_call" | "alert_email";
+// detection_setting: a person changed a per-project detection setting (decision 045).
+export type AuditAction = "logs_query" | "policies_query" | "model_call" | "alert_email" | "detection_setting";
 
 export async function appendAudit(
   tx: TenantTx,
@@ -393,11 +406,19 @@ export interface ProjectSummary {
   // unassessed; "no_owned_tables" when the policies loaded but scope no table to an owner.
   crossTenant: "assessed" | "unable_to_assess" | "no_owned_tables" | null;
   emailAlerts: AlertLevel;
+  // Detector 12's paging threshold (decision 045).
+  rpcBurstHits: number;
   // The signed-in user's role on this project (decision 036); null outside a user transaction.
   role: ProjectRole | null;
   // Decision 042: the scheduled removal, or null.
   removal: { activeUntil: Date; deleteAfter: Date } | null;
+  // Log gap (issue #133): the newest LOG_GAP_WINDOWS counted windows saw no edge-log request, after
+  // an earlier window saw some. Logging may have stopped, or the app went quiet.
+  logGap: boolean;
 }
+
+// About an hour of one-minute polls.
+export const LOG_GAP_WINDOWS = 60;
 
 function crossTenantCoverage(lastUnassessed: string[] | null, loaded: boolean, empty: boolean): ProjectSummary["crossTenant"] {
   if (lastUnassessed?.includes("cross_tenant")) return "unable_to_assess";
@@ -410,9 +431,9 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     id: string; name: string; supabase_ref: string; paused: boolean; last_polled_at: Date | null;
     open_incidents: number; last_run_status: ProjectSummary["lastRunStatus"];
     last_unassessed: string[] | null; ownership_loaded: boolean; ownership_empty: boolean; email_alerts: AlertLevel;
-    role: ProjectRole | null; active_until: Date | null; delete_after: Date | null;
+    rpc_burst_hits: number; role: ProjectRole | null; active_until: Date | null; delete_after: Date | null; log_gap: boolean;
   }>(
-    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts, p.active_until, p.delete_after,
+    `SELECT p.id, p.name, p.supabase_ref, p.paused, p.last_polled_at, p.email_alerts, p.rpc_burst_hits, p.active_until, p.delete_after,
             supahound.project_role(p.id) AS role,
             p.ownership_refreshed_at IS NOT NULL AS ownership_loaded,
             p.ownership = '{}'::jsonb AS ownership_empty,
@@ -422,7 +443,13 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
             (SELECT count(*)::int FROM supahound.incidents i
               WHERE i.tenant_id = p.tenant_id AND i.project_id = p.id AND i.status = 'open') AS open_incidents,
             (SELECT r.status FROM supahound.poll_runs r
-              WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id ORDER BY r.started_at DESC LIMIT 1) AS last_run_status
+              WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id ORDER BY r.started_at DESC LIMIT 1) AS last_run_status,
+            coalesce((SELECT count(*) = ${LOG_GAP_WINDOWS} AND bool_and(g.edge_requests = 0)
+                      FROM (SELECT r.edge_requests FROM supahound.poll_runs r
+                            WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id AND r.status = 'ok' AND r.edge_requests IS NOT NULL
+                            ORDER BY r.started_at DESC LIMIT ${LOG_GAP_WINDOWS}) g)
+                     AND EXISTS (SELECT 1 FROM supahound.poll_runs r
+                                 WHERE r.tenant_id = p.tenant_id AND r.project_id = p.id AND r.edge_requests > 0), false) AS log_gap
      FROM supahound.projects p WHERE p.tenant_id = $1 ORDER BY p.name`,
     [tx.tenantId],
   );
@@ -431,8 +458,10 @@ export async function listProjects(tx: TenantTx): Promise<ProjectSummary[]> {
     lastPolledAt: r.last_polled_at, openIncidents: r.open_incidents, lastRunStatus: r.last_run_status,
     crossTenant: crossTenantCoverage(r.last_unassessed, r.ownership_loaded, r.ownership_empty),
     emailAlerts: r.email_alerts,
+    rpcBurstHits: r.rpc_burst_hits,
     role: r.role,
     removal: r.active_until && r.delete_after ? { activeUntil: r.active_until, deleteAfter: r.delete_after } : null,
+    logGap: r.log_gap,
   }));
 }
 
@@ -468,11 +497,14 @@ export async function listOpenIncidents(tx: TenantTx, limit = 50, project?: Proj
   }));
 }
 
-// Incident history (issue #44, decision 035). The window: last seen in the last 30 days, or still
-// open. The engine resolves an incident only when its actor acts again after the 15-minute window,
-// so an actor who goes quiet leaves the incident open; it must stay reachable from the dashboard.
+// Incident history (issue #44, decision 035). The window: last seen in the last `days` days, or
+// still open. The engine resolves an incident only when its actor acts again after the 15-minute
+// window, so an actor who goes quiet leaves the incident open; it must stay reachable from the
+// dashboard. `days` comes from the workspace's plan (billing/history.ts, decision 048): 30, or
+// 365 on Enterprise. Callers read it with historyWindow (db/billing.ts) in the same transaction.
 
-export const INCIDENT_HISTORY_DAYS = 30;
+// The standard window, and the quiet time after which the data job resolves an open incident.
+export const INCIDENT_HISTORY_DAYS = STANDARD_INCIDENT_DAYS;
 
 // Keyset position: the last row of a page. `lastSeenUs` is epoch microseconds as a decimal string,
 // read from SQL. A JS Date holds milliseconds only, so a cursor built from one would skip rows
@@ -500,7 +532,8 @@ export interface IncidentDetail extends IncidentHistoryItem {
   summarySource: "model" | "template" | null;
 }
 
-const IN_WINDOW = `(i.status = 'open' OR i.last_seen_at >= $3::timestamptz - make_interval(days => ${INCIDENT_HISTORY_DAYS}))`;
+// $3 is now; `days` is the placeholder of the window's length in days.
+const IN_WINDOW = (days: string) => `(i.status = 'open' OR i.last_seen_at >= $3::timestamptz - make_interval(days => ${days}::int))`;
 const US_TO_TS = (param: string) => `(timestamptz 'epoch' + ${param}::bigint * interval '1 microsecond')`;
 
 interface IncidentRow {
@@ -523,18 +556,18 @@ const toHistoryItem = (r: IncidentRow): IncidentHistoryItem => ({
 export async function listIncidentHistory(
   tx: TenantTx,
   project: ProjectId,
-  opts: { now: Date; limit: number; after?: IncidentCursor | null },
+  opts: { now: Date; days: number; limit: number; after?: IncidentCursor | null },
 ): Promise<{ incidents: IncidentHistoryItem[]; next: IncidentCursor | null }> {
   const limit = Math.max(1, Math.min(100, Math.trunc(opts.limit)));
   const after = opts.after ?? null;
   const rows = await tx.query<IncidentRow>(
     `SELECT ${INCIDENT_COLUMNS}
      FROM supahound.incidents i
-     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW}
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW("$7")}
        AND ($4::text IS NULL OR (i.last_seen_at, i.id) < (${US_TO_TS("$4")}, $5::uuid))
      ORDER BY i.last_seen_at DESC, i.id DESC
      LIMIT $6`,
-    [tx.tenantId, project, opts.now, after?.lastSeenUs ?? null, after?.id ?? null, limit + 1],
+    [tx.tenantId, project, opts.now, after?.lastSeenUs ?? null, after?.id ?? null, limit + 1, checkWindowDays(opts.days)],
   );
   const page = rows.slice(0, limit);
   const last = page.at(-1);
@@ -544,14 +577,16 @@ export async function listIncidentHistory(
   };
 }
 
-// One incident of this project, in the window; null otherwise. Another project's or another
-// tenant's incident ID is null too, so the page answers 404 in every case.
-export async function getIncident(tx: TenantTx, project: ProjectId, incidentId: string, now: Date): Promise<IncidentDetail | null> {
+// One incident of this project, in the window of `days`; null otherwise. Another project's or
+// another tenant's incident ID is null too, so the page answers 404 in every case.
+export async function getIncident(
+  tx: TenantTx, project: ProjectId, incidentId: string, opts: { now: Date; days: number },
+): Promise<IncidentDetail | null> {
   const rows = await tx.query<IncidentRow>(
     `SELECT ${INCIDENT_COLUMNS}
      FROM supahound.incidents i
-     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW} AND i.id = $4::uuid`,
-    [tx.tenantId, project, now, incidentId],
+     WHERE i.tenant_id = $1 AND i.project_id = $2 AND ${IN_WINDOW("$5")} AND i.id = $4::uuid`,
+    [tx.tenantId, project, opts.now, incidentId, checkWindowDays(opts.days)],
   );
   const r = rows[0];
   return r ? { ...toHistoryItem(r), summarySource: r.summary_source } : null;

@@ -1,7 +1,8 @@
 // The secrets scanner for the scan funnel (hackme.si, decision 026).
 //
 // Two entry points, so the funnel can run one without the other:
-//   scanClientCode  — the page, its same-apex scripts and their public source maps. Passive: it
+//   scanClientCode  — the page, its same-apex scripts and their source maps (inline, or public at a
+//                     URL the script or its `SourceMap` header names). Passive: it
 //                     reads only what a browser loading the page would read.
 //   probeLeakPaths  — one GET for each path on a fixed list (`/.env`, `/.git/config`, ...).
 // Every request goes through `scopedGet`, so every URL and redirect hop passes the scope guard.
@@ -63,7 +64,16 @@ export function jwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
+// A random key body has digits and letters of both cases. An identifier or a word does not. Used by
+// rules whose prefix is short enough to appear in minified code (`re_`).
+function looksRandom(body: string): boolean {
+  return /[0-9]/.test(body) && /[A-Z]/.test(body) && /[a-z]/.test(body);
+}
+
 // Rules are prefix-anchored, so a random string does not match. Each has a near-miss test.
+// Rules marked "gitleaks" are ported from gitleaks' default config (MIT License, Copyright (c) 2019
+// Zachary Rice; https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml), with word
+// boundaries added where gitleaks had none. The others follow the provider's published format.
 export const SECRET_RULES: SecretRule[] = [
   {
     id: "supabase-service-role-key",
@@ -96,8 +106,20 @@ export const SECRET_RULES: SecretRule[] = [
     id: "supabase-access-token",
     name: "Supabase personal access token",
     severity: "critical",
-    pattern: /\bsbp_(?:oauth_)?[a-f0-9]{40}\b/g,
+    // Classic and OAuth tokens are 40 hex. A scoped token starts with `sbp_fc` (Supabase docs,
+    // "Personal access tokens"); its length is not published, so its body only has a floor.
+    pattern: /\bsbp_(?:oauth_[a-f0-9]{40}|fc[A-Za-z0-9]{32,}|[a-f0-9]{40})\b/g,
     fix: "Revoke this token in your Supabase account settings. It reaches the Management API of every project the account can open.",
+  },
+  {
+    id: "supabase-oauth-client-secret",
+    name: "Supabase OAuth app client secret",
+    severity: "high",
+    // The same regex as the rule of the same id in the repo's .gitleaks.toml.
+    pattern: /\bsba_[a-f0-9]{40}\b/g,
+    fix:
+      "Regenerate this OAuth app's client secret in the Supabase dashboard (Organization settings, OAuth Apps). " +
+      "With it, anyone can pose as your app when exchanging authorization codes.",
   },
   {
     id: "postgres-url-with-password",
@@ -156,6 +178,81 @@ export const SECRET_RULES: SecretRule[] = [
     severity: "high",
     pattern: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}/g,
     fix: ROTATE,
+  },
+  {
+    id: "openrouter-api-key",
+    name: "OpenRouter API key",
+    severity: "high",
+    // OpenRouter's secret-format docs: `sk-or-v1-` and 64 lowercase hex.
+    pattern: /\bsk-or-v1-[a-f0-9]{64}\b/g,
+    fix: ROTATE,
+  },
+  {
+    id: "groq-api-key",
+    name: "Groq API key",
+    severity: "high",
+    // `gsk_` and 52 alphanumerics; the floor of 48 allows for a small format change.
+    pattern: /\bgsk_[A-Za-z0-9]{48,}\b/g,
+    fix: ROTATE,
+  },
+  {
+    id: "xai-api-key",
+    name: "xAI API key",
+    severity: "high",
+    // `xai-` and 80 alphanumerics; the floor of 70 allows for a small format change.
+    pattern: /\bxai-[A-Za-z0-9]{70,}\b/g,
+    fix: ROTATE,
+  },
+  {
+    id: "resend-api-key",
+    name: "Resend API key",
+    severity: "high",
+    // `re_`, an 8-character id, `_`, a 24-character secret. The prefix is short, so the body must look random.
+    pattern: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b/g,
+    accept: (key) => (looksRandom(key.slice(3)) ? {} : null),
+    fix: ROTATE,
+  },
+  {
+    id: "google-api-key",
+    name: "Google API key",
+    // Firebase and Maps keys are meant for client code, so a key alone is not a leak. It matters when
+    // the key is unrestricted or can call a paid API such as Gemini, which a passive scan cannot tell.
+    severity: "low",
+    // gitleaks `gcp-api-key`.
+    pattern: /\bAIza[\w-]{35}(?![\w-])/g,
+    fix:
+      "Google API keys in client code are normal for Firebase and Maps, but only when restricted. In Google Cloud console " +
+      "(APIs & Services, Credentials), restrict this key to your sites and to the APIs the page needs. If it can call the " +
+      "Generative Language (Gemini) API or another paid API, rotate it.",
+  },
+  {
+    id: "twilio-api-key",
+    name: "Twilio API key",
+    severity: "high",
+    // gitleaks `twilio-api-key` (`SK` and 32 hex), with word boundaries and a digit-and-letter check.
+    pattern: /\bSK[0-9a-fA-F]{32}\b/g,
+    accept: (key) => (/[0-9]/.test(key.slice(2)) && /[a-fA-F]/.test(key.slice(2)) ? {} : null),
+    fix: "Delete this API key in the Twilio Console (Account, API keys) and create a new one. Its secret is probably exposed with it.",
+  },
+  {
+    id: "mailgun-api-key",
+    name: "Mailgun API or signing key",
+    severity: "high",
+    // gitleaks `mailgun-private-api-token` and `mailgun-signing-key`: the key must follow a name that
+    // says mailgun, since `key-` and 32 hex alone is common in minified code.
+    pattern: /mailgun[\w.-]{0,20}["'`]?\s{0,3}(?:=|:|=>|,)\s{0,3}["'`]?(key-[a-f0-9]{32}|[a-f0-9]{32}-[a-f0-9]{8}-[a-f0-9]{8})\b/gi,
+    secretGroup: 1,
+    fix: "Rotate this key in the Mailgun dashboard (API Security, or Webhooks for a signing key).",
+  },
+  {
+    id: "cloudflare-api-token",
+    name: "Cloudflare API token or key",
+    severity: "high",
+    // Cloudflare's scannable formats ("Token formats" docs): `cfk_` (global key), `cfut_` (user token),
+    // `cfat_` (account token), `cfast_` (Access service token secret), then 40 characters and a CRC32
+    // checksum. Older unprefixed tokens have no distinct shape and are not matched.
+    pattern: /\bcf(?:k|ut|at|ast)_[A-Za-z0-9]{46,48}\b/g,
+    fix: "Roll or delete this token in the Cloudflare dashboard (My Profile or Manage Account, API Tokens).",
   },
   {
     id: "vercel-ai-gateway-key",
@@ -344,14 +441,40 @@ export function sourceMapUrl(code: string, fileUrl: string): string | null {
   }
 }
 
+// The text of an inline source map (`sourceMappingURL=data:application/json;base64,...`), or null.
+// The map is as large as the code, so it is found by its last occurrence, not in the file's tail. A
+// map cut off by the byte cap still decodes up to the cut.
+const INLINE_MAP = /^data:application\/json(?:;[\w-]+=[\w-]+)*;base64,([A-Za-z0-9+/_-]*)/;
+
+export function inlineSourceMap(code: string): string | null {
+  const at = code.lastIndexOf("sourceMappingURL=data:");
+  if (at < 3 || !/[#@]\s*$/.test(code.slice(Math.max(0, at - 4), at))) return null;
+  const m = INLINE_MAP.exec(code.slice(at + "sourceMappingURL=".length));
+  if (!m || m[1]!.length < 4) return null;
+  const b64 = m[1]!.replace(/-/g, "+").replace(/_/g, "/");
+  try {
+    const bytes = Uint8Array.from(atob(b64.slice(0, b64.length - (b64.length % 4))), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 function isHtml(contentType: string, text: string): boolean {
   return contentType.includes("text/html") || /^\s*<(?:!doctype|html|head|body)\b/i.test(text);
+}
+
+export interface ClientCodeOptions extends ScopedFetchOptions {
+  // Called with the text of every file the scan matched (page, scripts, source maps). The anon-key
+  // exposure check (supabaseExposure.ts) reads the project URL and anon key from it, in memory.
+  onText?: (text: string) => void;
 }
 
 // Reads the page at `targetUrl`, every same-apex script it loads or names, and each script's public
 // source map, and matches every file against the rules. A script on another host is skipped, not
 // fetched. Throws only when `targetUrl` itself is outside the verified apex.
-export async function scanClientCode(targetUrl: string, verifiedApex: string, opts: ScopedFetchOptions = {}): Promise<SecretsScanResult> {
+export async function scanClientCode(targetUrl: string, verifiedApex: string, opts: ClientCodeOptions = {}): Promise<SecretsScanResult> {
+  const onText = opts.onText ?? (() => undefined);
   const start = scannableUrl(targetUrl, verifiedApex);
   if (start === null || start === "out-of-scope") {
     throw new Error(`${reportUrl(targetUrl) || "the target"} is not a scannable URL inside ${verifiedApex}`);
@@ -368,6 +491,7 @@ export async function scanClientCode(targetUrl: string, verifiedApex: string, op
   }
   result.fetched.push(reportUrl(page.url));
   findings.addSecrets(matchSecrets(page.text), page.url, "page");
+  onText(page.text);
 
   // Breadth first: the page's own scripts before the chunks they name.
   const queue: { url: string; source: "script" | "source-map" }[] = [];
@@ -404,7 +528,16 @@ export async function scanClientCode(targetUrl: string, verifiedApex: string, op
     if (doc.status !== 200 || isHtml(doc.contentType, doc.text)) continue; // A 404 page or SPA shell.
     result.fetched.push(reportUrl(doc.url));
     findings.addSecrets(matchSecrets(doc.text), doc.url, next.source);
+    onText(doc.text);
     if (next.source === "script") {
+      // A source map can be inline (base64 in the script), named in a trailing comment, or named in
+      // a `SourceMap` / `X-SourceMap` response header. A named map is fetched like any other URL.
+      const inline = inlineSourceMap(doc.text);
+      if (inline !== null) {
+        findings.addSecrets(matchSecrets(inline), doc.url, "source-map");
+        onText(inline);
+      }
+      if (doc.sourceMap) enqueue(doc.sourceMap, "source-map", doc.url);
       const map = sourceMapUrl(doc.text, doc.url);
       if (map) enqueue(map, "source-map", doc.url);
       for (const ref of scriptRefsInCode(doc.text, doc.url)) enqueue(ref, "script", doc.url);

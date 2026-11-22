@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { tenantId, type TenantId, type UserId } from "../tenancy/scope.js";
 import { isStorableEmail } from "./repo.js";
+import { logSecurityEvent } from "./securityEvents.js";
 import { begin, TenantTx } from "./tenant.js";
 
 // Entry points for signed-in users (decision 009). The user ID must come from a verified
@@ -79,7 +80,11 @@ export async function withTenantForUser<T>(
       [tenant, user],
     );
     const role = res.rows[0]?.role;
-    if (!role) throw new NotAMemberError();
+    if (!role) {
+      // Decision 044: no workspace to file it under (the user is not in it), so Workers logs.
+      logSecurityEvent("non_member");
+      throw new NotAMemberError();
+    }
     const tx = new TenantTx(client, tenant);
     try {
       return await fn(tx, role);

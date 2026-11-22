@@ -7,7 +7,8 @@ import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
 import { LogsApiError, type LogsQuery } from "../../src/logs/client.js";
 import { ownershipFromColumns } from "../../src/ownership/ownership.js";
-import { FIRST_LOOKBACK_MINUTES, LAG_SECONDS, pollProject, type PollDeps } from "../../src/poller/pollProject.js";
+import { ROLLUP_LIMIT } from "../../src/logs/sql.js";
+import { FIRST_LOOKBACK_MINUTES, LAG_SECONDS, MAX_ROLLUP_QUERIES, pollProject, type PollDeps } from "../../src/poller/pollProject.js";
 import { runDuePolls } from "../../src/poller/scheduler.js";
 import { projectScope, tenantId, type ProjectScope } from "../../src/tenancy/scope.js";
 import { ALICE, BOB, CHROME_UA } from "../helpers.js";
@@ -47,7 +48,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   const db = useDb();
   let agency: ProjectScope;
   let client: ProjectScope;
-  let logCalls: { token: string; ref: string; start: Date; end: Date }[];
+  let logCalls: { token: string; ref: string; start: Date; end: Date; sql: string }[];
   let explained: IncidentFeatures[];
   const behaviour: Record<string, (q: LogsQuery) => Record<string, unknown>[]> = {};
 
@@ -68,7 +69,7 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       vault: db.vault,
       now: () => NOW,
       queryLogs: async (q: LogsQuery, o: { token: string }) => {
-        logCalls.push({ token: o.token, ref: q.projectRef, start: q.start, end: q.end });
+        logCalls.push({ token: o.token, ref: q.projectRef, start: q.start, end: q.end, sql: q.sql });
         return behaviour[o.token]!(q);
       },
       queryPolicies: async () => { throw new Error("queryPolicies called: ownership was hand-set"); },
@@ -172,12 +173,14 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
   describe("windows", () => {
     const later = (s: number) => new Date(NOW.getTime() + s * 1000);
     const minute = (d: Date) => d.getTime() % 60_000 === 0;
+    // An empty rollup is followed by the auth coverage count (#130); these tests follow the rollups.
+    const rollups = () => logCalls.filter((c) => !c.sql.includes("rest_with_auth"));
 
     it("reads contiguous, minute-aligned windows that never overlap", async () => {
       behaviour[await tokenOf(agency)] = () => [];
       await pollProject(agency, deps({ now: () => NOW }));
       await pollProject(agency, deps({ now: () => later(60) }));
-      const [w1, w2] = logCalls;
+      const [w1, w2] = rollups();
       expect(w1!.end.getTime()).toBe(Math.floor((NOW.getTime() - LAG_SECONDS * 1000) / 60_000) * 60_000);
       expect(w1!.end.getTime() - w1!.start.getTime()).toBe(FIRST_LOOKBACK_MINUTES * 60_000);
       expect(w2!.start).toEqual(w1!.end);
@@ -209,8 +212,70 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
       expect(await pollProject(agency, deps({ now: () => later(60) }))).toMatchObject({ status: "unable_to_assess" });
       fail = false;
       await pollProject(agency, deps({ now: () => later(120) }));
-      expect(logCalls[2]!.start).toEqual(logCalls[0]!.end);
-      expect(logCalls[2]!.end.getTime()).toBeGreaterThan(logCalls[1]!.end.getTime());
+      const [w1, w2, w3] = rollups();
+      expect(w3!.start).toEqual(w1!.end);
+      expect(w3!.end.getTime()).toBeGreaterThan(w2!.end.getTime());
+    });
+
+    describe("a saturated rollup (#129)", () => {
+      // A fake Supabase that, like the real rollup, returns the window's busiest templates up to the query's LIMIT.
+      const inWindow = (rows: Record<string, unknown>[]) => (q: LogsQuery) =>
+        rows.filter((r) => Date.parse(r.first_seen as string) >= q.start.getTime() && Date.parse(r.first_seen as string) < q.end.getTime())
+          .sort((a, b) => Number(b.hits) - Number(a.hits))
+          .slice(0, Number(/LIMIT (\d+)$/.exec(q.sql)?.[1] ?? 0)); // a query without LIMIT (the #130 coverage count) gets no rows
+      const burst = (seen: Date) => Array.from({ length: ROLLUP_LIMIT + 1 }, (_, i) => ({
+        ...benignRows[0], search: `?user_id=eq.${BOB}&offset=${i}`, first_seen: seen.toISOString(), last_seen: seen.toISOString(),
+      }));
+      const probe = (seen: Date) => ({ ...attackRows[0], hits: "1", first_seen: seen.toISOString(), last_seen: seen.toISOString() });
+      const lastRun = (s: ProjectScope) => withTenant(db.app, s.tenantId, async (tx) => (await tx.query<{
+        status: string; error_code: string | null; templates: number | null; window_end: Date;
+      }>("SELECT status, error_code, templates, window_end FROM supahound.poll_runs ORDER BY started_at DESC LIMIT 1"))[0]!);
+
+      it("halves a full window, finds the lone probe in the first half, and resumes where it stopped", async () => {
+        // Window 12:23 to 12:28: the probe at 12:23:30, a burst over the cap at 12:27:30.
+        behaviour[await tokenOf(agency)] = inWindow([probe(later(-390)), ...burst(later(-150))]);
+        expect(await pollProject(agency, deps())).toMatchObject({ status: "ok", findings: 1 });
+        expect(logCalls.map((c) => [c.start.toISOString(), c.end.toISOString()])).toEqual([
+          ["2026-10-27T12:23:00.000Z", "2026-10-27T12:28:00.000Z"],
+          ["2026-10-27T12:23:00.000Z", "2026-10-27T12:25:00.000Z"],
+        ]);
+        expect(await lastRun(agency)).toMatchObject({ status: "ok", templates: 1, window_end: new Date("2026-10-27T12:25:00Z") });
+        // One template more than the cap, so a full answer is told apart from an exact one.
+        expect(logCalls[0]!.sql).toMatch(new RegExp(`LIMIT ${ROLLUP_LIMIT + 1}$`));
+
+        // The next poll starts at 12:25, not at the 12:28 the first one asked for.
+        await pollProject(agency, deps({ now: () => later(60) }));
+        expect(logCalls[2]!.start).toEqual(new Date("2026-10-27T12:25:00Z"));
+      });
+
+      it("reads a one-minute window over the cap as unable to assess, never ok", async () => {
+        // The burst fills 12:27 to 12:28, so every half that holds it is full.
+        behaviour[await tokenOf(agency)] = inWindow([probe(later(-390)), ...burst(later(-150))]);
+        await pollProject(agency, deps());
+        expect(await pollProject(agency, deps({ now: () => later(60) }))).toMatchObject({ status: "ok" });
+        logCalls = [];
+        // Window 12:27 to 12:30, then 12:27 to 12:28: a minute cannot be halved.
+        expect(await pollProject(agency, deps({ now: () => later(120) }))).toEqual({ status: "unable_to_assess", errorCode: "rollup_saturated" });
+        expect(logCalls.map((c) => [c.start.toISOString(), c.end.toISOString()])).toEqual([
+          ["2026-10-27T12:27:00.000Z", "2026-10-27T12:30:00.000Z"],
+          ["2026-10-27T12:27:00.000Z", "2026-10-27T12:28:00.000Z"],
+        ]);
+        expect(await lastRun(agency)).toMatchObject({ status: "unable_to_assess", error_code: "rollup_saturated", templates: ROLLUP_LIMIT + 1 });
+        // The failed run assessed nothing: the next poll starts at 12:27 again.
+        expect(await withTenant(db.app, agency.tenantId, (tx) => repo.lastAssessedUntil(tx, agency.projectId)))
+          .toEqual(new Date("2026-10-27T12:27:00Z"));
+      });
+
+      it("spends at most MAX_ROLLUP_QUERIES logs queries on one poll", async () => {
+        behaviour[await tokenOf(agency)] = () => [];
+        await pollProject(agency, deps());
+        // An hour later the window is 60 minutes and the burst sits in its first minute.
+        behaviour[await tokenOf(agency)] = inWindow(burst(later(-90)));
+        logCalls = [];
+        expect(await pollProject(agency, deps({ now: () => later(3600) }))).toEqual({ status: "unable_to_assess", errorCode: "rollup_saturated" });
+        expect(logCalls).toHaveLength(MAX_ROLLUP_QUERIES);
+        expect(logCalls.map((c) => (c.end.getTime() - c.start.getTime()) / 60_000)).toEqual([60, 30, 15, 7]);
+      });
     });
 
     it("skips when nothing new has landed since the last window", async () => {
@@ -261,5 +326,58 @@ describe.skipIf(pgInfo === null)("poller across tenants", () => {
     );
     expect(await pollProject(client, deps())).toEqual({ status: "unable_to_assess", errorCode: "token_unavailable" });
     expect(logCalls).toEqual([]);
+  });
+
+  describe("auth field coverage (#130)", () => {
+    const isCoverage = (q: LogsQuery) => q.sql.includes("rest_with_auth");
+    // An empty rollup; the coverage count answers with these numbers.
+    const counts = (rest: number, withAuth: number) => (q: LogsQuery) =>
+      isCoverage(q) ? [{ rest_requests: String(rest), rest_with_auth: String(withAuth) }] : [];
+    const lastRun = (s: ProjectScope) => withTenant(db.app, s.tenantId, async (tx) => (await tx.query<{ status: string; unassessed_detectors: string[] }>(
+      "SELECT status, unassessed_detectors FROM supahound.poll_runs ORDER BY started_at DESC LIMIT 1"))[0]!);
+
+    it("marks both detectors unassessed when REST traffic carries no subject or role", async () => {
+      behaviour[await tokenOf(agency)] = counts(120, 0);
+      expect(await pollProject(agency, deps())).toMatchObject({ status: "ok", findings: 0 });
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: ["cross_tenant", "service_role_misuse"] });
+      // The count covers the rollup's window and is audited before it runs.
+      expect(logCalls).toHaveLength(2);
+      expect(logCalls[1]!.start).toEqual(logCalls[0]!.start);
+      expect(logCalls[1]!.end).toEqual(logCalls[0]!.end);
+      const audit = await withTenant(db.app, agency.tenantId, (tx) =>
+        tx.query<{ detail: Record<string, unknown> }>("SELECT detail FROM supahound.audit_log WHERE action = 'logs_query' ORDER BY created_at"));
+      expect(audit.map((a) => a.detail.purpose)).toEqual([undefined, "auth_coverage"]);
+      expect(audit[1]!.detail.sql_sha256).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("reads as assessed when the fields are filled, or there is no REST traffic", async () => {
+      behaviour[await tokenOf(agency)] = counts(120, 3);
+      behaviour[await tokenOf(client)] = counts(0, 0);
+      await pollProject(agency, deps());
+      await pollProject(client, deps());
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: [] });
+      expect(await lastRun(client)).toEqual({ status: "ok", unassessed_detectors: [] });
+    });
+
+    // #154: sb_secret_ / sb_publishable_ keys fill no JWT field, but their kind gives detector 4 a
+    // role. A user subject only comes from a JWT, so detector 2 stays unassessed.
+    it("keeps only detector 2 unassessed when REST traffic carries a key kind but no JWT field", async () => {
+      behaviour[await tokenOf(agency)] = (q) =>
+        isCoverage(q) ? [{ rest_requests: "120", rest_with_auth: "0", rest_with_key_kind: "120" }] : [];
+      expect(await pollProject(agency, deps())).toMatchObject({ status: "ok", findings: 0 });
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: ["cross_tenant"] });
+    });
+
+    it("skips the count when the rollup has rows: each one has an auth field filled", async () => {
+      behaviour[await tokenOf(agency)] = (q) => (isCoverage(q) ? [{ rest_requests: "9", rest_with_auth: "0" }] : benignRows);
+      await pollProject(agency, deps());
+      expect(logCalls).toHaveLength(1);
+      expect(await lastRun(agency)).toEqual({ status: "ok", unassessed_detectors: [] });
+    });
+
+    it("reads a failed count as unable to assess, never clean", async () => {
+      behaviour[await tokenOf(agency)] = (q) => { if (isCoverage(q)) throw new LogsApiError("rate limited", 429); return []; };
+      expect(await pollProject(agency, deps())).toEqual({ status: "unable_to_assess", errorCode: "rate_limited" });
+    });
   });
 });

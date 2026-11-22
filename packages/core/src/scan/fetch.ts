@@ -2,9 +2,11 @@
 //
 // Every request goes through `scopedGet`. It refuses any URL outside the verified apex, follows
 // redirects by hand so each hop passes the scope guard too, and caps bytes and time. The passive
-// checks build on it; nothing in `scan/` calls `fetch` directly.
+// checks build on it; nothing in `scan/` calls `fetch` directly. The one exception to the apex rule
+// is `supabaseRestRootGet` (decision 046): one GET to the PostgREST root of a Supabase project the
+// verified site's own code names, through the same caps.
 
-import { assertInScope, ScopeError } from "./scope.js";
+import { assertInScope, assertSupabaseHostInScope, ScopeError, SUPABASE_REF } from "./scope.js";
 
 export const SCANNER_USER_AGENT = "Supahound-hackme/1.0 (+https://hackme.si; authorized scan)";
 
@@ -50,6 +52,9 @@ export interface FetchedDocument {
   contentType: string;
   text: string;
   truncated: boolean;
+  // The `SourceMap` (or legacy `X-SourceMap`) response header, unresolved. Callers fetch it only
+  // through `scopedGet`, like any other URL.
+  sourceMap: string | null;
 }
 
 export interface RefusedFetch {
@@ -128,13 +133,22 @@ async function readCapped(res: FetchLikeResponse, maxBytes: number): Promise<{ t
   return { text: text + decoder.decode(), truncated: false };
 }
 
-// GET one URL inside the verified apex. Each redirect hop passes the scope guard before it is
-// requested; a hop outside scope ends the request as refused, never followed.
-export async function scopedGet(rawUrl: string, verifiedApex: string, opts: ScopedFetchOptions = {}): Promise<FetchOutcome> {
+// Turns a URL (and, for a redirect, the URL it came from) into the next URL to request, or says why
+// not. Each caller of `guardedGet` passes its own scope rule.
+type Guard = (raw: string, base?: string) => URL | "out-of-scope" | null;
+
+// GET one URL that `guard` accepts. Each redirect hop passes the guard before it is requested; a hop
+// outside scope ends the request as refused, never followed.
+async function guardedGet(
+  rawUrl: string,
+  guard: Guard,
+  opts: ScopedFetchOptions,
+  extraHeaders: Record<string, string> = {},
+): Promise<FetchOutcome> {
   const limits = resolveLimits(opts.limits);
   const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
 
-  const first = scannableUrl(rawUrl, verifiedApex);
+  const first = guard(rawUrl);
   if (first === null) return { kind: "refused", url: reportUrl(rawUrl), reason: "bad-url" };
   if (first === "out-of-scope") return { kind: "refused", url: reportUrl(rawUrl), reason: "out-of-scope" };
 
@@ -146,7 +160,7 @@ export async function scopedGet(rawUrl: string, verifiedApex: string, opts: Scop
       res = await fetchImpl(current.toString(), {
         method: "GET",
         redirect: "manual",
-        headers: { "user-agent": SCANNER_USER_AGENT, accept: "*/*" },
+        headers: { "user-agent": SCANNER_USER_AGENT, accept: "*/*", ...extraHeaders },
         signal,
       });
     } catch (err) {
@@ -158,7 +172,7 @@ export async function scopedGet(rawUrl: string, verifiedApex: string, opts: Scop
       const location = res.headers.get("location");
       if (location === null) return { kind: "failed", url: reportUrl(current.toString()), reason: `http ${res.status} without location` };
       if (hop >= limits.maxRedirects) return { kind: "refused", url: reportUrl(current.toString()), reason: "too-many-redirects" };
-      const next = scannableUrl(location, verifiedApex, current.toString());
+      const next = guard(location, current.toString());
       if (next === null) return { kind: "refused", url: reportUrl(current.toString()), reason: "bad-url" };
       if (next === "out-of-scope") return { kind: "refused", url: reportUrl(current.toString()), reason: "out-of-scope" };
       await res.body?.cancel().catch(() => undefined);
@@ -175,10 +189,60 @@ export async function scopedGet(rawUrl: string, verifiedApex: string, opts: Scop
         contentType: (res.headers.get("content-type") ?? "").toLowerCase(),
         text,
         truncated,
+        sourceMap: res.headers.get("sourcemap") ?? res.headers.get("x-sourcemap"),
       };
     } catch (err) {
       const reason = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "read error";
       return { kind: "failed", url: reportUrl(current.toString()), reason };
     }
   }
+}
+
+// GET one URL inside the verified apex. Each redirect hop passes the scope guard before it is
+// requested; a hop outside scope ends the request as refused, never followed.
+export async function scopedGet(rawUrl: string, verifiedApex: string, opts: ScopedFetchOptions = {}): Promise<FetchOutcome> {
+  return guardedGet(rawUrl, (raw, base) => scannableUrl(raw, verifiedApex, base), opts);
+}
+
+// The PostgREST root path. It answers with an OpenAPI description that lists table, view and
+// function names, and no rows.
+export const SUPABASE_REST_ROOT = "/rest/v1/";
+
+// Parses the one URL `supabaseRestRootGet` may request: `https://<ref>.supabase.co/rest/v1/` exactly,
+// for a ref in `namedRefs`. No query, no other path, no port, no credentials. Returns null when the
+// URL does not have that shape, "out-of-scope" when the host is not a project the site names.
+export function supabaseRestRootUrl(raw: string, namedRefs: ReadonlySet<string>, base?: string): URL | "out-of-scope" | null {
+  let u: URL;
+  try {
+    u = base === undefined ? new URL(raw) : new URL(raw, base);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || u.username !== "" || u.password !== "" || u.port !== "") return null;
+  if (u.pathname !== SUPABASE_REST_ROOT || u.search !== "" || u.hash !== "") return null;
+  try {
+    assertSupabaseHostInScope(u.hostname, namedRefs);
+  } catch (err) {
+    if (err instanceof ScopeError) return "out-of-scope";
+    throw err;
+  }
+  return u;
+}
+
+// One GET to a named Supabase project's PostgREST root with the anon key the site ships (decision
+// 046). Redirects are never followed, whatever the limits say; bytes and time keep the usual caps.
+// The key goes in the request headers only; the outcome never repeats it.
+export async function supabaseRestRootGet(
+  ref: string,
+  anonKey: string,
+  namedRefs: ReadonlySet<string>,
+  opts: ScopedFetchOptions = {},
+): Promise<FetchOutcome> {
+  if (!SUPABASE_REF.test(ref)) return { kind: "refused", url: "", reason: "bad-url" };
+  return guardedGet(
+    `https://${ref}.supabase.co${SUPABASE_REST_ROOT}`,
+    (raw, base) => supabaseRestRootUrl(raw, namedRefs, base),
+    { ...opts, limits: { ...opts.limits, maxRedirects: 0 } },
+    { apikey: anonKey, authorization: `Bearer ${anonKey}`, accept: "application/openapi+json, application/json;q=0.9" },
+  );
 }

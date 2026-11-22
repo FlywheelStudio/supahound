@@ -48,6 +48,16 @@ Erik approved the scope and asked for the calls below to be made and recorded wi
    An Advisor lint that repeats a catalog finding on the same object is hidden when read
    (`rls_disabled_in_public` and `policy_exists_rls_disabled` → `rls_disabled`,
    `rls_enabled_no_policy` → `rls_no_policies`, `security_definer_view` → `view_not_invoker`).
+   *Amended by issue #134 (2026-11-22):* the 12 newer security lints of splinter, the Advisor's
+   lint source (0019 to 0032), are known by name, each with its own fix prompt.
+   `rls_policy_always_true` → `permissive_policy`, matched on the policy name. A few lints carry
+   structured metadata (policy name and command, a function's identity arguments, SECURITY
+   DEFINER, sensitive column names, a foreign key or extension name, versions); each value is
+   checked as a catalog name, an enum, a boolean or a version before it is stored as evidence.
+   Severity overrides: `sensitive_columns_exposed` critical, `rls_policy_always_true` high,
+   `anon_security_definer_function_executable` high, `anon_dynamic_sql_function_executable`
+   critical (ERROR) or high (WARN), `pg_graphql_authenticated_table_exposed` low. A table lint at
+   high or above raises detections as in item 7; the function lints have no table to raise.
 6. **Storage.** `posture_scans`, one row per project (request, attempt, status and time per
    source, counts). `posture_findings`, the latest result per source. A source that succeeds
    replaces its rows; a source that fails keeps its last good rows and records an error code,
@@ -95,3 +105,65 @@ Erik approved the scope and asked for the calls below to be made and recorded wi
   `supabase_read_only_user` may call `has_table_privilege` for other roles. Both need the OAuth
   app (#4). A failure shows as "unable to assess", never as clean.
 - Scan now waits for the next poll: up to about 2 minutes.
+
+## Addendum: function and GraphQL catalog checks (issue #135, 2026-11-22)
+
+The Advisor is experimental. When it fails, nothing checked RPC or GraphQL exposure, because the
+catalog checks covered only tables, views and policies. Two catalog checks now port splinter's
+lints 0026 to 0029 (PostgreSQL License, attributed in `config/posture.ts`).
+
+- **`POSTURE_SQL`** gains four columns and one row kind. `graphql_roles` on table and view rows:
+  NULL unless `pg_graphql` is in `pg_extension`; then the API roles with SELECT on any column
+  (`has_column_privilege`, so column grants count), for relkinds `r` and `v` only (pg_graphql does
+  not expose partitioned roots). Kind `function`: one row per SECURITY DEFINER function in
+  `public`, with `grants` as `anon:EXECUTE,authenticated:EXECUTE` (`has_function_privilege`,
+  PUBLIC included), `security_definer`, `search_path_set` (`proconfig` pins `search_path`) and
+  `arguments` (`pg_get_function_identity_arguments`, at most 512 characters, no control
+  characters, else the row is dropped). Still catalog reads only; no function bodies.
+- **Checks.**
+
+  | Check | Rule | Severity |
+  | --- | --- | --- |
+  | `function_definer_exposed` | SECURITY DEFINER function in `public` that an API role can EXECUTE | anon: high; authenticated only: medium |
+  | `graphql_table_exposed` | pg_graphql installed and an API role can SELECT a column of the table or view | anon: medium; authenticated only: low |
+
+  Evidence: exposure, the roles, and for functions the identity arguments and whether
+  search_path is pinned. Neither check raises detections: detectors never name a function, and
+  GraphQL introspection shows a shape, not rows.
+- **Dedupe.** `anon_`/`authenticated_security_definer_function_executable` →
+  `function_definer_exposed`; `pg_graphql_anon_table_exposed` and
+  `pg_graphql_authenticated_table_exposed` → `graphql_table_exposed`.
+- **Fix prompts.** `REVOKE EXECUTE ON FUNCTION <name>(<arguments>) FROM PUBLIC, <roles>`, a commented
+  `SECURITY INVOKER` alternative, and `SET search_path = ''` when it is not pinned. For GraphQL,
+  `REVOKE SELECT ... FROM <roles>` (which also ends REST reads by them) or, commented, revoking
+  `graphql.resolve`.
+- **Not ported:** splinter 0031/0032 (dynamic SQL in function bodies). They parse `prosrc` with
+  regular expressions; the Advisor still reports them.
+- **Not verified live:** that `supabase_read_only_user` may call `has_function_privilege` and
+  `has_column_privilege` for other roles (any role may, in stock Postgres), as for item 2.
+
+## Addendum: GraphQL findings gated on GraphQL traffic (issue #157, 2026-11-22)
+
+On a default Supabase project pg_graphql shows every table the API roles can read, so
+`graphql_table_exposed` (and the Advisor's `pg_graphql_anon_table_exposed` /
+`pg_graphql_authenticated_table_exposed`) fire once per table and flood the Posture page of a
+project that never uses GraphQL. Erik's decision 7C on #131: report them only where the logs show
+GraphQL traffic from that role.
+
+- **Counting.** The poll's count query (`pollCountSql`, the request count of #133 plus two
+  `countIf`s) counts the window's `/graphql/v1` calls whose effective role is anon, and those
+  whose role is authenticated. Request bodies are not in edge logs, so counts are all there is. They
+  are stored on the run (`poll_runs.graphql_anon_calls`, `graphql_authenticated_calls`, migration
+  `20261122160000`); NULL when not counted. No new table, so no new tenant rules.
+- **Gate.** A GraphQL finding is about the roles in its evidence (catalog: `roles`, else
+  `exposure`; Advisor: the role in the lint's name). It is shown when any of those roles has a
+  count above zero in the project's runs started in the last 7 days (`GRAPHQL_ACTIVITY_DAYS`).
+  Otherwise it is kept, stored and fixable, but hidden: the Posture page says how many are hidden
+  and why, the overview and project counts leave them out, and they raise no severity
+  (`postureExposedTables`). The gate runs after dedupe, on read only: scans store what they find.
+- **No counts reads as no traffic.** A deployment that does not count (`countRequests` off: tests,
+  the CLI), or runs that predate the migration, hide the GraphQL findings. The poller Worker counts.
+- **Why 7 days.** Long enough to catch a weekly job or a quiet app, short enough that a project
+  that stopped using GraphQL drops the noise within a week. One constant.
+- Hiding is not suppression: the objects remain visible through GraphQL introspection to any
+  caller. A first GraphQL call shows the findings from the next page load.

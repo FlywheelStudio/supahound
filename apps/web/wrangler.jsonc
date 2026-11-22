@@ -7,7 +7,11 @@
   "name": "supahound-web",
   "compatibility_date": "2026-10-27",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "vinext/server/fetch-handler",
+  // vinext's fetch handler plus a scheduled handler for the staff heartbeat (issue #159).
+  "main": "./worker/index.ts",
+  // Every minute: the heartbeat's stale check (no poll run finished for 15 minutes). It covers a
+  // dead poller cron; the poller's cron checks the failing share (packages/core/src/poller/heartbeat.ts).
+  "triggers": { "crons": ["* * * * *"] },
   "assets": {
     "directory": "dist/client",
     "html_handling": "none",
@@ -15,10 +19,16 @@
     "binding": "ASSETS",
     "run_worker_first": ["/*", "!/_next/static/*", "!/*/_next/static/*"]
   },
-  // App role only, through withTenantForUser. Create with --caching-disabled (decision 008).
-  // Local dev: CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP.
-  "hyperdrive": [{ "binding": "HYPERDRIVE_APP", "id": "00000000000000000000000000000001" }],
-  // Magic links and alerts (decision 014). The sender domain must be onboarded to Email Sending.
+  // App role, through withTenantForUser, for every request. Create with --caching-disabled
+  // (decision 008). HYPERDRIVE_SCHEDULER is the poller's scheduler config (same ID), used only by
+  // the cron's heartbeat: aggregates, never tenant rows.
+  // Local dev: CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP (and _SCHEDULER).
+  "hyperdrive": [
+    { "binding": "HYPERDRIVE_APP", "id": "00000000000000000000000000000001" },
+    { "binding": "HYPERDRIVE_SCHEDULER", "id": "00000000000000000000000000000002" }
+  ],
+  // Magic links, alerts and the staff heartbeat (decision 014). The sender domain must be
+  // onboarded to Email Sending.
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
     "APP_URL": "http://localhost:5173",
@@ -49,12 +59,19 @@
     // Staff workspaces without billing (decision 029): comma-separated email domains. A workspace
     // whose only owner signs in with an email on one of these domains needs no card. Exact match,
     // no subdomains. Empty: no exemptions.
-    "SUPAHOUND_BILLING_EXEMPT_DOMAINS": ""
+    "SUPAHOUND_BILLING_EXEMPT_DOMAINS": "",
+    // Staff heartbeat (issues #133, #159): who is emailed when no poll run has finished for 15
+    // minutes. One address or a comma-separated list; empty turns it off. At most one email per
+    // 6 hours. Set the same value on the poller, whose cron reports polls that mostly fail.
+    "SUPAHOUND_STAFF_ALERT_EMAIL": ""
   },
   "secrets": { "required": ["SEND_EMAIL_HOOK_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET", "SUPAHOUND_MASTER_KEYS"] },
+  // Each invocation's events go to the log sink Worker, which keeps them in R2 for 90 days
+  // (decision 047). Deploy apps/log-sink first. Self-hosting without it: remove this entry.
+  "tail_consumers": [{ "service": "supahound-log-sink" }],
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
-    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
+    "traces": { "enabled": false }
   }
 }

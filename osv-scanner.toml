@@ -1,0 +1,5 @@
+# osv-scanner config: the CI job `osv` scans pnpm-lock.yaml and fails on any known vulnerability
+# not listed here. Every entry needs a reason (why it cannot be reached) and an expiry; when it
+# expires CI fails again, so fix the dependency or renew the entry with a fresh reason.
+#
+# No entries: fflate and minimatch were fixed in #161.

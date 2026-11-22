@@ -2,10 +2,10 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import pg from "pg";
-import { EDGE_FIELDS, type EdgeField } from "./config/fields.js";
+import { EDGE_FIELDS, KEY_PREFIX_FIELDS, type FieldPath } from "./config/fields.js";
 import { pollWindow, queryLogs } from "./logs/client.js";
 import { normalizeRow, type EdgeEvent } from "./logs/event.js";
-import { discoverKeysSql, edgeRollupSql } from "./logs/sql.js";
+import { authCoverageSql, discoverKeysSql, edgeRollupSql, keyKindCountsSql, pollCountSql } from "./logs/sql.js";
 import {
   ownershipFromColumns,
   ownershipFromPolicies,
@@ -155,14 +155,22 @@ async function runDiscoverKeys(args: string[]): Promise<void> {
   const present = new Map(rows.map((r) => [String(r.key), Number(r.hits)]));
 
   process.stdout.write("Configured field paths:\n");
-  for (const field of Object.keys(EDGE_FIELDS) as EdgeField[]) {
-    const { key, verified } = EDGE_FIELDS[field];
+  const configured: Record<string, FieldPath> = { ...EDGE_FIELDS, ...KEY_PREFIX_FIELDS };
+  for (const [field, { key, verified }] of Object.entries(configured)) {
     const hits = present.get(key);
     const status = hits === undefined ? "MISSING" : `present (${hits} rows)`;
-    process.stdout.write(`  ${field.padEnd(15)} ${key.padEnd(48)} ${verified ? "docs" : "unverified"}  ${status}\n`);
+    process.stdout.write(`  ${field.padEnd(19)} ${key.padEnd(48)} ${verified ? "verified" : "unverified"}  ${status}\n`);
   }
   process.stdout.write("\nAuth-related keys in edge_logs:\n");
   for (const [key, hits] of present) process.stdout.write(`  ${key}  (${hits})\n`);
+
+  // Issue #154: the kinds of key in use (sb_secret_, sb_publishable_, legacy JWT), counted inside
+  // ClickHouse. Only the kind enums come back, never a prefix.
+  const kinds = await queryLogs({ projectRef: values.project, sql: keyKindCountsSql(process.env), start, end }, { token: token() });
+  process.stdout.write("\nKey kinds (apikey header / Authorization header):\n");
+  for (const r of kinds) {
+    process.stdout.write(`  ${String(r.apiKeyKind).padEnd(12)} / ${String(r.authorizationKind).padEnd(12)} (${Number(r.hits)})\n`);
+  }
 }
 
 export interface NoticeCliDeps {
@@ -306,7 +314,10 @@ async function main(argv: string[]): Promise<void> {
       return runDiscoverKeys(rest);
     case "print-sql":
       process.stdout.write(`-- Edge rollup (Management API logs endpoint)\n${edgeRollupSql({ env: process.env })}\n\n`);
+      process.stdout.write(`-- Request and GraphQL call counts per poll (issues #133, #157)\n${pollCountSql(process.env)}\n\n`);
+      process.stdout.write(`-- Auth field coverage, after an empty rollup (issue #130)\n${authCoverageSql(process.env)}\n\n`);
       process.stdout.write(`-- Key discovery (PRD task 1)\n${discoverKeysSql(process.env)}\n\n`);
+      process.stdout.write(`-- Key kinds in use, by discover-keys (issue #154)\n${keyKindCountsSql(process.env)}\n\n`);
       process.stdout.write(`-- Ownership from RLS policies (read-only SQL)\n${POLICIES_SQL}\n\n`);
       process.stdout.write(`-- Posture scan catalog checks (read-only SQL, decision 038)\n${POSTURE_SQL}\n`);
       return;

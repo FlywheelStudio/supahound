@@ -1,4 +1,6 @@
+import { logSecurityEvent } from "@supahound/core/db/securityEvents";
 import { Webhook } from "standardwebhooks";
+import { opsLog } from "@supahound/core/logging/opsLog";
 import { confirmUrl, isSignInType, renderSignInEmail, type RenderedEmail } from "./magicLink";
 
 // Supabase Auth Send Email Hook: https://supabase.com/docs/guides/auth/auth-hooks/send-email-hook
@@ -19,7 +21,10 @@ interface HookPayload {
   email_data?: { token_hash?: unknown; email_action_type?: unknown };
 }
 
-function hookError(status: number, message: string): Response {
+type RejectReason = "malformed_payload" | "unsupported_type" | "send_failed";
+
+function hookError(status: number, message: string, reason?: RejectReason): Response {
+  if (reason) opsLog("email_hook_rejected", { reason, http_status: status });
   // Supabase reads { error: { http_code, message } } on failure.
   return Response.json({ error: { http_code: status, message } }, { status });
 }
@@ -34,6 +39,8 @@ export async function handleSendEmailHook(body: string, headers: Headers, deps: 
       "webhook-signature": headers.get("webhook-signature") ?? "",
     }) as HookPayload;
   } catch {
+    // Logged as a security event (decision 044), not as email_hook_rejected.
+    logSecurityEvent("email_hook_bad_signature");
     return hookError(401, "invalid signature");
   }
 
@@ -41,16 +48,16 @@ export async function handleSendEmailHook(body: string, headers: Headers, deps: 
   const tokenHash = payload.email_data?.token_hash;
   const type = payload.email_data?.email_action_type;
   if (typeof email !== "string" || typeof tokenHash !== "string" || typeof type !== "string") {
-    return hookError(400, "malformed payload");
+    return hookError(400, "malformed payload", "malformed_payload");
   }
   // Only sign-in emails exist today. Anything else fails loudly instead of sending a wrong email.
-  if (!isSignInType(type)) return hookError(400, "unsupported email type");
+  if (!isSignInType(type)) return hookError(400, "unsupported email type", "unsupported_type");
 
   const rendered = renderSignInEmail(confirmUrl(deps.appUrl, tokenHash, type));
   try {
     await deps.send({ to: email, from: deps.from, ...rendered });
   } catch {
-    return hookError(502, "email send failed");
+    return hookError(502, "email send failed", "send_failed");
   }
   return Response.json({}, { status: 200 });
 }

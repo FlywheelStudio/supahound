@@ -55,12 +55,19 @@
     "APP_URL": "http://localhost:5173",
     // Sender of incident alert emails. Use an address on a domain onboarded to Email Sending.
     "EMAIL_FROM_ADDRESS": "alerts@supahound.example",
-    "EMAIL_FROM_NAME": "Supahound alerts"
+    "EMAIL_FROM_NAME": "Supahound alerts",
+    // Staff heartbeat (issue #133): who is emailed when polls mostly fail. One address or a
+    // comma-separated list; empty turns it off. At most one email per 6 hours. Set the same value
+    // on the web Worker: its cron reports polling that has stopped (issue #159).
+    "SUPAHOUND_STAFF_ALERT_EMAIL": ""
   },
   "secrets": { "required": ["SUPAHOUND_MASTER_KEYS", "SUPABASE_OAUTH_CLIENT_SECRET"] },
+  // Each invocation's events go to the log sink Worker, which keeps them in R2 for 90 days
+  // (decision 047). Deploy apps/log-sink first. Self-hosting without it: remove this entry.
+  "tail_consumers": [{ "service": "supahound-log-sink" }],
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
     "traces": { "enabled": true, "head_sampling_rate": 0.1 }
   }
 }

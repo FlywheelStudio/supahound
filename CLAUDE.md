@@ -1,5 +1,13 @@
 # Supahound
 
+> **This is a public, open-source repository.** Everything you commit, and every issue, PR,
+> comment, commit message, workflow, test fixture and log line, is public or can become public.
+> Write each one for strangers, attackers and customers to read. Before any change, ask: what does
+> this reveal, and could someone misuse it? Never include secrets, credentials, customer or client
+> names, project refs, account IDs, real log rows, internal URLs or internal-only plans. Security
+> findings that could be exploited go to Erik privately, never into a public issue. See "Rules
+> specific to this repo" below.
+
 Repository: [FlywheelStudio/supahound](https://github.com/FlywheelStudio/supahound). Fair source under
 FSL-1.1-ALv2 (`LICENSE.md`, decision 025); contributors sign `CLA.md`. Renamed from Guardbase (decision 015).
 
@@ -87,12 +95,13 @@ prints the wrangler output. Prove each new check can fail before you trust it (d
 | `packages/core/src/explainer/` | Features, validator, template; `llm.ts` is the ONLY model caller (ZDR) |
 | `packages/core/src/poller/` | One tenant-scoped poll; scheduler helpers |
 | `apps/poller/` | Cloudflare Worker: cron → queue → poll, via Hyperdrive |
+| `apps/log-sink/` | Tail Worker: the web and poller Workers' `opsLog` events, filtered, to R2 for 90 days (decision 047) |
 | `apps/web/` | Next.js on Workers (vinext): auth, onboarding, dashboard, Supabase connect, email hook. No marketing pages; optional brand links in `lib/brand.ts` |
 | `supabase/migrations/` | Postgres schema with forced RLS (apply to shared DBs only with approval) |
 | `supabase/setup/` | Not migrations: the login-user SQL for self-hosters (passwords never go in git) |
 | `packages/core/test/db/`, `test/uat/` | Postgres suites; detection UAT scenarios (UAT-D*) |
 | `apps/web/e2e/` | Playwright: signed-out checks, web UAT journey (UAT-W*), fake Auth, Postgres setup |
-| `.github/` | CI (with the gitleaks secret scan, `.gitleaks.toml`), PR hygiene, CLA check, labeler, Claude Action, Dependabot, templates |
+| `.github/` | CI (with the gitleaks secret scan, `.gitleaks.toml`), code scanning (CodeQL, dependency review), PR hygiene, CLA check, labeler, Claude Action, Dependabot, templates |
 | `docs/` | INDEX, STATE, ARCHITECTURE, ROADMAP, TESTING, WORKFLOW, decisions, WIP and feature docs |
 
 ## Environment
@@ -103,8 +112,8 @@ Local values go in `.dev.vars` (git-ignored). Hyperdrive local strings:
 
 ## Rules specific to this repo
 
-- **This repo is public.** Never put secrets, client names, customer data or internal-only notes in
-  code, docs, issues or PRs. CI runs gitleaks on every push; add a rule to `.gitleaks.toml` for any
+- **This repo is public and open source** (see the top of this file). Never put secrets, client
+  names, customer data or internal-only notes in code, docs, issues, PRs, comments or logs. CI runs gitleaks on every push; add a rule to `.gitleaks.toml` for any
   new secret format.
 - **Never `@claude` on an outsider's issue or PR.** The Claude Action holds a write token and the
   Claude secret; `claude.yml` refuses fork PRs and outsider-authored issues. Copy what you need into a

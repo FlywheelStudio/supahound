@@ -65,12 +65,21 @@ One more, Scan funnel, holds the hackme.si work (decision 016). It is not a PRD 
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` | PR, push to `develop` or `main` | gitleaks secret scan; typecheck, lint, tests, build; E2E + UAT job |
-| `cla.yml` | PR, or a signing comment | Fails until every outside author has signed `CLA.md` (decision 025). Signatures on the `cla-signatures` branch |
+| `ci.yml` | PR, push to `develop` or `main` | gitleaks secret scan; zizmor workflow lint (fails on high); osv-scanner on `pnpm-lock.yaml`; typecheck, lint, tests, build; E2E + UAT job |
+| `scorecard.yml` | Push to `develop` (the default branch), weekly, branch protection changes | OpenSSF Scorecard: alerts in the Security tab, results published to the Scorecard API |
+| `code-scanning.yml` | PR, push to `develop` or `main`, weekly | CodeQL (`security-extended`) to the Security tab; on PRs, dependency review fails on high/critical advisories and GPL/AGPL licences (#127) |
+| `cla.yml` | PR, or a signing comment (or `recheck`) | Fails until every outside commit author has signed `CLA.md` (decision 025). First-party `actions/github-script`, no PR code checked out. Signatures in `signatures/cla.json` on the `cla-signatures` branch; after a signature it re-runs the PR's failed check |
 | `pr-hygiene.yml` | PR opened or edited | Fails if the PR does not close an issue |
 | `labeler.yml` | PR | Adds `area:*` labels by path |
 | `claude.yml` | `@claude` in an issue or PR, or the `claude` label. Both the asker and the issue or PR author must be owners, members or collaborators; never on a fork PR | Claude Code works the issue and opens a PR into `develop` |
 | `dependabot.yml` | Weekly / monthly | Dependency update PRs (`type:chore`) |
+
+Every `uses:` names a full commit SHA with the version in a comment
+(`actions/checkout@<sha> # v7.0.1`); Dependabot's github-actions updates move both. Resolve a new
+pin with `git ls-remote https://github.com/<owner>/<repo>.git 'refs/tags/<tag>*'` and take the
+peeled `^{}` SHA when the tag is annotated. CLI tools in CI (gitleaks, zizmor, osv-scanner) are
+downloaded by version and checked against a SHA-256. A zizmor finding that is safe by design gets
+`# zizmor: ignore[<audit>]` on its line and a comment that says why.
 
 Only owners, members and collaborators can start the Claude workflow. It needs the
 `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` repository secret (`/install-github-app` sets it up).

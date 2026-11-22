@@ -4,10 +4,12 @@ import { countDailyUsage } from "@supahound/core/billing/usage";
 import { billingMode } from "@supahound/core/db/billing";
 import { billedTenants, dataJobTenants, dueProjects } from "@supahound/core/db/repo";
 import { runDataJob } from "@supahound/core/datacontrols/flow";
+import { opsLog as log } from "@supahound/core/logging/opsLog";
 import { explainerFor } from "@supahound/core/explainer/llm";
 import { queryLogs } from "@supahound/core/logs/client";
 import { queryReadOnly } from "@supahound/core/ownership/client";
 import { querySecurityAdvisor } from "@supahound/core/posture/advisor";
+import { runHeartbeat } from "@supahound/core/poller/heartbeat";
 import { pollProject, type PollDeps, type PollOutcome } from "@supahound/core/poller/pollProject";
 import { projectScope, tenantId as parseTenantId, type ProjectScope, type TenantId } from "@supahound/core/tenancy/scope";
 import { TokenVault } from "@supahound/core/vault/vault";
@@ -65,11 +67,6 @@ export function parseMessage(body: unknown): ProjectScope | null {
   } catch {
     return null;
   }
-}
-
-function log(event: string, fields: Record<string, string | number | boolean | null> = {}): void {
-  // Internal IDs and counts only. Never log error text, tokens, refs or customer data.
-  console.log(JSON.stringify({ event, ...fields }));
 }
 
 export interface PollQueue {
@@ -161,6 +158,23 @@ export default {
         log("data_jobs_enqueued", { count: await enqueueUsage(tenants, env.POLL_QUEUE, "data") });
       }
     } finally {
+      // Staff heartbeat (issue #133): runs even when enqueueing failed. Never fails the cron.
+      // This cron owns the "failing" check; the web Worker's cron owns "stale", so a dead poller
+      // cron is still reported and no slot gets two emails (issue #159).
+      try {
+        const outcome = await runHeartbeat({
+          scheduler,
+          billing: billingMode(env.SUPAHOUND_BILLING),
+          staffEmail: env.SUPAHOUND_STAFF_ALERT_EMAIL,
+          send: (m) => env.EMAIL.send(m),
+          from: { email: env.EMAIL_FROM_ADDRESS, name: env.EMAIL_FROM_NAME },
+          appUrl: env.APP_URL,
+          checks: "failing",
+        }, new Date(_controller.scheduledTime));
+        if (outcome.status !== "off" && outcome.status !== "healthy") log("heartbeat", { ...outcome });
+      } catch {
+        log("heartbeat_crashed");
+      }
       await scheduler.end();
     }
   },
@@ -182,6 +196,8 @@ export default {
       env: { SUPAHOUND_SOURCE_COLUMN: env.SUPAHOUND_SOURCE_COLUMN },
       // Posture scan (decision 038): catalog SQL on the read-only endpoint and the Security Advisor.
       posture: { querySql: queryReadOnly, queryAdvisor: querySecurityAdvisor },
+      // Log gap (issue #133): one request count per poll window, beside the rollup.
+      countRequests: true,
       // Incident alert email (decision 030): one email per incident per member.
       alerts: {
         send: (m) => env.EMAIL.send(m),

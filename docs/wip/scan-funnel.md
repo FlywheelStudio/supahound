@@ -63,10 +63,54 @@ Erik asked for a secrets scanner and chose to probe leak paths as well as client
 - Problems solved: the first test generator multiplied past 2^53, so its low bits collapsed and the
   "random" hex had too few symbols. It now uses `Math.imul`. The placeholder check reads the last 16
   characters, so a fixed prefix such as `sk_live_` cannot add variety to a fake key.
-- Known gaps: chunks that webpack builds from a runtime map (no literal path) are not found. Base64
-  inline source maps are not decoded. The scanner does not read `SourceMap` response headers.
+- Known gaps: chunks that webpack builds from a runtime map (no literal path) are not found.
 - Next: #51 wires `scanClientCode` (and `probeLeakPaths` once legal review clears it) into the scan
   job and the report.
+
+## Status — 2026-11-22: wider rules, inline and header source maps (#140)
+
+- Done:
+  - 10 more rules (26 in all): Supabase OAuth client secret (`sba_`, the `.gitleaks.toml` regex),
+    Supabase scoped tokens (`sbp_fc`, folded into the access-token rule), Google API key (`AIza`,
+    severity low: Firebase and Maps keys belong in client code when restricted), OpenRouter, Groq,
+    xAI, Resend, Twilio API key, Mailgun (only after a name that says mailgun) and Cloudflare's
+    prefixed tokens (`cfk_`, `cfut_`, `cfat_`, `cfast_`). Google, Twilio and Mailgun are ported from
+    gitleaks' default config (MIT, attributed in `secrets.ts`); the rest follow the provider's docs.
+  - Short-prefix rules carry a second check: a Resend body must mix digits and both cases; a Twilio
+    body must mix digits and hex letters, and `SK` must start a word.
+  - `inlineSourceMap` decodes a base64 `data:application/json` source map in a script and scans it as
+    `source: "source-map"`, with no request. A map cut off by the byte cap decodes up to the cut.
+  - `scopedGet` returns the `SourceMap` (or `X-SourceMap`) header; the scanner queues that URL like a
+    comment-named map, so the scope guard and the script limit apply.
+  - Tests: 154 in `scanSecrets.test.ts`. A sweep of 825 MB of minified JS and source maps in
+    `node_modules` (38,545 files, 3 inline maps) found no match from the new rules.
+- Not matched, on purpose: Cloudflare's older unprefixed tokens (40 alphanumerics, no distinct shape),
+  `cfoat_` Wrangler tokens (length not published), Mailgun public validation keys (public by design).
+
+## Status — 2026-11-22: what the anon key exposes (#139, decision 046)
+
+Erik chose to build it; legal review was recommended before the public funnel calls it.
+
+- Done:
+  - `scan/scope.ts`: `supabaseHostInScope`, the one host outside the verified apex in scope:
+    `<ref>.supabase.co` for a 20-character ref the site's own client code names.
+  - `scan/fetch.ts`: `scopedGet` now runs on a shared loop (`guardedGet`) with a scope rule per
+    caller. `supabaseRestRootGet` sends one GET to `https://<ref>.supabase.co/rest/v1/` with the
+    anon key, no redirects, same byte and time caps.
+  - `scan/supabaseExposure.ts`: the collector (project URLs and anon JWTs whose `ref` matches, held
+    in memory), `exposedNames` (OpenAPI paths → names through `safeName`, counts), the probe (at
+    most two projects, one request each) and the entry point `scanClientCodeWithAnonExposure`.
+    `scanClientCode` gained an `onText` hook and otherwise behaves as before.
+  - Finding `anon-key-exposure:openapi` (medium with tables or views, low with functions only),
+    monitor `exposed_read`. Evidence: project ref, key fingerprint and last 4, counts, names.
+  - Security scan tab: names and counts through the allowlist, the fix, a link to the matching
+    project's Posture tab or to Projects.
+  - Tests: `test/scanSupabaseExposure.test.ts` (53, fake fetch), web `scanDomains.test.ts` (+5).
+    Mutations in TESTING.md.
+- **Gate:** nothing calls `scanClientCodeWithAnonExposure` yet. When #51 wires the funnel, it calls
+  `scanClientCode` until legal review clears this check, then switches the call.
+- Known gaps: publishable-key-only apps (no ref in the key) get no exposure check; the per-table
+  `HEAD` count from the issue is not built (it touches data).
 
 ## Approach
 

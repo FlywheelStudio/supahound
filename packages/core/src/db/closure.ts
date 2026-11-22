@@ -106,7 +106,7 @@ export async function deferPurge(tx: TenantTx, now: Date): Promise<void> {
 //
 // Deleted: Supabase connections (sealed tokens) and through them every project with its incidents,
 // findings, poll runs, service-key networks, usage, project roles and invites; OAuth states; scans
-// with their findings and jobs.
+// with their findings and jobs; security events (decision 044).
 // Kept: the tenants row, memberships (members still open the closed page), billing_accounts and
 // stripe_events (the payment history), audit_log (its rows lose their project link, decision 022),
 // scan domains and authorizations (the consent record), and the closure row.
@@ -123,5 +123,7 @@ export async function purgeHistory(tx: TenantTx, now: Date): Promise<boolean> {
   await tx.query("DELETE FROM supahound.projects WHERE tenant_id = $1", [tx.tenantId]);
   await tx.query("DELETE FROM supahound.oauth_states WHERE tenant_id = $1", [tx.tenantId]);
   await tx.query("DELETE FROM supahound.scans WHERE tenant_id = $1", [tx.tenantId]);
+  // Security events are logs, not the record (decision 044).
+  await tx.query("DELETE FROM supahound.security_events WHERE tenant_id = $1", [tx.tenantId]);
   return true;
 }

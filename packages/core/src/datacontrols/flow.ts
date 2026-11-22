@@ -4,7 +4,7 @@ import { accessFor } from "../billing/policy.js";
 import { isLive, type ProjectSub } from "../billing/projects.js";
 import { projectSubFromStripe, type StripeSubscription } from "../billing/stripeMap.js";
 import {
-  getBilling, isPaying, listProjectSubscriptions, refreshStanding, saveProjectSubscription, saveSubscription, watchedProjects,
+  getBilling, isPaying, listProjectSubscriptions, refreshStanding, retentionPlan, saveProjectSubscription, saveSubscription, watchedProjects,
   type SubscriptionSnapshot,
 } from "../db/billing.js";
 import { deferPurge, getClosure, purgeHistory, recordClosure, reopenWorkspace, type ReopenResult } from "../db/closure.js";
@@ -12,6 +12,7 @@ import { deferConnectionDeletes, deleteExpiredConnections, markDisconnected, typ
 import { appendAudit } from "../db/repo.js";
 import { deleteRemovedProjects } from "../db/removal.js";
 import { applyRetention, type RetentionResult } from "../db/retention.js";
+import { deleteExpiredSecurityEvents, recordSecurityEvent } from "../db/securityEvents.js";
 import { withTenant, type TenantTx } from "../db/tenant.js";
 import { withTenantForUser } from "../db/user.js";
 import { parseCredentials } from "../supabase/oauth.js";
@@ -22,7 +23,8 @@ import { renderDisconnectEmail } from "./email.js";
 // Data controls (issue #43, decision 037): close and reopen a workspace, disconnect a Supabase
 // connection, and the daily data job. No external call (Stripe, Supabase, email) runs inside a
 // tenant transaction: read and check, close, call, then write in a new transaction that checks
-// again. Nothing is deleted while the workspace pays (billing/policy.ts payingAccount).
+// again. Nothing is deleted while the workspace pays (billing/policy.ts payingAccount). Each change
+// and each refusal by role is a security event in the transaction that decides it (decision 044).
 
 // The typed confirmation must match exactly, apart from surrounding spaces (decision 022's rule).
 export const confirms = (typed: string, expected: string): boolean => typed.trim() === expected;
@@ -77,7 +79,10 @@ export async function closeWorkspace(deps: CloseDeps, input: { user: UserId; ten
   const { user, tenant } = input;
   const started = deps.now();
   const pre = await withTenantForUser(deps.pool, user, tenant, async (tx, role) => {
-    if (role !== "owner") return { stop: "role" as const };
+    if (role !== "owner") {
+      await recordSecurityEvent(tx, { action: "workspace_closed", result: "denied", actor: user, detail: { reason: "role" } });
+      return { stop: "role" as const };
+    }
     if (await getClosure(tx)) return { stop: "already_closed" as const };
     if (!confirms(input.typedName, await workspaceName(tx))) return { stop: "mismatch" as const };
     const b = await getBilling(tx);
@@ -122,6 +127,7 @@ export async function closeWorkspace(deps: CloseDeps, input: { user: UserId; ten
        WHERE tenant_id = $1 AND removal_source = 'billing' AND removal_requested_at >= $2`,
       [tx.tenantId, started],
     );
+    await recordSecurityEvent(tx, { action: "workspace_closed", actor: user });
     return "closed";
   });
 }
@@ -132,7 +138,10 @@ export type ReopenOutcome = ReopenResult | "role";
 // that has ended means the billing page asks for a card, with no new trial.
 export async function reopenClosedWorkspace(deps: CloseDeps, input: { user: UserId; tenant: TenantId }): Promise<ReopenOutcome> {
   const pre = await withTenantForUser(deps.pool, input.user, input.tenant, async (tx, role) => {
-    if (role !== "owner") return { stop: "role" as const };
+    if (role !== "owner") {
+      await recordSecurityEvent(tx, { action: "workspace_reopened", result: "denied", actor: input.user, detail: { reason: "role" } });
+      return { stop: "role" as const };
+    }
     const c = await getClosure(tx);
     if (!c) return { stop: "not_closed" as const };
     if (c.purgedAt) return { stop: "too_late" as const };
@@ -159,7 +168,9 @@ export async function reopenClosedWorkspace(deps: CloseDeps, input: { user: User
     if (role !== "owner") return "role";
     if (snapshot) await saveSubscription(tx, snapshot, null);
     if (projectSnapshots.length > 0) await saveProjectSnapshots(tx, projectSnapshots);
-    return reopenWorkspace(tx);
+    const result = await reopenWorkspace(tx);
+    if (result === "reopened") await recordSecurityEvent(tx, { action: "workspace_reopened", actor: input.user });
+    return result;
   });
 }
 
@@ -200,7 +211,10 @@ export async function disconnectConnection(
 ): Promise<DisconnectOutcome> {
   const none = (result: DisconnectResult): DisconnectOutcome => ({ result, revoked: false, projectsPaused: 0, notice: null });
   const pre = await withTenantForUser(deps.pool, input.user, input.tenant, async (tx, role) => {
-    if (role === "member") return { stop: "role" as const };
+    if (role === "member") {
+      await recordSecurityEvent(tx, { action: "connection_removed", result: "denied", actor: input.user, target: input.connection, detail: { reason: "role" } });
+      return { stop: "role" as const };
+    }
     const [conn] = await tx.query<{ label: string; sealed_token: Buffer }>(
       "SELECT label, sealed_token FROM supahound.connections WHERE tenant_id = $1 AND id = $2 AND disconnected_at IS NULL",
       [tx.tenantId, input.connection],
@@ -227,6 +241,10 @@ export async function disconnectConnection(
     if (d.projects.length === 0) {
       await tx.query("DELETE FROM supahound.connections WHERE tenant_id = $1 AND id = $2", [tx.tenantId, input.connection]);
     }
+    await recordSecurityEvent(tx, {
+      action: "connection_removed", actor: input.user, target: input.connection,
+      detail: { reason: "user", projects: d.projects.length, revoked },
+    });
     const notice = { ...d, workspaceName: await workspaceName(tx), paying: await isPaying(tx), at: now };
     return { result: "disconnected", revoked, projectsPaused: d.projects.length, notice };
   });
@@ -238,6 +256,7 @@ export async function disconnectConnection(
 export async function markRevoked(tx: TenantTx, connection: ConnectionId, now: Date): Promise<DisconnectNotice | null> {
   const d = await markDisconnected(tx, connection, now, "revoked", null);
   if (!d) return null;
+  await recordSecurityEvent(tx, { action: "connection_removed", actor: null, target: connection, detail: { reason: "revoked", projects: d.projects.length } });
   return { ...d, workspaceName: await workspaceName(tx), paying: await isPaying(tx), at: now };
 }
 
@@ -301,7 +320,10 @@ export async function runDataJob(pool: Pool, tenant: TenantId, now: Date): Promi
     const closure = await getClosure(tx);
     if (closure?.purgedAt) return { paying: await isPaying(tx), purged: false, retention: null, connectionsDeleted: 0, projectsDeleted: 0 };
     const projectsDeleted = await deleteRemovedProjects(tx, now);
-    const paying = await isPaying(tx);
+    if (projectsDeleted > 0) {
+      await recordSecurityEvent(tx, { action: "data_deleted", actor: null, detail: { kind: "removed_projects", count: projectsDeleted } });
+    }
+    const { paying, window } = await retentionPlan(tx);
     // purgeHistory checks purge_after itself, in the UPDATE that claims the purge.
     if (closure && paying) await deferPurge(tx, now);
     else if (closure && (await purgeHistory(tx, now))) {
@@ -310,7 +332,13 @@ export async function runDataJob(pool: Pool, tenant: TenantId, now: Date): Promi
     let connectionsDeleted = 0;
     if (paying) await deferConnectionDeletes(tx, now);
     else connectionsDeleted = await deleteExpiredConnections(tx, now);
-    const retention = await applyRetention(tx, now, { deleteHistory: !paying });
+    if (connectionsDeleted > 0) {
+      await recordSecurityEvent(tx, { action: "data_deleted", actor: null, detail: { kind: "disconnected_connections", count: connectionsDeleted } });
+    }
+    // Decisions 044 and 048: security events older than the plan's window (90 days, or a year on
+    // Enterprise), only while the workspace does not pay.
+    if (!paying) await deleteExpiredSecurityEvents(tx, now, window.securityEventDays);
+    const retention = await applyRetention(tx, now, { deleteHistory: !paying, historyDays: window.incidentDays });
     return { paying, purged: false, retention, connectionsDeleted, projectsDeleted };
   });
 }
