@@ -109,6 +109,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D7 | A scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet |
 | UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
 | UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
+| UAT-D10 | Anon-key reads of a table the posture scan shows open raise a paging incident from the next poll (#132) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -363,5 +364,10 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Removal: Keep needs a scheduled removal (042) | `keepOutcome` always "kept" | `apps/web/test/picker.test.ts` fails |
 | Removal: the CHECK holds across daylight saving (042) | CHECK uses `interval '7 days'` instead of `'168 hours'` | `removalGrace.test.ts` fails (session in `America/New_York`, window over 2027-03-14) |
 | Removal: the words before and after the period (042) | `removalSentence` ignores the date | `apps/web/test/removal.test.ts` fails |
+| Anon reads: rejected requests raise nothing (#132) | `detectExposedReads` drops the status check | 1 unit test fails |
+| Anon reads: only plain identifiers reach the SQL (#132) | `anonReadTables` drops `safeIdentifier` | 1 unit test fails |
+| Anon reads: a policy's own read exposure counts (#132) | `anonCanRead` ignores `readExposure` | 1 unit test fails |
+| Anon reads: the poller passes posture to the detector (#132) | `pollProject` drops `anonReadable` from the scan | UAT-D10 fails |
+| Anon reads: findings may name the new detector (#132) | Migration `20261122010000` left out | UAT-D10 fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

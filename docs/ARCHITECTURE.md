@@ -78,10 +78,16 @@ by path, such as `@supahound/core/db/repo`. No build step sits between them.
    that succeeds replaces its findings (decision 038). It never fails the poll.
 4. **Audit, then query.** The SQL hash goes to `audit_log`. Then one ClickHouse query rolls the
    window up by request template (`packages/core/src/logs/sql.ts`). Supabase returns rollups, not raw rows.
+   Anon traffic is left out, except anon GET/HEAD on the tables the stored posture shows readable by
+   anon (at most 200 plain identifiers, issue #132). The SQL is fixed before that poll's posture scan, so
+   a new scan's tables are watched from the next poll.
 5. **Detect.** Rows become `EdgeEvent`s (`logs/event.ts`; field paths only in `config/fields.ts`).
    Detector 2 checks cross-tenant access. If no ownership map has ever loaded, detector 2 does not
    run and the run lists it in `unassessed_detectors`. Detector 4 checks service-role misuse.
    A detector 2 finding on a table that posture shows exposed is raised one step (decision 038).
+   `detectors/exposedRead.ts` (#132) flags anon reads of those anon-readable tables, one finding per
+   table, ASN and caller class (actor `anon:asn:<n>`): rows from a critical-posture table rate high,
+   1,000 rows or more in one poll critical; elsewhere low, or medium for 1,000 rows or more.
 6. **Group.** The incident engine (`incidents/engine.ts`) groups findings per tenant + project +
    actor, in a 15-minute window. It pages on a new incident at high or above, or on an escalation to high.
 7. **Explain.** `explainer/features.ts` rebuilds a whitelist of structured features and replaces

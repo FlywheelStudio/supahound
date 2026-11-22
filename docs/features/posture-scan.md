@@ -32,6 +32,11 @@ copyable SQL built from a template. The scan runs on the first poll, then daily,
    source's status. A failed source keeps its last good findings.
 6. `raiseForPosture` (`posture/findings.ts`) raises cross-tenant findings on exposed tables. It
    uses the fresh scan, else the stored findings loaded in the poll's first transaction.
+   `anonReadableTables` (same file, issue #132) lists the public tables anon can read every row of:
+   `rls_disabled` with an anon SELECT grant, `permissive_policy` whose `readExposure` is `anon`
+   (stored evidence since #132; older rows are inferred from `roles` and `exposure`), and the
+   Advisor's `rls_disabled_in_public` when the catalog did not report the table. The next poll's
+   logs query watches anon reads of these tables (`detectors/exposedRead.ts`).
 7. The web app reads `postureSummaries` (overview), `getPostureScan` and `listPostureFindings`
    (dashboard and Posture tab). `dedupePosture` hides Advisor lints that repeat a catalog finding.
    `fixPrompt` (`posture/fix.ts`) renders each prompt when the page renders.

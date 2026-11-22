@@ -212,6 +212,8 @@ export function catalogFindings(catalog: Catalog): PostureFinding[] {
         openCommands: open,
         roles: p.roles.length === 0 || p.roles.includes("public") ? ["public"] : roles,
         exposure: writeExposure !== "none" ? writeExposure : readExposure,
+        // Who the policy lets read every row, apart from writes: the anon-read detector's input (#132).
+        readExposure,
         clause: clauses.size > 1 ? "both" : [...clauses][0] ?? "using",
       },
     });

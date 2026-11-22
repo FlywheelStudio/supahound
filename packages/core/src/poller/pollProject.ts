@@ -253,7 +253,6 @@ async function refreshPosture(
 
 export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<PollOutcome> {
   const now = deps.now?.() ?? new Date();
-  const sql = edgeRollupSql(deps.env ? { env: deps.env } : {});
 
   // 1. Claim, load and record intent. The audit row is written before the query runs.
   const loaded = await withTenant(deps.app, scope.tenantId, async (tx) => {
@@ -269,6 +268,10 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       return { skip: "claimed_elsewhere" as const };
     }
     const runId = await repo.startPollRun(tx, scope.projectId, window);
+    // Anon reads are fetched only for the tables the stored posture shows readable by anon (#132).
+    // A scan that runs later in this poll takes effect from the next poll: the SQL is audited here.
+    const anonReadable = await postureRepo.postureAnonReadableTables(tx, scope.projectId);
+    const sql = edgeRollupSql({ ...(deps.env ? { env: deps.env } : {}), anonReadTables: anonReadable.keys() });
     await repo.appendAudit(tx, {
       projectId: scope.projectId,
       action: "logs_query",
@@ -280,14 +283,14 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       },
     });
     return {
-      project, runId, window,
+      project, runId, window, sql, anonReadable,
       networks: await repo.loadNetworks(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
       exposed: await postureRepo.postureExposedTables(tx, scope.projectId),
     };
   });
   if ("skip" in loaded) return { status: "skipped", reason: loaded.skip! };
-  const { project, runId, window } = loaded;
+  const { project, runId, window, sql } = loaded;
 
   // Token: opened (and refreshed if near expiry) in its own short, row-locked transaction.
   let token: string;
@@ -336,6 +339,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   // A detection on a table that posture shows exposed is raised one step (decision 038).
   const findings = raiseForPosture(scan(events, {
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
+    anonReadable: loaded.anonReadable,
   }), exposed);
   const openIncidents: Incident[] = loaded.open.map((i) => ({
     ...i, scope, status: "open", detectors: i.detectors as Incident["detectors"],

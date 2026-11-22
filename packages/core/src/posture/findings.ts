@@ -41,6 +41,43 @@ export function exposedTables(findings: PostureFinding[]): Map<string, string> {
   return out;
 }
 
+export interface AnonReadable {
+  check: string;
+  severity: Severity;
+}
+
+const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+// Does this finding say the anon key can read every row of the table? Only what posture stores:
+// rls_disabled with an anon SELECT grant; permissive_policy whose read exposure is anon (rows
+// saved before readExposure existed: SELECT open to anon or public and the stored exposure is
+// anon); the Advisor's rls_disabled_in_public when the catalog did not report the table (dedupe
+// drops it when it did: the catalog knows the grants).
+function anonCanRead(f: PostureFinding): boolean {
+  const e = f.evidence;
+  if (f.source === "catalog" && f.check === "rls_disabled") return listOf(e.anonPrivileges).includes("SELECT");
+  if (f.source === "catalog" && f.check === "permissive_policy") {
+    if (!listOf(e.openCommands).includes("SELECT")) return false;
+    if (typeof e.readExposure === "string") return e.readExposure === "anon";
+    const roles = listOf(e.roles);
+    return e.exposure === "anon" && (roles.includes("anon") || roles.includes("public"));
+  }
+  return f.source === "advisor" && f.check === "rls_disabled_in_public";
+}
+
+// Tables in `public` whose every row the anon key can read, by the stored posture findings
+// (issue #132): table → the worst such finding's check and severity. The poller watches anon
+// reads of exactly these tables.
+export function anonReadableTables(findings: PostureFinding[]): Map<string, AnonReadable> {
+  const out = new Map<string, AnonReadable>();
+  // dedupePosture sorts worst first, so the first finding kept per table is the worst.
+  for (const f of dedupePosture(findings)) {
+    if (f.schema !== "public" || f.object === null || f.objectType !== "table" || !anonCanRead(f)) continue;
+    if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
+  }
+  return out;
+}
+
 const RAISED: Record<Severity, Severity> = { low: "medium", medium: "high", high: "critical", critical: "critical" };
 export const POSTURE_SIGNAL = "posture_exposed";
 

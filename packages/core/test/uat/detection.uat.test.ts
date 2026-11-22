@@ -72,13 +72,14 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     });
   }
 
-  function poll(scope: ProjectScope, now: Date) {
+  function poll(scope: ProjectScope, now: Date, extra: Partial<PollDeps> = {}) {
     const deps: PollDeps = {
       app: db.app, vault: db.vault, now: () => now, intervalSeconds: 0,
       queryLogs: async () => logs(now),
       queryPolicies: async () => policies(),
       explain: async (f: IncidentFeatures): Promise<ExplainResult> =>
         ({ explanation: templateExplanation(f), source: "template", model: null, zdrConfirmed: null, attempts: [] }),
+      ...extra,
     };
     return pollProject(scope, deps);
   }
@@ -190,5 +191,40 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     logs = (now) => normalTraffic(new Date(now.getTime() - 200_000));
     expect(await poll(s, T0)).toMatchObject({ status: "ok", findings: 0 });
     expect(await projects(s)).toMatchObject([{ lastRunStatus: "ok", crossTenant: "no_owned_tables" }]);
+  });
+  it("UAT-D10 anon-key reads of a table the posture scan shows open raise a paging incident from the next poll", async () => {
+    const s = await watchProject("Shop app");
+    // Posture: customers has RLS off and anon may SELECT it; orders is locked down.
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "customers", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+        { kind: "table", schema_name: "public", object_name: "orders", rls_enabled: true, policy_count: 1, grants: "anon:SELECT,authenticated:SELECT" },
+        { kind: "policy", schema_name: "public", object_name: "orders", policy_name: "own", permissive: "PERMISSIVE", roles: "{authenticated}", cmd: "SELECT", qual: "(auth.uid() = user_id)" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    const sqls: string[] = [];
+    const dump = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/customers", search: "?select=*", userAgent: "curl/8.7.1", contentRange: "0-999/*",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "4",
+    });
+    logs = (now) => [dump(new Date(now.getTime() - 130_000))];
+    const capture = { queryLogs: async (q: { sql: string }) => { sqls.push(q.sql); return logs(T0); } };
+
+    // First poll: the scan runs; the logs query was fixed (and audited) before it, so nothing yet.
+    expect(await poll(s, T0, { posture, ...capture })).toMatchObject({ status: "ok", findings: 0 });
+    expect(sqls[0]).not.toContain("/rest/v1/customers");
+
+    // Next poll: the anon branch watches customers only, and the dump pages.
+    logs = (now) => [dump(new Date(now.getTime() - 130_000))];
+    const capture2 = { queryLogs: async (q: { sql: string }) => { sqls.push(q.sql); return logs(at(60)); } };
+    expect(await poll(s, at(60), { posture, ...capture2 })).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(sqls[1]).toContain("'/rest/v1/customers'");
+    expect(sqls[1]).not.toContain("/rest/v1/orders");
+    const open = await dashboard(s);
+    expect(open).toHaveLength(1);
+    // 4 requests of 1,000 rows from an RLS-off table: a bulk read, critical.
+    expect(open[0]).toMatchObject({ severity: "critical", detectors: ["exposed_read"], hits: 4 });
+    expect(open[0]!.summary?.summary).toContain("`customers`");
   });
 });

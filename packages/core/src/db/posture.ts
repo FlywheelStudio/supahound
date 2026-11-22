@@ -1,5 +1,5 @@
 import type { Severity } from "../detectors/finding.js";
-import { countBySeverity, dedupePosture, exposedTables, type SeverityCounts } from "../posture/findings.js";
+import { anonReadableTables, countBySeverity, dedupePosture, exposedTables, type AnonReadable, type SeverityCounts } from "../posture/findings.js";
 import type { PostureFinding, PostureSource, SourceStatus } from "../posture/types.js";
 import { projectId, type ProjectId } from "../tenancy/scope.js";
 import type { TenantTx } from "./tenant.js";
@@ -165,6 +165,17 @@ export async function postureExposedTables(tx: TenantTx, project: ProjectId): Pr
     [tx.tenantId, project],
   );
   return exposedTables(rows.map(toFinding));
+}
+
+// Tables whose every row the anon key can read, by the stored findings (issue #132).
+export async function postureAnonReadableTables(tx: TenantTx, project: ProjectId): Promise<Map<string, AnonReadable>> {
+  const rows = await tx.query<FindingRow>(
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
+     FROM supahound.posture_findings
+     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public'`,
+    [tx.tenantId, project],
+  );
+  return anonReadableTables(rows.map(toFinding));
 }
 
 export interface PostureSummary {
