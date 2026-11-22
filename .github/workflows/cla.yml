@@ -2,8 +2,14 @@
 # commenting the sentence in CLA.md on a pull request. Signatures live on the unprotected
 # `cla-signatures` branch, so branch protection on develop and main never blocks them.
 #
+# First-party replacement for CLA Assistant Lite (archived), #161. It keeps that action's
+# signatures file (`signatures/cla.json`, `{"signedContributors": [{name, id, comment_id,
+# created_at, repoId, pullRequestNo}]}`), so every past signature stays valid. Signatures match on
+# the GitHub user ID.
+#
 # pull_request_target runs this file from the base branch with a write token. It never checks out
-# or runs the pull request's code. Keep it that way: no actions/checkout in this file.
+# or runs the pull request's code, and reads only the PR's commit metadata through the API. Keep it
+# that way: no actions/checkout in this file, and no `${{ }}` expressions inside the script.
 name: CLA
 
 # zizmor flags both triggers as dangerous. They are needed to read signing comments and to set a
@@ -12,15 +18,12 @@ on:
   issue_comment: # zizmor: ignore[dangerous-triggers]
     types: [created]
   pull_request_target: # zizmor: ignore[dangerous-triggers]
-    types: [opened, closed, synchronize]
+    types: [opened, reopened, synchronize]
 
-permissions:
-  actions: write
-  contents: write
-  pull-requests: write
-  statuses: write
+permissions: {}
 
 jobs:
+  # The job name `cla` is a required check on develop and main (docs/WORKFLOW.md).
   cla:
     runs-on: ubuntu-24.04
     if: >-
@@ -28,13 +31,150 @@ jobs:
       (github.event.issue.pull_request &&
         (github.event.comment.body == 'recheck' ||
          github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+    permissions:
+      actions: write # re-run the PR's failed CLA run after a signature
+      contents: write # write signatures/cla.json on the cla-signatures branch
+      pull-requests: write # post and update the CLA comment
     steps:
-      - uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+      - name: Check signatures
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGN_PHRASE: I have read the CLA Document and I hereby sign the CLA
+          SIGNATURES_BRANCH: cla-signatures
+          SIGNATURES_PATH: signatures/cla.json
+          DOCUMENT_URL: https://github.com/FlywheelStudio/supahound/blob/develop/CLA.md
+          ALLOWLIST: erikgoins,dependabot[bot],claude[bot],github-actions[bot]
         with:
-          path-to-signatures: signatures/cla.json
-          path-to-document: https://github.com/FlywheelStudio/supahound/blob/develop/CLA.md
-          branch: cla-signatures
-          allowlist: erikgoins,dependabot[bot],claude[bot],github-actions[bot]
-          lock-pullrequest-aftermerge: false
+          script: |
+            const { owner, repo } = context.repo;
+            const env = process.env;
+            const MARKER = '<!-- supahound-cla -->';
+            const allowlist = env.ALLOWLIST.split(',').map((s) => s.trim()).filter(Boolean);
+            const allowed = (login) =>
+              allowlist.some((pattern) =>
+                pattern.includes('*')
+                  ? new RegExp('^' + pattern.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$').test(login)
+                  : pattern === login,
+              );
+
+            const isComment = context.eventName === 'issue_comment';
+            const prNumber = isComment ? context.payload.issue.number : context.payload.pull_request.number;
+            const pr = isComment
+              ? (await github.rest.pulls.get({ owner, repo, pull_number: prNumber })).data
+              : context.payload.pull_request;
+
+            // Signatures file on the cla-signatures branch, created by CLA Assistant Lite.
+            async function readSignatures() {
+              const res = await github.rest.repos.getContent({
+                owner, repo, path: env.SIGNATURES_PATH, ref: env.SIGNATURES_BRANCH,
+              });
+              const file = JSON.parse(Buffer.from(res.data.content, 'base64').toString('utf8'));
+              if (!Array.isArray(file.signedContributors)) throw new Error('signatures file has no signedContributors');
+              return { file, sha: res.data.sha };
+            }
+
+            // Every commit author on the PR: a linked GitHub account, or an email with no account.
+            async function authors() {
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner, repo, pull_number: prNumber, per_page: 100,
+              });
+              const linked = new Map();
+              const unlinked = new Set();
+              for (const c of commits) {
+                if (c.author && c.author.id) linked.set(c.author.id, { id: c.author.id, login: c.author.login });
+                else unlinked.add((c.commit.author && c.commit.author.name) || 'unknown');
+              }
+              return { linked: [...linked.values()], unlinked: [...unlinked] };
+            }
+
+            function evaluate(signed, who) {
+              const ids = new Set(signed.map((s) => s.id));
+              const pending = who.linked.filter((a) => !allowed(a.login) && !ids.has(a.id));
+              return { pending, ok: pending.length === 0 && who.unlinked.length === 0 };
+            }
+
+            let { file, sha } = await readSignatures();
+            const who = await authors();
+            let result = evaluate(file.signedContributors, who);
+
+            // A signing comment records the commenter, once, if they authored a commit here.
+            if (isComment && context.payload.comment.body.trim() === env.SIGN_PHRASE) {
+              const signer = context.payload.comment.user;
+              for (let attempt = 0; attempt < 5; attempt++) {
+                if (!result.pending.some((a) => a.id === signer.id)) break;
+                file.signedContributors.push({
+                  name: signer.login,
+                  id: signer.id,
+                  comment_id: context.payload.comment.id,
+                  created_at: context.payload.comment.created_at,
+                  repoId: context.payload.repository.id,
+                  pullRequestNo: prNumber,
+                });
+                try {
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner, repo, path: env.SIGNATURES_PATH, branch: env.SIGNATURES_BRANCH, sha,
+                    message: `@${signer.login} has signed the CLA in ${owner}/${repo}#${prNumber}`,
+                    content: Buffer.from(JSON.stringify(file, null, 2) + '\n').toString('base64'),
+                  });
+                  core.info(`Recorded a signature for ${signer.login} (${signer.id}).`);
+                  break;
+                } catch (err) {
+                  // Another run wrote the file first: read it again and retry.
+                  if (err.status !== 409 && err.status !== 422) throw err;
+                  ({ file, sha } = await readSignatures());
+                  result = evaluate(file.signedContributors, who);
+                }
+              }
+              ({ file, sha } = await readSignatures());
+              result = evaluate(file.signedContributors, who);
+            }
+
+            // The bot comment: posted when someone must sign, updated afterwards.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: prNumber, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(MARKER));
+            const safe = (name) => name.replace(/[^A-Za-z0-9 ._-]/g, '');
+            let body;
+            if (result.ok) {
+              body = `${MARKER}\nAll contributors have signed the [CLA](${env.DOCUMENT_URL}). Thank you.`;
+            } else {
+              const lines = [
+                MARKER,
+                `Thank you for your contribution. Before we can merge it, each author of a commit in this pull request signs our [Contributor License Agreement](${env.DOCUMENT_URL}). To sign, post a comment with exactly this sentence:`,
+                '',
+                '```',
+                env.SIGN_PHRASE,
+                '```',
+                '',
+              ];
+              if (result.pending.length) lines.push(`Not signed yet: ${result.pending.map((a) => '@' + a.login).join(', ')}.`);
+              if (who.unlinked.length) {
+                lines.push('', `Commits by ${who.unlinked.map((n) => '`' + safe(n) + '`').join(', ')} have an email that is not linked to a GitHub account. Add that email to your GitHub account (or rewrite the commits with a linked one), then comment \`recheck\`.`);
+              }
+              lines.push('', 'You sign once. Comment `recheck` to run the check again.');
+              body = lines.join('\n');
+            }
+            if (existing) {
+              if (existing.body !== body) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else if (!result.ok) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+            }
+
+            if (!isComment) {
+              if (!result.ok) core.setFailed('Not every commit author has signed the CLA.');
+              return;
+            }
+
+            // A comment run is not attached to the PR. Once everyone has signed, re-run the PR's
+            // failed `cla` run so the required check on its head commit turns green.
+            if (result.ok) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner, repo, workflow_id: 'cla.yml', event: 'pull_request_target', head_sha: pr.head.sha, per_page: 1,
+              });
+              const run = runs.data.workflow_runs[0];
+              if (run && run.status === 'completed' && run.conclusion !== 'success') {
+                await github.rest.actions.reRunWorkflow({ owner, repo, run_id: run.id });
+                core.info(`Re-ran CLA run ${run.id} for ${pr.head.sha}.`);
+              }
+            }
