@@ -59,13 +59,32 @@ Set `E2E_DEBUG=1` to print the wrangler output.
 
 The CI job `secrets` runs gitleaks 8.30.1 (pinned by SHA-256) over the full history with
 `.gitleaks.toml`: the default rules plus Postgres URLs with a password, Supabase secret keys, personal
-access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys and
-`SUPAHOUND_MASTER_KEYS` values. Run it locally with
+access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys,
+legacy `service_role` JWT keys and `SUPAHOUND_MASTER_KEYS` values. Run it locally with
 `gitleaks git --config .gitleaks.toml --redact .` (`brew install gitleaks`).
 
 Prove a new rule can fail: commit a planted secret in a scratch clone and see the rule fire. On
 2026-11-10 every custom rule fired on its planted secret, a placeholder URL
 (`postgres://postgres:postgres@…`) did not, and the real history had no findings (decision 025).
+
+`supabase-service-role-jwt` matches the base64url text of `"service_role"` inside a JWT payload, at
+each of the three byte alignments. On 2026-11-22, with `gitleaks dir` over nine planted HS256 keys
+(three alignments each for `service_role`, `anon` and `authenticated`): it fired on the three
+`service_role` keys only (the default `jwt` rule fired on all nine); with one alignment removed it
+missed one key; the real history had no findings.
+
+### Workflow lint and dependency scan
+
+- `workflows` (zizmor 1.32.0, pinned by SHA-256) audits `.github/workflows` and fails on any
+  high-severity finding. Run it locally with `zizmor --min-severity high .github/workflows`
+  (`pipx install zizmor`). On 2026-11-22 it passed; removing the `ignore` comments in `cla.yml`
+  failed it with two `dangerous-triggers` errors.
+- `osv` (osv-scanner 2.7.1, pinned by SHA-256) scans `pnpm-lock.yaml` and fails on any known
+  vulnerability that `osv-scanner.toml` does not list with a reason and an expiry. Run it locally
+  with `osv-scanner scan source --lockfile pnpm-lock.yaml`. On 2026-11-22 it found two (fflate via
+  satori, minimatch via ESLint), both unreachable and listed until 2027-01-31; without the config it
+  exits non-zero.
+- `scorecard.yml` (OpenSSF Scorecard) is a grade, not a gate: it files code scanning alerts.
 
 ### Self-hosting checks
 

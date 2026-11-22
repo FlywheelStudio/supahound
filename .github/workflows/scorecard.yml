@@ -1,0 +1,44 @@
+# OpenSSF Scorecard: grades the repo's supply-chain practices (pinned actions, token permissions,
+# branch protection, dangerous workflows, ...) and uploads the findings to the Security tab as
+# code scanning alerts. The repo is public (decision 025), so the results are also published to the
+# Scorecard API (badge and https://scorecard.dev); publishing needs `id-token: write`.
+#
+# Scorecard grades the default branch, which is `develop`, and publishes only from it. Pushes to
+# `main` come from `develop`, so the weekly run and the push to `develop` cover both.
+#
+# publish_results makes the Scorecard service check this file: keep it to the steps below, keep the
+# workflow-level token read-only, and add no top-level `env` or `defaults`.
+name: Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "23 4 * * 1"
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: results.sarif
