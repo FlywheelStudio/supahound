@@ -74,6 +74,19 @@ export const LINT_TITLE: Readonly<Record<string, string>> = {
   ssl_not_enforced: "SSL is not enforced for database connections",
   network_restrictions_not_set: "No network restrictions are set",
   vulnerable_postgres_version: "Postgres version has security patches available",
+  // splinter 0019 to 0032 (issue #134).
+  insecure_queue_exposed_in_api: "Queue table is exposed through the Data API without RLS",
+  fkey_to_auth_unique: "Foreign key points at an auth unique constraint",
+  extension_versions_outdated: "Extension is not on its current version",
+  sensitive_columns_exposed: "Sensitive columns are readable without RLS",
+  rls_policy_always_true: "A policy lets any row be changed",
+  public_bucket_allows_listing: "Anyone can list the files in a public bucket",
+  pg_graphql_anon_table_exposed: "Signed-out visitors can see this object in the GraphQL schema",
+  pg_graphql_authenticated_table_exposed: "Signed-in users can see this object in the GraphQL schema",
+  anon_security_definer_function_executable: "Signed-out visitors can run a SECURITY DEFINER function",
+  authenticated_security_definer_function_executable: "Signed-in users can run a SECURITY DEFINER function",
+  anon_dynamic_sql_function_executable: "Signed-out visitors can run a function that executes their SQL",
+  authenticated_dynamic_sql_function_executable: "Signed-in users can run a function that executes their SQL",
 };
 
 export const CHECK_TITLE: Readonly<Record<string, string>> = {
@@ -86,6 +99,12 @@ export function checkTitle(f: Pick<PostureFinding, "source" | "check" | "evidenc
   if (f.source === "advisor") {
     const t = LINT_TITLE[f.check];
     return t ?? `${f.check.charAt(0).toUpperCase()}${f.check.slice(1).replace(/_/g, " ")}`;
+  }
+  if (f.check === "function_definer_exposed") {
+    return f.evidence.exposure === "anon" ? "Signed-out visitors can run a SECURITY DEFINER function" : "Signed-in users can run a SECURITY DEFINER function";
+  }
+  if (f.check === "graphql_table_exposed") {
+    return f.evidence.exposure === "anon" ? "Signed-out visitors can see this object in the GraphQL schema" : "Signed-in users can see this object in the GraphQL schema";
   }
   if (f.check === "permissive_policy") {
     return strs(f.evidence.openCommands).some((c) => c !== "SELECT") ? "A policy lets any row be changed" : "A policy lets every row be read";
@@ -119,6 +138,226 @@ function permissive(f: PostureFinding, target: string, display: string): FixProm
   };
 }
 
+// Catalog checks of issue #135 (ported from splinter 0026 to 0029; remediation per splinter's docs).
+const roleList = (v: unknown): ("anon" | "authenticated")[] =>
+  strs(v).filter((r): r is "anon" | "authenticated" => r === "anon" || r === "authenticated");
+
+function definerExposed(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const roles = roleList(f.evidence.executableBy);
+  const args = str(f.evidence.arguments);
+  const sig = args === null ? target : `${target}(${args})`;
+  const exposure = str(f.evidence.exposure) ?? "none";
+  const lines = [
+    `-- ${display} is SECURITY DEFINER: it runs as its owner, past every RLS policy. ${roles.join(" and ") || "An API role"} can EXECUTE it.`,
+    ...(args === null ? ["-- Add the argument types after the name if the function is overloaded."] : []),
+    "-- If callers should not run it, revoke EXECUTE. Postgres grants it to PUBLIC by default, so revoke that too; service_role keeps its own grant.",
+    `REVOKE EXECUTE ON FUNCTION ${sig} FROM ${["PUBLIC", ...roles].join(", ")};`,
+    "",
+    "-- If it must stay callable, run it with the caller's rights so RLS applies:",
+    `-- ALTER FUNCTION ${sig} SECURITY INVOKER;`,
+  ];
+  if (f.evidence.searchPathSet === false) {
+    lines.push("", "-- It also resolves names through the caller's search_path. Pin it:", `ALTER FUNCTION ${sig} SET search_path = '';`);
+  }
+  return {
+    title,
+    explanation: `${display} runs with its owner's rights, past every RLS policy, and ${exposure === "anon" ? "anyone with the project's anon key" : "every signed-in user"} can call it at /rest/v1/rpc/${f.object}.`,
+    sql: lines.join("\n"),
+  };
+}
+
+function graphqlTable(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const roles = roleList(f.evidence.roles);
+  const who = roles.join(", ") || "anon, authenticated";
+  return {
+    title,
+    explanation: `pg_graphql is installed and ${who} can SELECT ${display}, so its name, columns and relationships show in the GraphQL schema at /graphql/v1. RLS still filters its rows.`,
+    sql: [
+      `-- Hide ${display} from GraphQL for ${who}. This also stops ${roles.length === 1 ? "that role" : "those roles"} reading it through the REST API.`,
+      `REVOKE SELECT ON ${target} FROM ${who};`,
+      "",
+      "-- If the app does not use GraphQL, block the endpoint for the API roles instead:",
+      "-- REVOKE ALL ON FUNCTION graphql.resolve FROM anon, authenticated;",
+    ].join("\n"),
+  };
+}
+
+// The newer splinter lints (issue #134). Their remediation follows splinter's own docs
+// (https://github.com/supabase/splinter/tree/main/docs), written as templates over structured fields.
+
+type ApiRoleName = "anon" | "authenticated";
+const lintRole = (check: string): ApiRoleName => (check.startsWith("anon_") ? "anon" : "authenticated");
+const WHO: Record<ApiRoleName, string> = { anon: "anyone with the project's anon key", authenticated: "every signed-in user" };
+
+// A function's signature for REVOKE and ALTER FUNCTION: with its identity arguments when known.
+function functionSignature(target: string, f: PostureFinding): { sig: string; lines: string[] } {
+  const args = str(f.evidence.arguments);
+  return args === null
+    ? { sig: target, lines: ["-- Add the argument types after the name if the function is overloaded."] }
+    : { sig: `${target}(${args})`, lines: [] };
+}
+
+function definerFunction(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const role = lintRole(f.check);
+  const { sig, lines } = functionSignature(target, f);
+  return {
+    title,
+    explanation: `${display} runs with its owner's rights, past every RLS policy, and ${WHO[role]} can call it at /rest/v1/rpc/${f.object}.`,
+    sql: [
+      `-- ${display} is SECURITY DEFINER and ${role} can EXECUTE it.`,
+      ...lines,
+      "-- If it is not meant for them, revoke EXECUTE. Postgres grants it to PUBLIC by default, so revoke that too; service_role keeps its own grant.",
+      `REVOKE EXECUTE ON FUNCTION ${sig} FROM PUBLIC, ${role};`,
+      "",
+      "-- If it must stay callable, run it with the caller's rights so RLS applies:",
+      `-- ALTER FUNCTION ${sig} SECURITY INVOKER;`,
+    ].join("\n"),
+  };
+}
+
+function dynamicSqlFunction(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const role = lintRole(f.check);
+  const { sig, lines } = functionSignature(target, f);
+  const definer = f.evidence.securityDefiner === true;
+  return {
+    title,
+    explanation: `${display} appears to run SQL text passed in by the caller${definer ? ", with its owner's rights" : ""}, and ${WHO[role]} can call it at /rest/v1/rpc/${f.object}.`,
+    sql: [
+      `-- ${display} appears to EXECUTE text from its arguments, and ${role} can call it.`,
+      ...lines,
+      `REVOKE EXECUTE ON FUNCTION ${sig} FROM PUBLIC, ${role};`,
+      "",
+      "-- Then replace it with one function per operation that runs a fixed statement. If SQL must be",
+      "-- built, pass values with EXECUTE ... USING and quote names with quote_ident().",
+    ].join("\n"),
+  };
+}
+
+function graphqlExposed(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const role = lintRole(f.check.replace(/^pg_graphql_/, ""));
+  return {
+    title,
+    explanation: `${role} can SELECT ${display}, so its name, columns and relationships show in the GraphQL schema at /graphql/v1 to ${WHO[role]}. RLS still filters its rows.`,
+    sql: [
+      `-- Hide ${display} from ${role}. This also stops ${role} reading it through the REST API.`,
+      `REVOKE SELECT ON ${target} FROM ${role};`,
+      "",
+      `-- If ${role} needs no GraphQL at all, block the endpoint for it instead:`,
+      `-- REVOKE ALL ON FUNCTION graphql.resolve FROM ${role};`,
+    ].join("\n"),
+  };
+}
+
+function alwaysTruePolicy(f: PostureFinding, title: string, target: string, display: string): FixPrompt {
+  const policy = str(f.evidence.policy);
+  if (policy === null) {
+    return {
+      title,
+      explanation: `A policy on ${display} lets every row be changed. Scope its USING and WITH CHECK to the row's owner.`,
+      sql: null,
+    };
+  }
+  const command = str(f.evidence.command) ?? "ALL";
+  const scoped = "((select auth.uid()) = user_id)";
+  const alter = [`ALTER POLICY ${quoteIdent(policy)} ON ${target}`];
+  if (command !== "INSERT") alter.push(`  USING ${scoped}`);
+  if (command === "INSERT" || command === "UPDATE" || command === "ALL") alter.push(`  WITH CHECK ${scoped}`);
+  alter[alter.length - 1] += ";";
+  return {
+    title,
+    explanation: `Policy ${policy} on ${display} lets ${command} change any row: its expression is always true.`,
+    sql: [`-- Scope policy ${quoteIdent(policy)} on ${display} to the row's owner. Replace user_id with the owner column.`, ...alter].join("\n"),
+  };
+}
+
+function newerLint(f: PostureFinding, title: string, target: string, display: string): FixPrompt | null {
+  switch (f.check) {
+    case "insecure_queue_exposed_in_api":
+      return {
+        title,
+        explanation: `Queue table ${display} has row level security off, so anyone with the project URL and anon key can read, change and delete its messages through pgmq_public.`,
+        sql: [
+          `-- Turn on RLS for queue table ${display}. The Data API then reaches no message until you add policies.`,
+          `ALTER TABLE ${target} ENABLE ROW LEVEL SECURITY;`,
+          "",
+          "-- If no client uses queues through the Data API, remove pgmq_public from the exposed schemas",
+          "-- in the project's Data API settings instead.",
+        ].join("\n"),
+      };
+    case "fkey_to_auth_unique": {
+      const fk = str(f.evidence.foreignKey);
+      const explanation = `${display} has a foreign key${fk ? ` ${fk}` : ""} to a unique constraint in the auth schema. Supabase plans to remove those constraints, and the key would block Auth upgrades and security patches.`;
+      if (fk === null) return { title, explanation, sql: null };
+      return {
+        title,
+        explanation,
+        sql: [
+          `-- Point ${quoteIdent(fk)} at the primary key auth.users (id). Replace user_id with the referencing column.`,
+          `ALTER TABLE ${target} DROP CONSTRAINT ${quoteIdent(fk)};`,
+          `ALTER TABLE ${target} ADD CONSTRAINT ${quoteIdent(fk)} FOREIGN KEY (user_id) REFERENCES auth.users (id);`,
+        ].join("\n"),
+      };
+    }
+    case "sensitive_columns_exposed": {
+      const cols = strs(f.evidence.sensitiveColumns);
+      const named = cols.length > 0 ? `Columns ${cols.join(", ")} look` : "Some columns look";
+      return {
+        title,
+        explanation: `${display} has row level security off and an API role can read it. ${named} like credentials or personal data.`,
+        sql: [
+          `-- Turn on row level security for ${display}. Existing policies take effect at once; with none, the Data API returns no rows.`,
+          `ALTER TABLE ${target} ENABLE ROW LEVEL SECURITY;`,
+          "",
+          ...OWNER_EXAMPLE(target),
+          "",
+          "-- Secrets the client never needs (password hashes, API keys) belong outside the Data API, in a",
+          "-- schema it does not serve or in Supabase Vault.",
+        ].join("\n"),
+      };
+    }
+    case "rls_policy_always_true":
+      return alwaysTruePolicy(f, title, target, display);
+    case "public_bucket_allows_listing": {
+      const policies = strs(f.evidence.policies);
+      return {
+        title,
+        explanation: `Bucket ${f.object} is public and a broad SELECT policy on storage.objects lets clients list every file in it. Public object URLs work without that policy.`,
+        sql: policies.length === 0 ? null : [
+          `-- Drop the listing ${policies.length === 1 ? "policy" : "policies"} for bucket ${f.object}. Public URLs keep working.`,
+          "-- If clients must list files, make the bucket private instead.",
+          ...policies.map((p) => `DROP POLICY IF EXISTS ${quoteIdent(p)} ON storage.objects;`),
+        ].join("\n"),
+      };
+    }
+    case "pg_graphql_anon_table_exposed":
+    case "pg_graphql_authenticated_table_exposed":
+      return graphqlExposed(f, title, target, display);
+    case "anon_security_definer_function_executable":
+    case "authenticated_security_definer_function_executable":
+      return definerFunction(f, title, target, display);
+    case "anon_dynamic_sql_function_executable":
+    case "authenticated_dynamic_sql_function_executable":
+      return dynamicSqlFunction(f, title, target, display);
+    default:
+      return null;
+  }
+}
+
+function outdatedExtension(f: PostureFinding, title: string): FixPrompt {
+  const ext = str(f.evidence.extension) ?? f.object;
+  const installed = str(f.evidence.installedVersion);
+  const latest = str(f.evidence.defaultVersion);
+  const versions = installed && latest ? ` (installed ${installed}, current ${latest})` : "";
+  return {
+    title,
+    explanation: `Extension ${ext ?? "unknown"} is not on its current version${versions}. Older versions can miss security patches and are outside the Supabase SLA.`,
+    sql: ext === null ? null : [
+      "-- Read the extension's changelog and try the update on a branch or a copy first.",
+      `ALTER EXTENSION ${quoteIdent(ext)} UPDATE;`,
+    ].join("\n"),
+  };
+}
+
 export function fixPrompt(f: PostureFinding): FixPrompt {
   const title = checkTitle(f);
   const named = f.schema !== null && f.object !== null;
@@ -148,6 +387,10 @@ export function fixPrompt(f: PostureFinding): FixPrompt {
         };
       case "permissive_policy":
         return permissive(f, target, display);
+      case "function_definer_exposed":
+        return definerExposed(f, title, target, display);
+      case "graphql_table_exposed":
+        return graphqlTable(f, title, target, display);
     }
   }
 
@@ -157,7 +400,11 @@ export function fixPrompt(f: PostureFinding): FixPrompt {
     explanation: `The Supabase Security Advisor reports ${f.check} on ${display}. Open Advisors → Security Advisor in the Supabase dashboard for the steps.`,
     sql: null,
   };
+  // extension_versions_outdated names an extension but no schema.
+  if (f.check === "extension_versions_outdated") return outdatedExtension(f, title);
   if (!named) return generic;
+  const newer = newerLint(f, title, target, display);
+  if (newer !== null) return newer;
   switch (f.check) {
     case "rls_disabled_in_public":
     case "policy_exists_rls_disabled":

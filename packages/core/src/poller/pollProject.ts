@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 import * as repo from "../db/repo.js";
 import { withTenant } from "../db/tenant.js";
 import { ServiceRoleNetworks } from "../detectors/serviceRole.js";
+import type { Finding } from "../detectors/finding.js";
 import { buildFeatures, type IncidentFeatures } from "../explainer/features.js";
 import type { ExplainResult } from "../explainer/llm.js";
 import { templateExplanation } from "../explainer/template.js";
@@ -11,7 +12,7 @@ import { applyFindings } from "../incidents/engine.js";
 import type { Incident } from "../incidents/incident.js";
 import { LogsApiError, MAX_WINDOW_MS, type LogsQuery } from "../logs/client.js";
 import { normalizeRow } from "../logs/event.js";
-import { edgeRequestCountSql, edgeRollupSql, ROLLUP_LIMIT } from "../logs/sql.js";
+import { authCoverageSql, edgeRequestCountSql, edgeRollupSql, ROLLUP_LIMIT } from "../logs/sql.js";
 import { parsePolicyRows, SqlQueryError, type ReadOnlyQuery } from "../ownership/client.js";
 import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap } from "../ownership/ownership.js";
 import { POSTURE_SQL } from "../config/posture.js";
@@ -376,7 +377,28 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   if (loaded.networks.length > 0) networks.learn(scope, loaded.networks);
   const events = rows.map(normalizeRow);
   // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
-  const unassessedDetectors: ("cross_tenant")[] = owners.loaded ? [] : ["cross_tenant"];
+  const unassessedDetectors: Finding["detector"][] = owners.loaded ? [] : ["cross_tenant"];
+  // Every rollup row has an auth field filled, so only an empty rollup can hide empty fields (issue
+  // #130). Then REST traffic with no subject or role means neither detector could see anything.
+  if (rows.length === 0) {
+    const coverageSql = authCoverageSql(deps.env);
+    let counts: Record<string, unknown> | undefined;
+    try {
+      await withTenant(deps.app, scope.tenantId, (tx) => repo.appendAudit(tx, {
+        projectId: scope.projectId,
+        action: "logs_query",
+        detail: { purpose: "auth_coverage", sql_sha256: sha256(coverageSql), window_start: window.start.toISOString(), window_end: rollup.end.toISOString() },
+      }));
+      [counts] = await deps.queryLogs({ projectRef: project.supabaseRef, sql: coverageSql, start: window.start, end: rollup.end }, { token });
+    } catch (err) {
+      const code = errorCode(err);
+      await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
+      return { status: "unable_to_assess", errorCode: code };
+    }
+    if (Number(counts?.rest_requests ?? 0) > 0 && Number(counts?.rest_with_auth ?? 0) === 0) {
+      for (const d of ["cross_tenant", "service_role_misuse"] as const) if (!unassessedDetectors.includes(d)) unassessedDetectors.push(d);
+    }
+  }
   // A detection on a table that posture shows exposed is raised one step (decision 038).
   const findings = raiseForPosture(scan(events, {
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),

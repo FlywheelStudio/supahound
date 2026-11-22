@@ -116,14 +116,17 @@ describe.skipIf(pgInfo === null)("poller heartbeat and log gap", () => {
         explain: async () => { throw new Error("no incidents expected"); },
       };
       expect(await pollProject(a, deps)).toMatchObject({ status: "ok" });
-      expect(queries).toHaveLength(2);
+      // The rollup, the request count and, because the rollup came back empty, the auth-coverage count (#130).
+      expect(queries).toHaveLength(3);
+      expect(queries.filter((q) => /count\(\) AS requests/.test(q))).toHaveLength(1);
       const rows = await withTenant(db.app, a.tenantId, (tx) => tx.query<{ edge_requests: string }>("SELECT edge_requests FROM supahound.poll_runs"));
       expect(rows.map((r) => Number(r.edge_requests))).toEqual([42]);
       const audit = await withTenant(db.app, a.tenantId, (tx) =>
         tx.query<{ detail: Record<string, unknown> }>("SELECT detail FROM supahound.audit_log WHERE action = 'logs_query'"),
       );
-      expect(audit).toHaveLength(1);
-      expect(audit[0]!.detail.count_sql_sha256).toMatch(/^[0-9a-f]{64}$/);
+      // One audit row for the rollup (it carries the count's hash) and one for the coverage count.
+      expect(audit).toHaveLength(2);
+      expect(audit.find((r) => r.detail.count_sql_sha256)!.detail.count_sql_sha256).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it("keeps the poll when the count fails, with the count unknown", async () => {
