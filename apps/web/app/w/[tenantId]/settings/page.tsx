@@ -3,6 +3,7 @@ import { getBilling, projectTiers } from "@supahound/core/db/billing";
 import { getClosure, isClosedNow, PURGE_AFTER_DAYS } from "@supahound/core/db/closure";
 import { listConnectionsWithProjects, listProjects } from "@supahound/core/db/repo";
 import { RETENTION_DAYS } from "@supahound/core/db/retention";
+import { SECURITY_EVENT_DAYS } from "@supahound/core/db/securityEvents";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
 import { tenantId as parseTenantId } from "@supahound/core/tenancy/scope";
 import { env } from "cloudflare:workers";
@@ -14,6 +15,7 @@ import { mode } from "../../../../lib/billing";
 import { brandFrom } from "../../../../lib/brand";
 import { canClose, canDisconnect, closedPath, disconnectedNotice, MESSAGES, ymd } from "../../../../lib/dataControls";
 import { withPool } from "../../../../lib/db";
+import { securityLogPath } from "../../../../lib/securityLog";
 import { requireUser } from "../../../../lib/supabase";
 import { reopenAction } from "../closed/actions";
 import { closeWorkspaceAction } from "./actions";
@@ -82,6 +84,16 @@ export default async function WorkspaceSettings({
         canReconnect={data.access !== "blocked" && !data.closure}
       />
 
+      {owner && (
+        <section aria-labelledby="security-heading" className="mb-10">
+          <h2 id="security-heading" className="mb-2 font-semibold">Security log</h2>
+          <p className="text-sm text-slate-700">
+            Sign-ins, invites, role changes, Supabase connections and data deletion from the last {SECURITY_EVENT_DAYS} days.{" "}
+            <Link href={securityLogPath(tenant)} className="underline">Open the security log</Link>
+          </p>
+        </section>
+      )}
+
       <section aria-labelledby="retention-heading" className="mb-10">
         <h2 id="retention-heading" className="mb-3 font-semibold">How long Supahound keeps data</h2>
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
@@ -90,6 +102,7 @@ export default async function WorkspaceSettings({
             Otherwise: incidents and findings {RETENTION_DAYS} days after an incident&apos;s last activity, and poll history after{" "}
             {RETENTION_DAYS} days (the latest poll of each project stays). An incident that stays quiet for {RETENTION_DAYS} days is resolved.
           </li>
+          <li>Security log events: {SECURITY_EVENT_DAYS} days, and all of them when a closed workspace is deleted.</li>
           <li>A disconnected Supabase organization: its projects&apos; history {PURGE_AFTER_DAYS} days after the disconnect, or after the workspace stops paying.</li>
           <li>A closed workspace: its logs and history {PURGE_AFTER_DAYS} days after it stops paying. Its record, billing and payment history and audit log are never deleted.</li>
         </ul>

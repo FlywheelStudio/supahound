@@ -1,10 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { env } from "cloudflare:workers";
+import { logSecurityEvent } from "@supahound/core/db/securityEvents";
 import { NextResponse, type NextRequest } from "next/server";
 import { isSafeMethod, isSameOrigin, newNonce, setSecurityHeaders, SIGNED_ROUTES } from "./lib/security";
 
-// 1. Reject cross-origin state changes (CSRF). Signed server-to-server routes are exempt and
-//    verify their own signatures.
+// 1. Reject cross-origin state changes (CSRF), with a security event in Workers logs (decision
+//    044). Signed server-to-server routes are exempt and verify their own signatures.
 // 2. Refresh the Supabase session cookie.
 // 3. Never let a shared cache store a page: one user's workspace must never be served to
 //    another. The app has no public pages since the marketing site moved out (decision 025), so
@@ -23,6 +24,8 @@ export async function middleware(request: NextRequest) {
   };
 
   if (!isSafeMethod(request.method) && !signed && !isSameOrigin(request, env.APP_URL)) {
+    // Decision 044: no tenant to file it under; Workers logs, with the method only.
+    logSecurityEvent("csrf_rejected", { method: request.method.toLowerCase() });
     return secure(new NextResponse("Forbidden", { status: 403 }));
   }
   if (signed) return secure(NextResponse.next());

@@ -3,8 +3,9 @@ import { expect } from "vitest";
 import * as billing from "../../src/db/billing.js";
 import * as posture from "../../src/db/posture.js";
 import * as repo from "../../src/db/repo.js";
+import { recordSecurityEvent } from "../../src/db/securityEvents.js";
 import { withTenant } from "../../src/db/tenant.js";
-import { tenantId, type ConnectionId, type ProjectId, type TenantId } from "../../src/tenancy/scope.js";
+import { tenantId, verifiedUserId, type ConnectionId, type ProjectId, type TenantId } from "../../src/tenancy/scope.js";
 import type { Db } from "./harness.js";
 
 // One tenant with a row in every tenant table (scan funnel, billing, people included). Shared by
@@ -39,7 +40,10 @@ export async function seedFullTenant(db: Db, name: string, token: string): Promi
     }]);
     await repo.saveNetworks(tx, project, [16509]);
     await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
-    await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, randomUUID()]);
+    const owner = randomUUID();
+    await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, owner]);
+    // Security events (decision 044): one about the project.
+    await recordSecurityEvent(tx, { action: "project_added", actor: verifiedUserId(owner), project, target: project });
     // People per project (decision 036): a viewer and an open invite.
     const viewer = randomUUID();
     await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'member')", [tenant, viewer]);

@@ -198,6 +198,11 @@ tenant's row counts stay the same.
   nonce back from that header and puts it on its inline hydration scripts. The Send Email
   Hook checks its Standard Webhooks signature. The OAuth state is single-use, bound to the user and
   the workspace, and stored only as a hash.
+- **Security events** (decision 044, ASVS 16.3). Sign-ins, invites, role changes, connections,
+  project changes, closing and data deletion, with refusals by role, go to `security_events` in
+  the transaction that makes the change; workspace owners read them on Settings → Security log.
+  Events with no workspace (CSRF 403, bad hook signature, rejected OAuth state, non-member 404) go
+  to Workers logs as one line of JSON with an event enum and no personal data.
 
 ## Data model
 
@@ -221,6 +226,7 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
 | `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
 | `audit_log` | Every query and model call, append-only |
+| `security_events` | Supahound's own security events: sign-ins, invites, role changes, connections, project changes, closing, data deletion; actor, action, target, result; IDs and enums only. Workspace owners read it (RLS); append-only for signed-in users; 90 days once the workspace stops paying (decision 044) |
 | `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project); processed Stripe events; requests per project per day (decisions 028, 041) |
 | `project_subscriptions` | One Stripe subscription per watched project: tier, status, period end; kept as payment history when the project is removed (decision 041) |
 | `account_closures` | A closed workspace: when it closed, when its paid period ends, when its history may be purged and when it was (decision 037). Never deleted after the purge |

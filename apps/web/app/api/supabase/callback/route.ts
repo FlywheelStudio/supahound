@@ -1,5 +1,6 @@
 import { storeConnection } from "@supahound/core/db/connections";
 import { consumeOAuthState } from "@supahound/core/db/repo";
+import { recordSecurityEvent } from "@supahound/core/db/securityEvents";
 import { NotAMemberError } from "@supahound/core/db/user";
 import { listSupabaseProjects } from "@supahound/core/supabase/management";
 import { exchangeCode } from "@supahound/core/supabase/oauth";
@@ -24,7 +25,11 @@ export async function GET(request: NextRequest) {
       store: async (u, t, credentials) => {
         const refs = await listSupabaseProjects(credentials.accessToken, { baseUrl: env.SUPABASE_API_URL })
           .then((ps) => ps.map((p) => p.ref), () => null);
-        const out = await paidTenant(pool, u, t, (tx) => storeConnection(tx, vault(), JSON.stringify(credentials), refs, new Date()));
+        const out = await paidTenant(pool, u, t, async (tx) => {
+          const stored = await storeConnection(tx, vault(), JSON.stringify(credentials), refs, new Date());
+          await recordSecurityEvent(tx, { action: "connection_added", actor: u, target: stored.connection, detail: { reattached: stored.reattached } });
+          return stored;
+        });
         return out.reattached;
       },
       isNotAMember: (err) => err instanceof NotAMemberError,

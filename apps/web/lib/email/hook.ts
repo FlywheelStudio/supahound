@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "@supahound/core/db/securityEvents";
 import { Webhook } from "standardwebhooks";
 import { confirmUrl, isSignInType, renderSignInEmail, type RenderedEmail } from "./magicLink";
 
@@ -34,6 +35,7 @@ export async function handleSendEmailHook(body: string, headers: Headers, deps: 
       "webhook-signature": headers.get("webhook-signature") ?? "",
     }) as HookPayload;
   } catch {
+    logSecurityEvent("email_hook_bad_signature");
     return hookError(401, "invalid signature");
   }
 

@@ -12,7 +12,7 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache and security headers (CSP nonce, hydration with no violation), hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 12 |
-| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
+| UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period → security log, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 62 |
 
 Totals on `feature/project-removal-grace` (2026-11-12): core 820, web 182, poller 15, E2E 72.
 
@@ -183,6 +183,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W47 | Removing a project (the warning says so, with the dates) cancels its subscription at the period end; the project and its row stay until deletion; workspace billing shows when it ends and lists the removal; picking the project again keeps it and resumes the same subscription with no second charge |
 | UAT-W48 | A project Viewer sees the plan and status but no portal button and no invoices; a replayed owner portal form is refused and opens no portal session |
 | UAT-W49 | The owner opens the Billing Portal from the plan page; the portal returns to that page |
+| UAT-W51 | The owner reads a member's sign-in and an invite on Settings → Security log; the member gets no log and no link; the rows hold no address (`securityLog.uat.spec.ts`, decision 044) |
 | UAT-W50 | Remove → the projects page, project dashboard, workspace billing and Plan & billing all say "stays active until <period end> and is deleted on <+7 days> unless you keep it"; Keep project on the plan page cancels the removal and resumes the same subscription (decision 042) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
@@ -413,5 +414,13 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | RPC: authenticated-only definers are not watched (#131) | `anonDefinerFunctions` ignores the stored exposure | 1 unit test fails |
 | RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D14 fails |
 | RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D14 fails |
+| Security events: owners only read them (#138) | `owner_read` allows admins | `securityEvents.test.ts` fails |
+| Security events: append-only for signed-in users (#138) | `system_delete` passes every row | `securityEvents.test.ts` fails |
+| Security events: sign-in policy allows one row shape (#138) | `own_sign_in` drops its result and project checks | `securityEvents.test.ts` fails |
+| Security events: kept while paying (#138) | The data job deletes old events while paying | `securityEvents.test.ts` fails |
+| Security events: the purge empties them (#138) | `purgeHistory` keeps them | `dataControls.test.ts` purge test fails |
+| Security events: the disconnect records its outcome (#138) | The event drops `revoked` | `securityEvents.test.ts` fails |
+| Security events: only owners get the page (#138) | `canReadSecurityLog` allows admins | `apps/web/test/securityLog.test.ts` fails |
+| Security events: a bad hook signature is logged (#138) | The log call removed | `apps/web/test/securityLog.test.ts` fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

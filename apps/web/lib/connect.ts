@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "@supahound/core/db/securityEvents";
 import type { Credentials } from "@supahound/core/supabase/oauth";
 import { sha256Hex, tenantFromState } from "@supahound/core/supabase/oauth";
 import type { TenantId, UserId } from "@supahound/core/tenancy/scope";
@@ -21,13 +22,20 @@ export async function handleOAuthCallback(params: URLSearchParams, user: UserId 
   if (!user) return "/login";
   const state = params.get("state") ?? "";
   const tenant = tenantFromState(state);
-  if (!tenant) return "/app?error=connect";
+  if (!tenant) {
+    logSecurityEvent("oauth_state_rejected", { reason: "malformed" });
+    return "/app?error=connect";
+  }
   const code = params.get("code");
   if (!code) return `/w/${tenant}?error=consent`;
 
   try {
     const verifier = await deps.consume(user, tenant, sha256Hex(state));
-    if (!verifier) return `/w/${tenant}?error=connect`;
+    if (!verifier) {
+      // Unknown, used, expired or someone else's (decision 044: Workers logs, no tenant row).
+      logSecurityEvent("oauth_state_rejected", { reason: "unknown" });
+      return `/w/${tenant}?error=connect`;
+    }
     const credentials = await deps.exchange(code, verifier);
     const reattached = await deps.store(user, tenant, credentials);
     return reattached === true ? `/w/${tenant}?reconnected=1` : `/w/${tenant}?connected=1`;
