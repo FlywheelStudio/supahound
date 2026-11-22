@@ -141,3 +141,29 @@ lints 0026 to 0029 (PostgreSQL License, attributed in `config/posture.ts`).
   regular expressions; the Advisor still reports them.
 - **Not verified live:** that `supabase_read_only_user` may call `has_function_privilege` and
   `has_column_privilege` for other roles (any role may, in stock Postgres), as for item 2.
+
+## Addendum: GraphQL findings gated on GraphQL traffic (issue #157, 2026-11-22)
+
+On a default Supabase project pg_graphql shows every table the API roles can read, so
+`graphql_table_exposed` (and the Advisor's `pg_graphql_anon_table_exposed` /
+`pg_graphql_authenticated_table_exposed`) fire once per table and flood the Posture page of a
+project that never uses GraphQL. Erik's decision 7C on #131: report them only where the logs show
+GraphQL traffic from that role.
+
+- **Counting.** The poll's count query (`pollCountSql`, the request count of #133 plus two
+  `countIf`s) counts the window's `/graphql/v1` calls whose effective role is anon, and those
+  whose role is authenticated. Request bodies are not in edge logs, so counts are all there is. They
+  are stored on the run (`poll_runs.graphql_anon_calls`, `graphql_authenticated_calls`, migration
+  `20261122160000`); NULL when not counted. No new table, so no new tenant rules.
+- **Gate.** A GraphQL finding is about the roles in its evidence (catalog: `roles`, else
+  `exposure`; Advisor: the role in the lint's name). It is shown when any of those roles has a
+  count above zero in the project's runs started in the last 7 days (`GRAPHQL_ACTIVITY_DAYS`).
+  Otherwise it is kept, stored and fixable, but hidden: the Posture page says how many are hidden
+  and why, the overview and project counts leave them out, and they raise no severity
+  (`postureExposedTables`). The gate runs after dedupe, on read only: scans store what they find.
+- **No counts reads as no traffic.** A deployment that does not count (`countRequests` off: tests,
+  the CLI), or runs that predate the migration, hide the GraphQL findings. The poller Worker counts.
+- **Why 7 days.** Long enough to catch a weekly job or a quiet app, short enough that a project
+  that stopped using GraphQL drops the noise within a week. One constant.
+- Hiding is not suppression: the objects remain visible through GraphQL introspection to any
+  caller. A first GraphQL call shows the findings from the next page load.

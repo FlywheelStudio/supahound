@@ -62,10 +62,33 @@ misuse) against one project.
   check and severity, method (or `mixed`), rows (when a Content-Range came back), ASN, caller class,
   network type. Medium, or high at 100+ calls in one poll. Rejected calls raise nothing.
 - Known gaps: RPC arguments sent as a JSON body are invisible, so a finding says which function,
-  never with what. Authenticated calls to authenticated-executable definers are not watched yet.
-  A fresh scan's functions are watched from the next poll. GraphQL (`/graphql/v1`) call counts per
-  role and anon Storage listing (`/storage/v1/object/list/<bucket>`) are still to do (#131).
+  never with what. A fresh scan's functions are watched from the next poll.
 - Migration `20261122010000_detector_names.sql` widens `findings.detector` (shared with #132; detector 12, rules SH-D12-*).
+
+## GraphQL counts, anon Storage listing, signed-in definer calls (#157)
+
+The rest of #131, with Erik's decisions of 2026-11-22.
+
+- **GraphQL.** `pollCountSql` (the poll's count query, #133) adds two `countIf`s: `/graphql/v1`
+  calls by anon and by authenticated, stored on `poll_runs` (migration `20261122160000`). Request
+  bodies are not in edge logs: counts only, no detector. They gate the GraphQL posture findings
+  (decision 7C; decision 038 addendum): shown and counted for a role only when the last 7 days of
+  runs counted its calls, otherwise hidden with a note on the Posture page.
+- **Storage (detector 13, `storage_listing`, SH-D13-*).** The rollup keeps anon calls to
+  `/storage/v1/object/list/` (one fixed prefix). Storage answers 200 with an empty list when RLS
+  filters every file and sends no Content-Range, so the logs cannot say whether a listing returned
+  anything; posture decides. A bucket the Advisor flags `public_bucket_allows_listing`: medium,
+  high at 100 list calls in one poll (paging through the bucket). Any other bucket: low whatever
+  the count, never named (the path is caller-controlled), only fingerprinted.
+- **Signed-in definer calls (decision 6, SH-D12-003).** `authenticatedDefinerFunctions`: the
+  catalog check when its `executableBy` names authenticated, or the Advisor's authenticated lint.
+  The rollup already holds them (user subject). Always low, actor `definer:fn:<name>`: one
+  incident per function, no user named (evidence counts distinct users), never stacked onto a
+  user's incident, so it never pages. It still emails when the project's threshold is `low`
+  (the default), once per incident.
+- Known gaps: anon listing from the app itself (a signed-out gallery) reads as low noise; the burst
+  threshold is untuned until live data. The bucket from the path is matched raw (no URL decoding):
+  an encoded flagged name reads as an unflagged bucket, low.
 
 ## Field paths
 

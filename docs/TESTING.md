@@ -133,6 +133,9 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
 | UAT-D13 | Anon-key reads of a table the posture scan shows open raise a paging incident from the next poll (#132) |
 | UAT-D14 | A burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll (#131) |
+| UAT-D15 | GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role, then show and count (#157) |
+| UAT-D16 | Anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed (#157) |
+| UAT-D17 | Signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page (#157) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -413,5 +416,15 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | RPC: authenticated-only definers are not watched (#131) | `anonDefinerFunctions` ignores the stored exposure | 1 unit test fails |
 | RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D14 fails |
 | RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D14 fails |
+| Storage: the rollup fetches anon list calls (#157) | `edgeRollupSql` drops the Storage branch | 1 unit test and UAT-D16 fail |
+| Storage: only posture-named buckets are named (#157) | `detectStorageListing` keeps the path's bucket | 2 unit tests and UAT-D16 fail |
+| Storage: the poller passes posture to the detector (#157) | `pollProject` drops `listableBuckets` from the scan | UAT-D16 fails |
+| Storage: findings may name the new detector (#157) | Migration `20261122160000` leaves out `storage_listing` | UAT-D16 fails |
+| Signed-in definer calls stay low (#157) | The authenticated branch rates medium | 2 unit tests and UAT-D17 fail |
+| Signed-in definer calls never stack (#157) | Actor `user:<subject>` instead of the function | 2 unit tests and UAT-D17 fail |
+| Signed-in definer calls: the poller passes posture (#157) | `pollProject` drops `authenticatedDefiners` from the scan | UAT-D17 fails |
+| GraphQL gate hides without traffic (#157) | `gateGraphql` shows every finding | 3 unit tests, 1 Postgres test and UAT-D15 fail |
+| GraphQL gate: the poll stores its counts (#157) | `pollProject` saves `graphqlCalls: null` | UAT-D15 fails |
+| GraphQL gate: the overview counts what the page shows (#157) | `postureSummaries` counts ungated findings | 1 Postgres test and UAT-D15 fail |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.
