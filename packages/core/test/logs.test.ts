@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EDGE_FIELDS, sourceColumn, unverifiedFields } from "../src/config/fields.js";
 import { buildLogsUrl, LogsApiError, pollWindow, queryLogs } from "../src/logs/client.js";
 import { effectiveRole, normalizeRow, rowsReturned } from "../src/logs/event.js";
-import { discoverKeysSql, edgeRollupSql } from "../src/logs/sql.js";
+import { authCoverageSql, discoverKeysSql, edgeRollupSql } from "../src/logs/sql.js";
 import { event } from "./helpers.js";
 
 const REF = "abcdefghijklmnopqrst";
@@ -38,6 +38,20 @@ describe("edgeRollupSql", () => {
 
   it("uses the configured source column", () => {
     expect(edgeRollupSql({ env: { SUPAHOUND_SOURCE_COLUMN: "source_name" } })).toContain("source_name = 'edge_logs'");
+  });
+});
+
+describe("authCoverageSql (#130)", () => {
+  const sql = authCoverageSql({});
+
+  it("counts REST requests and those with an auth field, from fields.ts paths, and returns no log values", () => {
+    expect(sql).toMatch(/^SELECT\n {2}countIf\(.*\) AS rest_requests,\n {2}countIf\(.*\) AS rest_with_auth\nFROM logs/);
+    for (const f of ["path", "jwtSubject", "jwtRole", "apiKeyRole"] as const) {
+      expect(sql).toContain(`log_attributes['${EDGE_FIELDS[f].key}']`);
+    }
+    expect(sql).not.toMatch(/GROUP BY/);
+    expect(sql).toContain("source = 'edge_logs'");
+    expect(authCoverageSql({ SUPAHOUND_SOURCE_COLUMN: "source_name" })).toContain("source_name = 'edge_logs'");
   });
 });
 

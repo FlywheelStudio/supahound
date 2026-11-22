@@ -13,8 +13,10 @@
 # PR; copy what you need into a new issue instead.
 name: Claude
 
+# zizmor flags issue_comment as dangerous; the job's `if` below is the mitigation (no outsiders,
+# no forks). Keep both checks when you change this file.
 on:
-  issue_comment:
+  issue_comment: # zizmor: ignore[dangerous-triggers]
     types: [created]
   pull_request_review_comment:
     types: [created]
@@ -56,10 +58,10 @@ jobs:
         run: |
           cross=$(gh pr view "${{ github.event.issue.number }}" -R "${{ github.repository }}" --json isCrossRepository -q .isCrossRepository)
           if [ "$cross" != "false" ]; then echo "PR is from a fork; Claude does not run on fork code."; exit 1; fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@acfe7992852970efb4fee683d63d628e3e52df67 # v1.0.286
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

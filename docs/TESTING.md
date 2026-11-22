@@ -11,7 +11,7 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 | Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 289, within the 820 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
-| E2E, signed out | The built web Worker: redirects, CSRF, cache headers, hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 11 |
+| E2E, signed out | The built web Worker: redirects, CSRF, cache and security headers (CSP nonce, hydration with no violation), hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 12 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 61 |
 
 Totals on `feature/project-removal-grace` (2026-11-12): core 820, web 182, poller 15, E2E 72.
@@ -59,13 +59,32 @@ Set `E2E_DEBUG=1` to print the wrangler output.
 
 The CI job `secrets` runs gitleaks 8.30.1 (pinned by SHA-256) over the full history with
 `.gitleaks.toml`: the default rules plus Postgres URLs with a password, Supabase secret keys, personal
-access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys and
-`SUPAHOUND_MASTER_KEYS` values. Run it locally with
+access and OAuth tokens, OAuth client secrets, Stripe webhook secrets, Vercel AI Gateway keys,
+legacy `service_role` JWT keys and `SUPAHOUND_MASTER_KEYS` values. Run it locally with
 `gitleaks git --config .gitleaks.toml --redact .` (`brew install gitleaks`).
 
 Prove a new rule can fail: commit a planted secret in a scratch clone and see the rule fire. On
 2026-11-10 every custom rule fired on its planted secret, a placeholder URL
 (`postgres://postgres:postgres@…`) did not, and the real history had no findings (decision 025).
+
+`supabase-service-role-jwt` matches the base64url text of `"service_role"` inside a JWT payload, at
+each of the three byte alignments. On 2026-11-22, with `gitleaks dir` over nine planted HS256 keys
+(three alignments each for `service_role`, `anon` and `authenticated`): it fired on the three
+`service_role` keys only (the default `jwt` rule fired on all nine); with one alignment removed it
+missed one key; the real history had no findings.
+
+### Workflow lint and dependency scan
+
+- `workflows` (zizmor 1.32.0, pinned by SHA-256) audits `.github/workflows` and fails on any
+  high-severity finding. Run it locally with `zizmor --min-severity high .github/workflows`
+  (`pipx install zizmor`). On 2026-11-22 it passed; removing the `ignore` comments in `cla.yml`
+  failed it with two `dangerous-triggers` errors.
+- `osv` (osv-scanner 2.7.1, pinned by SHA-256) scans `pnpm-lock.yaml` and fails on any known
+  vulnerability that `osv-scanner.toml` does not list with a reason and an expiry. Run it locally
+  with `osv-scanner scan source --lockfile pnpm-lock.yaml`. On 2026-11-22 it found two (fflate via
+  satori, minimatch via ESLint), both unreachable and listed until 2027-01-31; without the config it
+  exits non-zero.
+- `scorecard.yml` (OpenSSF Scorecard) is a grade, not a gate: it files code scanning alerts.
 
 ### Self-hosting checks
 
@@ -109,7 +128,11 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D7 | A scrape is caught with ownership read from the project's own RLS policies; public profiles stay quiet |
 | UAT-D8 | A project whose RLS policies cannot be read shows detector 2 as "unable to assess", and detector 4 still alerts |
 | UAT-D9 | A project whose policies scope no table to an owner reads "no owner-scoped tables", not clean |
-| UAT-D11 | A burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll (#131) |
+| UAT-D10 | A lone probe in a window too busy to read whole still raises its incident (#129) |
+| UAT-D11 | A minute with more traffic than one poll can read is "unable to assess", never an all-clear (#129) |
+| UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
+| UAT-D13 | Anon-key reads of a table the posture scan shows open raise a paging incident from the next poll (#132) |
+| UAT-D14 | A burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll (#131) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -200,12 +223,14 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | `getClaims()` verifies the signature | Fake Auth signs with a key that is not in its JWKS | UAT-W1 fails |
 | Hook checks its signature | Fake Auth signs the hook with the wrong secret | UAT-W1 fails (401) |
 | No shared caching of signed-in pages | Middleware stops setting `private, no-store` | 3 E2E checks fail |
+| CSP blocks inline script without the nonce (#143) | `script-src` loses `'nonce-…'` | 3 unit tests fail; on the built Worker the headers E2E check fails and Chrome reports CSP violations on `/login` (2026-11-22) |
 | No second page for a repeat | Engine pages on every update at high or above | UAT-D4 fails |
 | Sign-in email HTML is escaped | `renderSignInEmail` drops `escapeHtml` | 2 unit tests fail |
 | Picks are checked against Supabase's list | `handleWatch` inserts the submitted refs | UAT-W12 fails |
 | Remove needs the exact name | `removalOutcome` ignores the typed name | UAT-W14 fails |
 | Removal keeps audit rows | Migration `20261109000000` left out | Postgres `projects.test.ts` fails |
 | Never-loaded ownership is not clean (#10) | The run records no unassessed detectors | 3 tests fail, including UAT-D8 |
+| Empty auth fields are not clean (#130) | The poller never runs the coverage count | 3 tests fail, including UAT-D12 |
 | Policies audit row precedes the query (#10) | Audit row written after the query | 1 Postgres test fails |
 | A failed read keeps the old map (#10) | Failure also resets `ownership` to `{}` | 1 Postgres test fails |
 | A failed read retries after an hour (#10) | Retry wait set to 0 | 1 Postgres test fails |
@@ -218,6 +243,12 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Redirect hops pass the scope guard (#74) | `scopedGet` follows `Location` without `scannableUrl` | 2 unit tests fail |
 | A leak path must answer at its own path (#74) | `probeLeakPaths` drops the same-path check | 1 unit test fails |
 | An npmrc needs a known key (#74) | `leakShape` drops the known-key check | 1 unit test fails |
+| Inline source maps are scanned (#140) | `scanClientCode` skips the decoded inline map | 1 unit test fails |
+| A truncated inline map still decodes (#140) | `inlineSourceMap` does not trim the base64 to whole quads | 1 unit test fails |
+| `SourceMap` headers are followed (#140) | `scanClientCode` ignores the header / `scopedGet` drops `X-SourceMap` | 4 unit tests fail / 1 fails |
+| Short-prefix keys need a random body (#140) | Resend drops its mixed-character check / Twilio drops its digit-and-letter check / Twilio drops `\b` | 1 unit test fails each |
+| Mailgun needs its name (#140) | The Mailgun rule drops the `mailgun` context | 1 unit test fails |
+| Scoped Supabase tokens match (#140) | The access-token rule drops the `sbp_fc` branch | 2 unit tests fail |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
@@ -267,6 +298,12 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | No Advisor free text is kept (#11) | `parseLints` keeps `title` | 2 unit tests fail |
 | Names with control characters are dropped (#11) | `safeName` allows them | 3 unit tests fail |
 | Advisor duplicates show once (#11) | `dedupePosture` keeps all | 2 tests fail (unit and Postgres) |
+| Always-true policies dedupe per policy (#134) | `dedupePosture` ignores the policy name / `postureSummaries` reads no evidence | 1 unit test fails / 1 Postgres test fails |
+| The newer lints rate by exposure (#134) | `sensitive_columns_exposed` override removed | 2 unit tests fail |
+| Each newer lint has its own fix (#134) | `fixPrompt` skips `newerLint` | 1 unit test fails |
+| SECURITY DEFINER functions are found (#135) | The function rows lose `f.prosecdef` / the check ignores `securityDefiner` | 1 Postgres test fails / 1 unit test fails |
+| GraphQL exposure counts column grants, not partitioned roots (#135) | The relkind filter removed | 1 Postgres test fails |
+| Ported checks hide their Advisor lints (#135) | `pg_graphql_anon_table_exposed` mapping removed | 1 unit test fails |
 | Posture raises detections (#11) | `raiseForPosture` returns its input | 4 tests fail (unit and Postgres) |
 | The raise agrees with the Posture page (#11) | `postureExposedTables` filters by severity before dedupe | 1 Postgres test fails |
 | Service-role findings are not raised (#11) | The detector check removed | 1 unit test fails |
@@ -364,10 +401,17 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Removal: Keep needs a scheduled removal (042) | `keepOutcome` always "kept" | `apps/web/test/picker.test.ts` fails |
 | Removal: the CHECK holds across daylight saving (042) | CHECK uses `interval '7 days'` instead of `'168 hours'` | `removalGrace.test.ts` fails (session in `America/New_York`, window over 2027-03-14) |
 | Removal: the words before and after the period (042) | `removalSentence` ignores the date | `apps/web/test/removal.test.ts` fails |
+| A saturated rollup is never clean (#129) | The poller asks for `ROLLUP_LIMIT` rows and never checks the count | 5 tests fail, including UAT-D10 and UAT-D11 |
+| A saturated poll spends a bounded budget (#129) | `queryRollup` drops the `MAX_ROLLUP_QUERIES` check | 1 Postgres test fails |
+| Anon reads: rejected requests raise nothing (#132) | `detectExposedReads` drops the status check | 1 unit test fails |
+| Anon reads: only plain identifiers reach the SQL (#132) | `anonReadTables` drops `safeIdentifier` | 1 unit test fails |
+| Anon reads: a policy's own read exposure counts (#132) | `anonCanRead` ignores `readExposure` | 1 unit test fails |
+| Anon reads: the poller passes posture to the detector (#132) | `pollProject` drops `anonReadable` from the scan | UAT-D13 fails |
+| Anon reads: findings may name the new detector (#132) | Migration `20261122010000` left out | UAT-D13 fails |
 | RPC: rejected calls raise nothing (#131) | `detectRpcExposure` drops the status check | 1 unit test fails |
 | RPC: only plain identifiers reach the SQL (#131) | `anonRpcFunctions` drops `safeIdentifier` | 1 unit test fails |
 | RPC: authenticated-only definers are not watched (#131) | `anonDefinerFunctions` ignores the stored exposure | 1 unit test fails |
-| RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D11 fails |
-| RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D11 fails |
+| RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D14 fails |
+| RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D14 fails |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

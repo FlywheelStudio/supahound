@@ -5,18 +5,45 @@ import type { PostureFinding } from "./types.js";
 
 // Advisor lints that report the same thing as one of Supahound's catalog checks.
 export const ADVISOR_EQUIVALENT: Readonly<Record<string, string>> = {
+  // splinter 0026 to 0029, which the catalog checks of issue #135 port.
+  anon_security_definer_function_executable: "function_definer_exposed",
+  authenticated_security_definer_function_executable: "function_definer_exposed",
+  pg_graphql_anon_table_exposed: "graphql_table_exposed",
+  pg_graphql_authenticated_table_exposed: "graphql_table_exposed",
   rls_disabled_in_public: "rls_disabled",
   policy_exists_rls_disabled: "rls_disabled",
   rls_enabled_no_policy: "rls_no_policies",
   security_definer_view: "view_not_invoker",
+  // splinter 0024 (issue #134): a write policy whose USING or WITH CHECK passes every row.
+  rls_policy_always_true: "permissive_policy",
 };
 
+// The part of an object a finding is about, when one object can have several: a policy on a
+// table, or one overload of a function (its identity arguments).
+function partOf(f: PostureFinding): string | null {
+  const p = f.evidence.policy ?? f.evidence.arguments;
+  return typeof p === "string" ? p : null;
+}
+
 // Drops an Advisor finding when a catalog finding already reports the same check on the same
-// object. The catalog one stays: its severity knows the grants. Worst first, then by object.
+// object (and the same policy or overload, when the Advisor names one). The catalog one stays:
+// its severity knows the grants. Worst first, then by object.
 export function dedupePosture<T extends PostureFinding>(findings: T[]): T[] {
-  const catalog = new Set(findings.filter((f) => f.source === "catalog").map((f) => `${f.check}|${f.schema}|${f.object}`));
+  const catalog = new Set<string>();
+  for (const f of findings) {
+    if (f.source !== "catalog") continue;
+    const key = `${f.check}|${f.schema}|${f.object}`;
+    catalog.add(key);
+    const part = partOf(f);
+    if (part !== null) catalog.add(`${key}|${part}`);
+  }
+  const repeats = (f: T) => {
+    const key = `${ADVISOR_EQUIVALENT[f.check] ?? "-"}|${f.schema}|${f.object}`;
+    const part = partOf(f);
+    return catalog.has(part === null ? key : `${key}|${part}`);
+  };
   return findings
-    .filter((f) => f.source !== "advisor" || !catalog.has(`${ADVISOR_EQUIVALENT[f.check] ?? "-"}|${f.schema}|${f.object}`))
+    .filter((f) => f.source !== "advisor" || !repeats(f))
     .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]
       || `${a.schema}.${a.object}.${a.check}`.localeCompare(`${b.schema}.${b.object}.${b.check}`));
 }
@@ -53,6 +80,11 @@ export interface DefinerExposure {
   severity: Severity;
 }
 
+export interface AnonReadable {
+  check: string;
+  severity: Severity;
+}
+
 // Functions in `public` (the schema PostgREST serves under /rpc) that posture shows as SECURITY
 // DEFINER and executable by anon: function → the worst such finding's check and severity. A catalog
 // finding whose stored exposure names another role (authenticated only) is left out.
@@ -62,6 +94,38 @@ export function anonDefinerFunctions(findings: PostureFinding[]): Map<string, De
   for (const f of dedupePosture(findings)) {
     if (f.schema !== "public" || f.object === null || !DEFINER_EXPOSED_CHECKS.has(f.check)) continue;
     if (typeof f.evidence.exposure === "string" && f.evidence.exposure !== "anon") continue;
+    if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
+  }
+  return out;
+}
+
+const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+// Does this finding say the anon key can read every row of the table? Only what posture stores:
+// rls_disabled with an anon SELECT grant; permissive_policy whose read exposure is anon (rows
+// saved before readExposure existed: SELECT open to anon or public and the stored exposure is
+// anon); the Advisor's rls_disabled_in_public when the catalog did not report the table (dedupe
+// drops it when it did: the catalog knows the grants).
+function anonCanRead(f: PostureFinding): boolean {
+  const e = f.evidence;
+  if (f.source === "catalog" && f.check === "rls_disabled") return listOf(e.anonPrivileges).includes("SELECT");
+  if (f.source === "catalog" && f.check === "permissive_policy") {
+    if (!listOf(e.openCommands).includes("SELECT")) return false;
+    if (typeof e.readExposure === "string") return e.readExposure === "anon";
+    const roles = listOf(e.roles);
+    return e.exposure === "anon" && (roles.includes("anon") || roles.includes("public"));
+  }
+  return f.source === "advisor" && f.check === "rls_disabled_in_public";
+}
+
+// Tables in `public` whose every row the anon key can read, by the stored posture findings
+// (issue #132): table → the worst such finding's check and severity. The poller watches anon
+// reads of exactly these tables.
+export function anonReadableTables(findings: PostureFinding[]): Map<string, AnonReadable> {
+  const out = new Map<string, AnonReadable>();
+  // dedupePosture sorts worst first, so the first finding kept per table is the worst.
+  for (const f of dedupePosture(findings)) {
+    if (f.schema !== "public" || f.object === null || f.objectType !== "table" || !anonCanRead(f)) continue;
     if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
   }
   return out;

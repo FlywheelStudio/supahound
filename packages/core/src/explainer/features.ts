@@ -42,6 +42,16 @@ export interface IncidentFeatures {
     networkTypes: string[];
     asns: number[];
   };
+  exposedRead?: {
+    tables: string[];
+    postureChecks: string[];
+    postureSeverities: Severity[];
+    // Rows the anon key received across the incident's findings; null when no response said.
+    rowsReturned: number | null;
+    callerClasses: string[];
+    networkTypes: string[];
+    asns: number[];
+  };
 }
 
 const SIGNALS = new Set([
@@ -51,6 +61,8 @@ const SIGNALS = new Set([
   "posture_exposed",
   // Anon calls to a SECURITY DEFINER function posture shows anon-executable (issue #131).
   "definer_rpc_call", "rpc_burst",
+  // Anon reads of a table posture shows readable by anon (issue #132).
+  "exposed_table_read", "rows_returned", "bulk_read",
 ]);
 const METHODS = new Set(["GET", "HEAD", "PATCH", "PUT", "DELETE", "POST"]);
 const OUTCOMES = new Set(["rejected", "empty", "rows_returned", "unknown"]);
@@ -74,6 +86,7 @@ export function buildFeatures(incident: Incident, findings: Finding[]): Incident
   const cross = findings.filter((f) => f.detector === "cross_tenant");
   const service = findings.filter((f) => f.detector === "service_role_misuse");
   const rpc = findings.filter((f) => f.detector === "rpc_exposure");
+  const anonReads = findings.filter((f) => f.detector === "exposed_read");
   const durationMs = incident.lastSeenAt.getTime() - incident.openedAt.getTime();
 
   const features: IncidentFeatures = {
@@ -121,6 +134,18 @@ export function buildFeatures(incident: Incident, findings: Finding[]): Incident
       callerClasses: uniq(rpc.map((f) => pick(CALLER_CLASSES, f.evidence.callerClass))),
       networkTypes: uniq(rpc.map((f) => pick(NETWORK_TYPES, f.evidence.networkType))),
       asns: uniq(rpc.map((f) => count(f.evidence.asn))),
+    };
+  }
+  if (anonReads.length > 0) {
+    const rows = anonReads.map((f) => count(f.evidence.rowsReturned)).filter((n): n is number => n !== null);
+    features.exposedRead = {
+      tables: uniq(anonReads.map((f) => ident(f.evidence.table))),
+      postureChecks: uniq(anonReads.map((f) => check(f.evidence.postureCheck))),
+      postureSeverities: uniq(anonReads.map((f) => pick(SEVERITIES, f.evidence.postureSeverity) as Severity | null)),
+      rowsReturned: rows.length > 0 ? rows.reduce((a, b) => a + b, 0) : null,
+      callerClasses: uniq(anonReads.map((f) => pick(CALLER_CLASSES, f.evidence.callerClass))),
+      networkTypes: uniq(anonReads.map((f) => pick(NETWORK_TYPES, f.evidence.networkType))),
+      asns: uniq(anonReads.map((f) => count(f.evidence.asn))),
     };
   }
   return features;

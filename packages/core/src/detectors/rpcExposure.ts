@@ -13,6 +13,10 @@ import { safeIdentifier, type Finding, type Severity } from "./finding.js";
 // Calls in one poll from one network and caller class that read as automation, not an app.
 export const RPC_BURST_HITS = 100;
 
+// The signals this detector emits; each has a rule in rules.ts.
+export const RPC_EXPOSURE_SIGNALS = ["definer_rpc_call", "rpc_burst"] as const;
+export type RpcExposureSignal = (typeof RPC_EXPOSURE_SIGNALS)[number];
+
 interface Group {
   fn: string;
   posture: DefinerExposure;
@@ -60,7 +64,7 @@ export function detectRpcExposure(events: EdgeEvent[], definers: ReadonlyMap<str
   }
 
   return [...groups.values()].map((g) => {
-    const signals = ["definer_rpc_call"];
+    const signals: RpcExposureSignal[] = ["definer_rpc_call"];
     let severity: Severity = "medium";
     if (g.hits >= RPC_BURST_HITS) {
       signals.push("rpc_burst");

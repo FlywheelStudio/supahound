@@ -10,9 +10,9 @@ import type { ExplainResult } from "../../src/explainer/llm.js";
 import { templateExplanation } from "../../src/explainer/template.js";
 import { SqlQueryError } from "../../src/ownership/client.js";
 import { ownershipFromPolicies } from "../../src/ownership/ownership.js";
-import { AdvisorApiError, parseLints, type AdvisorLint } from "../../src/posture/advisor.js";
+import { AdvisorApiError, advisorFindings, parseLints, type AdvisorLint } from "../../src/posture/advisor.js";
 import { catalogFindings, parseCatalogRows } from "../../src/posture/catalog.js";
-import { POSTURE_SIGNAL } from "../../src/posture/findings.js";
+import { dedupePosture, POSTURE_SIGNAL } from "../../src/posture/findings.js";
 import {
   pollProject, POSTURE_REFRESH_SECONDS, POSTURE_RETRY_SECONDS, type PollDeps,
 } from "../../src/poller/pollProject.js";
@@ -339,6 +339,34 @@ describe.skipIf(pgInfo === null)("posture storage and RLS for signed-in users", 
     expect(m.get(p1)).toMatchObject({ counts: { critical: 1, high: 0, medium: 0, low: 0 }, scan: { catalogStatus: "ok" } });
   });
 
+  it("counts an Advisor always-true policy the catalog did not flag, as the Posture page shows it (#134)", async () => {
+    const p = await withTenant(db.app, A, async (tx) => {
+      const conn = await repo.createConnection(tx, db.vault, { label: "z", token: "t" });
+      const p = await repo.createProject(tx, { connectionId: conn, supabaseRef: "ffffffffffffffffffff", name: "Policies" });
+      const scanId = (await posture.claimPostureScan(tx, p, T0, { refreshSeconds: 1, retrySeconds: 1 }))!;
+      const policyRow = {
+        kind: "policy", schema_name: "public", object_name: "notes", rls_enabled: null, rls_forced: null, policy_count: null,
+        security_invoker: null, grants: null, policy_name: "a", permissive: "PERMISSIVE", roles: "anon", cmd: "UPDATE", qual: "true", with_check: null,
+      };
+      const always = (policy: string) => ({
+        name: "rls_policy_always_true", title: "t", level: "WARN", facing: "EXTERNAL", categories: ["SECURITY"], description: "d",
+        detail: "d", remediation: "r", metadata: { schema: "public", name: "notes", type: "table", policy_name: policy, command: "UPDATE" },
+        cache_key: `x_${policy}`,
+      });
+      const adv = advisorFindings(parseLints([always("a"), always("b")]));
+      await posture.savePostureScan(tx, p, scanId, {
+        catalog: { status: "ok", findings: catalogFindings(parseCatalogRows([tableRow("notes", true, 1), policyRow])) },
+        advisor: { status: "ok", findings: adv.status === "ok" ? adv.findings : [] },
+      }, T0);
+      return p;
+    });
+    // Catalog flags policy a (critical); the Advisor repeats a (hidden) and adds b (high).
+    const page = await withTenant(db.app, A, (tx) => posture.listPostureFindings(tx, p));
+    expect(dedupePosture(page).map((f) => `${f.source}:${String(f.evidence.policy)}:${f.severity}`)).toEqual(["catalog:a:critical", "advisor:b:high"]);
+    const m = await as(u.owner, A, (tx) => posture.postureSummaries(tx));
+    expect(m.get(p)!.counts).toEqual({ critical: 1, high: 1, medium: 0, low: 0 });
+  });
+
   it("lets owners and editors ask for a scan; RLS refuses a viewer and a stranger", async () => {
     expect(await as(u.editor, A, (tx) => posture.requestPostureScan(tx, p1, u.editor, 0))).toBe("queued");
     await expect(as(u.viewer, A, (tx) => posture.requestPostureScan(tx, p1, u.viewer, 0))).rejects.toThrow(/row-level security/);
@@ -422,6 +450,14 @@ describe.skipIf(pgInfo === null)("POSTURE_SQL on a real Postgres catalog", () =>
       CREATE VIEW public.invoker_view WITH (security_invoker = on) AS SELECT id FROM public.private_notes;
       GRANT SELECT, INSERT, UPDATE, DELETE ON public.open_notes, public.private_notes, public.locked, public.guestbook TO anon, authenticated;
       GRANT SELECT ON public.definer_view, public.invoker_view TO anon, authenticated;
+      -- Issue #135: SECURITY DEFINER functions. PUBLIC holds EXECUTE by default.
+      CREATE FUNCTION public.grant_admin(uid uuid) RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';
+      CREATE FUNCTION public.pinned(n integer) RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = '' AS 'SELECT 1';
+      REVOKE EXECUTE ON FUNCTION public.pinned(integer) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.pinned(integer) TO authenticated;
+      CREATE FUNCTION public.internal_only() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';
+      REVOKE EXECUTE ON FUNCTION public.internal_only() FROM PUBLIC;
+      CREATE FUNCTION public.invoker_fn(q text) RETURNS int LANGUAGE sql AS 'SELECT 1';
     `.replace("auth_uid()", "current_setting('x.uid', true)::uuid"));
   });
 
@@ -430,9 +466,17 @@ describe.skipIf(pgInfo === null)("POSTURE_SQL on a real Postgres catalog", () =>
     const parsed = parseCatalogRows(rows);
     expect(parsed.skipped).toBe(0);
     expect(parsed.relations.find((r) => r.name === "private_notes")).toMatchObject({ rlsEnabled: true, rlsForced: true, policyCount: 1 });
-    expect(parsed.relations.find((r) => r.name === "invoker_view")).toMatchObject({ kind: "view", securityInvoker: true });
+    expect(parsed.relations.find((r) => r.name === "invoker_view")).toMatchObject({ kind: "view", securityInvoker: true, graphqlRoles: null });
+    // Only SECURITY DEFINER functions come back, with their identity arguments and search_path.
+    expect(parsed.functions.map((f) => [f.name, f.arguments, f.searchPathSet, f.executableBy]).sort()).toEqual([
+      ["grant_admin", "uid uuid", false, ["anon", "authenticated"]],
+      ["internal_only", "", false, []],
+      ["pinned", "n integer", true, ["authenticated"]],
+    ]);
     const got = catalogFindings(parsed).map((f) => `${f.check}:${f.object}:${f.severity}`).sort();
     expect(got).toEqual([
+      "function_definer_exposed:grant_admin:high",
+      "function_definer_exposed:pinned:medium",
       "permissive_policy:guestbook:critical",
       "permissive_policy:guestbook:medium",
       "rls_disabled:internal:low",
@@ -441,4 +485,33 @@ describe.skipIf(pgInfo === null)("POSTURE_SQL on a real Postgres catalog", () =>
       "view_not_invoker:definer_view:high",
     ]);
   });
+
+  it("reports GraphQL exposure only once pg_graphql is installed, column grants included, partitioned roots not (#135)", async () => {
+    await db.admin.query(`
+      CREATE TABLE public.col_only (id int, secret text);
+      GRANT SELECT (id) ON public.col_only TO anon;
+      CREATE TABLE public.parted (id int) PARTITION BY RANGE (id);
+      GRANT SELECT ON public.parted TO anon, authenticated;
+    `);
+    const graphql = async () => catalogFindings(parseCatalogRows((await db.admin.query(POSTURE_SQL)).rows as Record<string, unknown>[]))
+      .filter((f) => f.check === "graphql_table_exposed").map((f) => `${f.object}:${f.objectType}:${f.severity}`).sort();
+    try {
+      expect(await graphql()).toEqual([]);
+      // pg_graphql is not in the test cluster; a catalog row stands in for CREATE EXTENSION.
+      await db.admin.query(`INSERT INTO pg_catalog.pg_extension (oid, extname, extowner, extnamespace, extrelocatable, extversion)
+        VALUES (4000000001, 'pg_graphql', 10, 'public'::regnamespace, false, '1.5.11')`);
+      expect(await graphql()).toEqual([
+        "col_only:table:medium",
+        "definer_view:view:medium",
+        "guestbook:table:medium",
+        "invoker_view:view:medium",
+        "locked:table:medium",
+        "open_notes:table:medium",
+        "private_notes:table:medium",
+      ]);
+    } finally {
+      await db.admin.query("DELETE FROM pg_catalog.pg_extension WHERE oid = 4000000001; DROP TABLE public.col_only, public.parted;");
+    }
+  });
 });
+

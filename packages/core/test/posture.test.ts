@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ADVISOR_LINTS, MAX_CATALOG_ROWS, POSTURE_SQL } from "../src/config/posture.js";
 import type { Finding } from "../src/detectors/finding.js";
 import { buildFeatures } from "../src/explainer/features.js";
-import { AdvisorApiError, advisorFindings, parseLints, querySecurityAdvisor } from "../src/posture/advisor.js";
+import { AdvisorApiError, advisorFindings, lintSeverity, parseLints, querySecurityAdvisor, safeArguments } from "../src/posture/advisor.js";
 import { CatalogError, catalogFindings, isTrueExpr, parseCatalogRows, policyRoles, safeName } from "../src/posture/catalog.js";
 import { countBySeverity, dedupePosture, exposedTables, POSTURE_SIGNAL, raiseForPosture } from "../src/posture/findings.js";
 import { checkTitle, fixPrompt, quoteIdent } from "../src/posture/fix.js";
@@ -233,13 +233,13 @@ describe("Security Advisor client", () => {
 
   it("keeps only the lint name, level, type and identifiers; never title, description, detail or remediation", async () => {
     const lints = await querySecurityAdvisor(REF, { token: "t", fetch: fakeFetch(200, { lints: [lint("rls_disabled_in_public")] }) as unknown as typeof fetch });
-    expect(lints).toEqual([{ name: "rls_disabled_in_public", level: "ERROR", security: true, schema: "public", object: "notes", type: "table" }]);
+    expect(lints).toEqual([{ name: "rls_disabled_in_public", level: "ERROR", security: true, schema: "public", object: "notes", type: "table", evidence: {} }]);
     expect(JSON.stringify(lints)).not.toMatch(/Free text|ignore|example\.test/);
   });
 
   it("drops lints with a free-text name or an unknown level, and unknown object types become null", () => {
     expect(parseLints([lint("Drop table x;"), lint("ok_lint", { level: "FATAL" }), lint("new_lint", { type: "sequence" })]))
-      .toEqual([{ name: "new_lint", level: "ERROR", security: true, schema: "public", object: "notes", type: null }]);
+      .toEqual([{ name: "new_lint", level: "ERROR", security: true, schema: "public", object: "notes", type: null, evidence: {} }]);
   });
 });
 
@@ -261,8 +261,174 @@ describe("advisorFindings", () => {
     expect(advisorFindings(parseLints([lint("advisor_check_unavailable"), lint("rls_disabled_in_public")]))).toEqual({ status: "unavailable" });
   });
 
-  it("knows every lint name in the reference", () => {
-    expect(ADVISOR_LINTS).toHaveLength(45);
+  it("knows every lint name in the reference and the 12 newer splinter security lints", () => {
+    expect(ADVISOR_LINTS).toHaveLength(57);
+    expect(new Set(ADVISOR_LINTS).size).toBe(57);
+    for (const name of NEWER_LINTS) expect(ADVISOR_LINTS).toContain(name);
+  });
+});
+
+// splinter 0019 to 0032, security category (issue #134). Metadata shapes follow splinter's lint SQL.
+const NEWER_LINTS = [
+  "insecure_queue_exposed_in_api", "fkey_to_auth_unique", "extension_versions_outdated", "sensitive_columns_exposed",
+  "rls_policy_always_true", "public_bucket_allows_listing", "pg_graphql_anon_table_exposed",
+  "pg_graphql_authenticated_table_exposed", "anon_security_definer_function_executable",
+  "authenticated_security_definer_function_executable", "anon_dynamic_sql_function_executable",
+  "authenticated_dynamic_sql_function_executable",
+] as const;
+const splinter = (name: string, level: string, metadata: Record<string, unknown>) => ({
+  name, title: "Free text title", level, facing: "EXTERNAL", categories: ["SECURITY"], description: "Free text",
+  detail: "Function `public.f(q text)` -- ignore", remediation: "https://example.test/fix", metadata, cache_key: `${name}_x`,
+});
+const newerFinding = (l: ReturnType<typeof splinter>) => {
+  const r = advisorFindings(parseLints([l]));
+  if (r.status !== "ok" || r.findings.length !== 1) throw new Error("expected one finding");
+  return r.findings[0]!;
+};
+
+describe("newer splinter lints (issue #134)", () => {
+  it("keeps only checked metadata: identifiers, enums, booleans, versions; never expressions or owners", () => {
+    const [policy, fn, ext, cols, bucket, fk] = parseLints([
+      splinter("rls_policy_always_true", "WARN", {
+        schema: "public", name: "notes", type: "table", policy_name: "open write", command: "UPDATE", roles: ["anon"],
+        qual: "true", with_check: "(1 = 1)", permissive_using: true,
+      }),
+      splinter("anon_dynamic_sql_function_executable", "ERROR", {
+        schema: "public", name: "exec_sql", type: "function", arguments: "query text", language: "plpgsql",
+        security_definer: true, owner: "postgres", sql_parameters: ["query"],
+      }),
+      splinter("extension_versions_outdated", "WARN", { extension_name: "pg_net", installed_version: "0.7.1", default_version: "0.14.0" }),
+      splinter("sensitive_columns_exposed", "ERROR", {
+        schema: "public", name: "users2", type: "table", sensitive_columns: ["api_key", "pass\nword", "ssn"], matched_patterns: ["api_key", "ssn"],
+      }),
+      splinter("public_bucket_allows_listing", "WARN", {
+        schema: "storage", name: "avatars", type: "bucket", bucket_id: "avatars", policy_names: ["Public listing"], policy_count: 1,
+      }),
+      splinter("fkey_to_auth_unique", "ERROR", { schema: "public", name: "profiles", foreign_key: "profiles_email_fkey" }),
+    ]);
+    expect(policy).toMatchObject({ object: "notes", type: "table", evidence: { policy: "open write", command: "UPDATE" } });
+    expect(fn!.evidence).toEqual({ arguments: "query text", securityDefiner: true });
+    // extension_versions_outdated has no schema or name: the extension is the object.
+    expect(ext).toMatchObject({ schema: null, object: "pg_net", type: "extension", evidence: { extension: "pg_net", installedVersion: "0.7.1", defaultVersion: "0.14.0" } });
+    expect(cols!.evidence).toEqual({ sensitiveColumns: ["api_key", "ssn"] });
+    // "bucket" is not a stored object type (the column's CHECK), so it becomes null.
+    expect(bucket).toMatchObject({ schema: "storage", object: "avatars", type: null, evidence: { policies: ["Public listing"] } });
+    // splinter gives no type for this lint; it stays null, so it never counts as an exposed table.
+    expect(fk).toMatchObject({ type: null, evidence: { foreignKey: "profiles_email_fkey" } });
+    expect(JSON.stringify([policy, fn, ext, cols, bucket, fk])).not.toMatch(/1 = 1|postgres|plpgsql|Free text|ignore|matched|bucket_id/);
+  });
+
+  it("refuses unsafe metadata values", () => {
+    const [l] = parseLints([splinter("anon_dynamic_sql_function_executable", "WARN", {
+      schema: "public", name: "f", arguments: "q text\n-- x", security_definer: "yes", command: "DROP", policy_name: "x".repeat(64),
+      installed_version: "1.0; drop", default_version: "1.1",
+    })]);
+    expect(l!.evidence).toEqual({ defaultVersion: "1.1" });
+    expect(safeArguments("a".repeat(513))).toBeNull();
+    expect(safeArguments("")).toBe("");
+  });
+
+  it("infers the function type the security definer lints leave out", () => {
+    for (const name of ["anon_security_definer_function_executable", "authenticated_security_definer_function_executable"]) {
+      const [l] = parseLints([splinter(name, "WARN", { schema: "public", name: "f", arguments: "", security_definer: true })]);
+      expect(l!.type).toBe("function");
+    }
+  });
+
+  it("rates the lints by what they expose through the Data API", () => {
+    const sev = (name: string, level: string) => newerFinding(splinter(name, level, { schema: "public", name: "x", type: "table" })).severity;
+    expect(sev("sensitive_columns_exposed", "ERROR")).toBe("critical");
+    expect(sev("rls_policy_always_true", "WARN")).toBe("high");
+    expect(sev("anon_security_definer_function_executable", "WARN")).toBe("high");
+    expect(sev("authenticated_security_definer_function_executable", "WARN")).toBe("medium");
+    expect(sev("anon_dynamic_sql_function_executable", "ERROR")).toBe("critical");
+    expect(sev("anon_dynamic_sql_function_executable", "WARN")).toBe("high");
+    expect(sev("authenticated_dynamic_sql_function_executable", "ERROR")).toBe("high");
+    expect(sev("pg_graphql_anon_table_exposed", "WARN")).toBe("medium");
+    expect(sev("pg_graphql_authenticated_table_exposed", "WARN")).toBe("low");
+    expect(sev("insecure_queue_exposed_in_api", "ERROR")).toBe("high");
+    expect(lintSeverity("brand_new_lint", "INFO")).toBe("low");
+  });
+
+  it("keeps one finding per policy and per overload", () => {
+    const r = advisorFindings(parseLints([
+      splinter("rls_policy_always_true", "WARN", { schema: "public", name: "notes", type: "table", policy_name: "a" }),
+      splinter("rls_policy_always_true", "WARN", { schema: "public", name: "notes", type: "table", policy_name: "b" }),
+      splinter("anon_security_definer_function_executable", "WARN", { schema: "public", name: "f", arguments: "a integer" }),
+      splinter("anon_security_definer_function_executable", "WARN", { schema: "public", name: "f", arguments: "a text" }),
+      splinter("anon_security_definer_function_executable", "WARN", { schema: "public", name: "f", arguments: "a text" }),
+    ]));
+    expect(r.status === "ok" && r.findings.length).toBe(4);
+  });
+
+  it("hides rls_policy_always_true behind the catalog's permissive_policy on the same policy only", () => {
+    const catalog = finding({ check: "permissive_policy", severity: "critical", evidence: { policy: "a", openCommands: ["UPDATE"] } });
+    const adv = (policy: string | undefined, object = "notes") => finding({
+      source: "advisor", check: "rls_policy_always_true", severity: "high", object, evidence: policy ? { policy, level: "WARN" } : { level: "WARN" },
+    });
+    const list = dedupePosture([catalog, adv("a"), adv("b"), adv(undefined), adv("a", "other")]);
+    expect(list.map((f) => `${f.source}:${f.object}:${String(f.evidence.policy)}`)).toEqual([
+      "catalog:notes:a", "advisor:notes:b", "advisor:other:a",
+    ]);
+  });
+
+  it("raises detections on a table with sensitive columns or an always-true write policy, never on an auth foreign key", () => {
+    const m = exposedTables([
+      newerFinding(splinter("sensitive_columns_exposed", "ERROR", { schema: "public", name: "secrets", type: "table", sensitive_columns: ["api_key"] })),
+      newerFinding(splinter("rls_policy_always_true", "WARN", { schema: "public", name: "notes", type: "table", policy_name: "a" })),
+      newerFinding(splinter("fkey_to_auth_unique", "ERROR", { schema: "public", name: "profiles", foreign_key: "fk" })),
+      newerFinding(splinter("pg_graphql_anon_table_exposed", "WARN", { schema: "public", name: "posts", type: "table" })),
+    ]);
+    expect([...m.entries()]).toEqual([["secrets", "sensitive_columns_exposed"], ["notes", "rls_policy_always_true"]]);
+  });
+
+  it("gives every newer lint a specific title and fix, never the generic dashboard prompt", () => {
+    const meta: Record<string, Record<string, unknown>> = {
+      insecure_queue_exposed_in_api: { schema: "pgmq", name: "q_jobs", type: "table" },
+      fkey_to_auth_unique: { schema: "public", name: "profiles", foreign_key: "profiles_email_fkey" },
+      extension_versions_outdated: { extension_name: "pg_net", installed_version: "0.7.1", default_version: "0.14.0" },
+      sensitive_columns_exposed: { schema: "public", name: "users2", type: "table", sensitive_columns: ["api_key", "ssn"] },
+      rls_policy_always_true: { schema: "public", name: "notes", type: "table", policy_name: "open", command: "UPDATE" },
+      public_bucket_allows_listing: { schema: "storage", name: "avatars", type: "bucket", policy_names: ["List all", 'we"ird'] },
+      pg_graphql_anon_table_exposed: { schema: "public", name: "posts", type: "table" },
+      pg_graphql_authenticated_table_exposed: { schema: "public", name: "posts", type: "view" },
+      anon_security_definer_function_executable: { schema: "public", name: "grant_admin", arguments: "uid uuid", security_definer: true },
+      authenticated_security_definer_function_executable: { schema: "public", name: "grant_admin", arguments: "", security_definer: true },
+      anon_dynamic_sql_function_executable: { schema: "public", name: "exec_sql", type: "function", arguments: "query text", security_definer: true },
+      authenticated_dynamic_sql_function_executable: { schema: "public", name: "exec_sql", type: "function", security_definer: false },
+    };
+    const prompts = Object.fromEntries(NEWER_LINTS.map((name) => {
+      const p = fixPrompt(newerFinding(splinter(name, "WARN", meta[name]!)));
+      expect(p.explanation, name).not.toMatch(/Security Advisor reports/);
+      expect(p.title, name).not.toBe(`${name.charAt(0).toUpperCase()}${name.slice(1).replace(/_/g, " ")}`);
+      return [name, p];
+    }));
+    expect(prompts.insecure_queue_exposed_in_api!.sql).toContain('ALTER TABLE "pgmq"."q_jobs" ENABLE ROW LEVEL SECURITY;');
+    expect(prompts.fkey_to_auth_unique!.sql).toContain('ALTER TABLE "public"."profiles" DROP CONSTRAINT "profiles_email_fkey";');
+    expect(prompts.fkey_to_auth_unique!.sql).toContain("REFERENCES auth.users (id);");
+    expect(prompts.extension_versions_outdated!.sql).toContain('ALTER EXTENSION "pg_net" UPDATE;');
+    expect(prompts.extension_versions_outdated!.explanation).toMatch(/installed 0\.7\.1, current 0\.14\.0/);
+    expect(prompts.sensitive_columns_exposed!.sql).toContain('ALTER TABLE "public"."users2" ENABLE ROW LEVEL SECURITY;');
+    expect(prompts.sensitive_columns_exposed!.explanation).toMatch(/api_key, ssn/);
+    expect(prompts.rls_policy_always_true!.sql).toContain('ALTER POLICY "open" ON "public"."notes"\n  USING ((select auth.uid()) = user_id)\n  WITH CHECK ((select auth.uid()) = user_id);');
+    expect(prompts.public_bucket_allows_listing!.sql).toContain('DROP POLICY IF EXISTS "List all" ON storage.objects;\nDROP POLICY IF EXISTS "we""ird" ON storage.objects;');
+    expect(prompts.pg_graphql_anon_table_exposed!.sql).toContain('REVOKE SELECT ON "public"."posts" FROM anon;');
+    expect(prompts.pg_graphql_authenticated_table_exposed!.sql).toContain('REVOKE SELECT ON "public"."posts" FROM authenticated;');
+    expect(prompts.anon_security_definer_function_executable!.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."grant_admin"(uid uuid) FROM PUBLIC, anon;');
+    expect(prompts.anon_security_definer_function_executable!.sql).toContain('-- ALTER FUNCTION "public"."grant_admin"(uid uuid) SECURITY INVOKER;');
+    expect(prompts.authenticated_security_definer_function_executable!.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."grant_admin"() FROM PUBLIC, authenticated;');
+    expect(prompts.anon_dynamic_sql_function_executable!.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."exec_sql"(query text) FROM PUBLIC, anon;');
+    expect(prompts.anon_dynamic_sql_function_executable!.explanation).toMatch(/owner's rights/);
+    // No arguments known: the bare name, with a note about overloads.
+    expect(prompts.authenticated_dynamic_sql_function_executable!.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."exec_sql" FROM PUBLIC, authenticated;');
+    expect(prompts.authenticated_dynamic_sql_function_executable!.sql).toMatch(/overloaded/);
+    expect(prompts.authenticated_dynamic_sql_function_executable!.explanation).not.toMatch(/owner's rights/);
+  });
+
+  it("falls back to prose without SQL when the lint lacks the name the SQL needs", () => {
+    expect(fixPrompt(finding({ source: "advisor", check: "fkey_to_auth_unique", objectType: null, evidence: {} })).sql).toBeNull();
+    expect(fixPrompt(finding({ source: "advisor", check: "rls_policy_always_true", evidence: {} })).sql).toBeNull();
+    expect(fixPrompt(finding({ source: "advisor", check: "public_bucket_allows_listing", schema: "storage", object: "b", evidence: {} })).sql).toBeNull();
   });
 });
 
@@ -388,5 +554,89 @@ describe("postureSourceStatus", () => {
     expect(postureSourceStatus(new SqlQueryError("x", 201))).toBe("invalid_response");
     expect(postureSourceStatus(new CatalogError("x"))).toBe("invalid_response");
     expect(postureSourceStatus(new TypeError("fetch failed"))).toBe("network_error");
+  });
+});
+
+// Issue #135: catalog checks ported from splinter 0026 to 0029.
+const fn = (name: string, o: Partial<{ definer: boolean | string; grants: string; args: string | null; searchPath: boolean }> = {}) => ({
+  kind: "function", schema_name: "public", object_name: name, rls_enabled: null, rls_forced: null, policy_count: null,
+  security_invoker: null, grants: o.grants ?? "anon:EXECUTE,authenticated:EXECUTE", policy_name: null, permissive: null, roles: null,
+  cmd: null, qual: null, with_check: null, graphql_roles: null, security_definer: o.definer ?? true,
+  search_path_set: o.searchPath ?? false, arguments: o.args === undefined ? "uid uuid" : o.args,
+});
+
+describe("function_definer_exposed", () => {
+  it("flags a SECURITY DEFINER function the API roles can execute: high for anon, medium for authenticated only", () => {
+    const f = only([fn("a"), fn("b", { grants: "authenticated:EXECUTE" }), fn("c", { grants: "" }), fn("d", { definer: false })], "function_definer_exposed");
+    expect(f.map((x) => [x.object, x.severity, x.objectType])).toEqual([["a", "high", "function"], ["b", "medium", "function"]]);
+    expect(f[0]!.evidence).toEqual({ exposure: "anon", executableBy: ["anon", "authenticated"], arguments: "uid uuid", searchPathSet: false });
+  });
+
+  it("keeps each overload, and drops a row with unsafe arguments", () => {
+    const parsed = parseCatalogRows([fn("f", { args: "a integer" }), fn("f", { args: "a text" }), fn("g", { args: "x text\n-- y" }), fn("h", { args: "a".repeat(513) })]);
+    expect(parsed.functions.map((x) => x.arguments)).toEqual(["a integer", "a text"]);
+    expect(parsed.skipped).toBe(2);
+    expect(safeArguments("")).toBe("");
+  });
+
+  it("revokes EXECUTE with the exact signature and pins a mutable search_path", () => {
+    const [f] = only([fn("grant_admin")], "function_definer_exposed");
+    const p = fixPrompt(f!);
+    expect(p.title).toBe("Signed-out visitors can run a SECURITY DEFINER function");
+    expect(p.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."grant_admin"(uid uuid) FROM PUBLIC, anon, authenticated;');
+    expect(p.sql).toContain('-- ALTER FUNCTION "public"."grant_admin"(uid uuid) SECURITY INVOKER;');
+    expect(p.sql).toContain(`ALTER FUNCTION "public"."grant_admin"(uid uuid) SET search_path = '';`);
+    expect(p.explanation).toMatch(/\/rest\/v1\/rpc\/grant_admin/);
+    const [pinned] = only([fn("g", { grants: "authenticated:EXECUTE", searchPath: true, args: "" })], "function_definer_exposed");
+    const q = fixPrompt(pinned!);
+    expect(q.sql).toContain('REVOKE EXECUTE ON FUNCTION "public"."g"() FROM PUBLIC, authenticated;');
+    expect(q.sql).not.toMatch(/search_path/);
+    expect(q.title).toBe("Signed-in users can run a SECURITY DEFINER function");
+  });
+});
+
+describe("graphql_table_exposed", () => {
+  const withGraphql = <T extends object>(row: T, roles: string | null) => ({ ...row, graphql_roles: roles });
+
+  it("flags a table or view an API role can see in GraphQL, only when pg_graphql is installed", () => {
+    const f = only([
+      withGraphql(table("a"), "anon,authenticated"), withGraphql(table("b"), "authenticated"), withGraphql(table("c"), ""),
+      withGraphql(view("v", true), "anon"), withGraphql(table("d"), null), table("e"),
+    ], "graphql_table_exposed");
+    expect(f.map((x) => [x.object, x.severity, x.objectType, x.evidence.exposure])).toEqual([
+      ["a", "medium", "table", "anon"], ["b", "low", "table", "authenticated"], ["v", "medium", "view", "anon"],
+    ]);
+  });
+
+  it("revokes SELECT from the roles that see it", () => {
+    const [f] = only([withGraphql(table("posts"), "anon,authenticated")], "graphql_table_exposed");
+    const p = fixPrompt(f!);
+    expect(p.title).toBe("Signed-out visitors can see this object in the GraphQL schema");
+    expect(p.sql).toContain('REVOKE SELECT ON "public"."posts" FROM anon, authenticated;');
+    expect(p.sql).toContain("-- REVOKE ALL ON FUNCTION graphql.resolve FROM anon, authenticated;");
+  });
+
+  it("never raises detections: introspection is not row access", () => {
+    expect(exposedTables(only([withGraphql(table("posts"), "anon")], "graphql_table_exposed")).size).toBe(0);
+  });
+});
+
+describe("dedupe of the ported checks against their Advisor lints", () => {
+  it("hides the Advisor's function and GraphQL lints behind the catalog finding on the same object", () => {
+    const catalog = run([fn("f"), { ...table("posts"), graphql_roles: "anon,authenticated" }])
+      .filter((f) => f.check === "function_definer_exposed" || f.check === "graphql_table_exposed");
+    const adv = (check: string, object: string, objectType: string | null) =>
+      finding({ source: "advisor", check, severity: "medium", object, objectType, evidence: { level: "WARN" } });
+    const list = dedupePosture([
+      ...catalog,
+      adv("anon_security_definer_function_executable", "f", "function"),
+      adv("authenticated_security_definer_function_executable", "f", "function"),
+      adv("pg_graphql_anon_table_exposed", "posts", "table"),
+      adv("pg_graphql_authenticated_table_exposed", "posts", "table"),
+      adv("anon_security_definer_function_executable", "other", "function"),
+    ]);
+    expect(list.map((f) => `${f.source}:${f.check}:${f.object}`)).toEqual([
+      "catalog:function_definer_exposed:f", "advisor:anon_security_definer_function_executable:other", "catalog:graphql_table_exposed:posts",
+    ]);
   });
 });

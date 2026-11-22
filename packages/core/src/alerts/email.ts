@@ -76,6 +76,7 @@ const DETECTOR_LABEL: Record<Finding["detector"], string> = {
   cross_tenant: "Cross-tenant data access",
   service_role_misuse: "Service-role key misuse",
   rpc_exposure: "Anon calls to an exposed SECURITY DEFINER function",
+  exposed_read: "Anon reads of an exposed table",
 };
 
 const SIGNAL_LABEL: Record<string, string> = {
@@ -93,6 +94,9 @@ const SIGNAL_LABEL: Record<string, string> = {
   posture_exposed: "The table's posture is exposed (RLS off or an open policy)",
   definer_rpc_call: "Called a SECURITY DEFINER function anon may execute",
   rpc_burst: "Called it 100 times or more in one poll",
+  exposed_table_read: "Read a table the anon key can read in full",
+  rows_returned: "Rows came back",
+  bulk_read: "Read 1,000 rows or more in one poll",
 };
 
 const MAX_SUMMARY = 600;

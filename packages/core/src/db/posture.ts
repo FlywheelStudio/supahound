@@ -1,5 +1,5 @@
 import type { Severity } from "../detectors/finding.js";
-import { anonDefinerFunctions, countBySeverity, dedupePosture, exposedTables, type DefinerExposure, type SeverityCounts } from "../posture/findings.js";
+import { anonDefinerFunctions, anonReadableTables, countBySeverity, dedupePosture, exposedTables, type AnonReadable, type DefinerExposure, type SeverityCounts } from "../posture/findings.js";
 import type { PostureFinding, PostureSource, SourceStatus } from "../posture/types.js";
 import { projectId, type ProjectId } from "../tenancy/scope.js";
 import type { TenantTx } from "./tenant.js";
@@ -178,6 +178,17 @@ export async function postureAnonDefinerFunctions(tx: TenantTx, project: Project
   return anonDefinerFunctions(rows.map(toFinding));
 }
 
+// Tables whose every row the anon key can read, by the stored findings (issue #132).
+export async function postureAnonReadableTables(tx: TenantTx, project: ProjectId): Promise<Map<string, AnonReadable>> {
+  const rows = await tx.query<FindingRow>(
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
+     FROM supahound.posture_findings
+     WHERE tenant_id = $1 AND project_id = $2 AND schema_name = 'public'`,
+    [tx.tenantId, project],
+  );
+  return anonReadableTables(rows.map(toFinding));
+}
+
 export interface PostureSummary {
   projectId: ProjectId;
   scan: PostureScanRecord | null;
@@ -192,7 +203,10 @@ export async function postureSummaries(tx: TenantTx): Promise<Map<ProjectId, Pos
     [tx.tenantId],
   );
   const findings = await tx.query<FindingRow>(
-    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, '{}'::jsonb AS evidence, found_at
+    // Evidence: only the keys dedupePosture reads (a policy or a function's arguments), so the
+    // overview counts what the Posture page shows.
+    `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type,
+            jsonb_strip_nulls(jsonb_build_object('policy', evidence->'policy', 'arguments', evidence->'arguments')) AS evidence, found_at
      FROM supahound.posture_findings WHERE tenant_id = $1`,
     [tx.tenantId],
   );

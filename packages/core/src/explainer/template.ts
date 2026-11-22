@@ -49,6 +49,19 @@ export function templateExplanation(f: IncidentFeatures): Explanation {
     steps.unshift(`Revoke EXECUTE on ${list(r.functions)} from \`anon\`, or make it SECURITY INVOKER. The project's Posture page has the details.`);
     steps.push("Check that the function validates its arguments and the caller before it reads or changes data.");
   }
+  if (f.exposedRead) {
+    const r = f.exposedRead;
+    parts.push(
+      `Signed-out callers using the \`anon\` key read ${list(r.tables)}, which the posture scan shows readable by anyone with that key.`,
+    );
+    if (r.rowsReturned !== null && r.rowsReturned > 0) {
+      impact = `The \`anon\` key received ${r.rowsReturned} row(s), so this data is public to anyone who has the key, and the key ships in every client app.`;
+    } else {
+      impact = "No rows came back in these responses, so this looks like a probe of an exposed table.";
+    }
+    steps.unshift(`Fix the posture finding on ${list(r.tables)}: enable RLS or narrow the policy. The project's Posture page has the SQL.`);
+    steps.push("If this table should be public, make that explicit with a read-only policy and confirm it holds nothing private.");
+  }
 
   parts.push(`Supahound saw ${f.hits} request(s) over ${f.durationMinutes} minute(s).`);
   return { summary: parts.join(" "), likelyImpact: impact, nextSteps: steps.slice(0, 5) };

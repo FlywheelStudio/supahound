@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 import * as repo from "../db/repo.js";
 import { withTenant } from "../db/tenant.js";
 import { ServiceRoleNetworks } from "../detectors/serviceRole.js";
+import type { Finding } from "../detectors/finding.js";
 import { buildFeatures, type IncidentFeatures } from "../explainer/features.js";
 import type { ExplainResult } from "../explainer/llm.js";
 import { templateExplanation } from "../explainer/template.js";
@@ -11,7 +12,7 @@ import { applyFindings } from "../incidents/engine.js";
 import type { Incident } from "../incidents/incident.js";
 import { LogsApiError, MAX_WINDOW_MS, type LogsQuery } from "../logs/client.js";
 import { normalizeRow } from "../logs/event.js";
-import { edgeRollupSql } from "../logs/sql.js";
+import { authCoverageSql, edgeRollupSql, ROLLUP_LIMIT } from "../logs/sql.js";
 import { parsePolicyRows, SqlQueryError, type ReadOnlyQuery } from "../ownership/client.js";
 import { ownershipFromPolicies, POLICIES_SQL, type OwnershipMap } from "../ownership/ownership.js";
 import { POSTURE_SQL } from "../config/posture.js";
@@ -96,6 +97,10 @@ export const POSTURE_RETRY_SECONDS = 60 * 60;
 
 const floorToMinute = (ms: number) => Math.floor(ms / 60_000) * 60_000;
 
+// Logs queries one poll may spend on a saturated rollup (issue #129). Supabase allows 10 analytics
+// queries a minute and a project polls once a minute.
+export const MAX_ROLLUP_QUERIES = 4;
+
 // Windows are contiguous and minute-aligned: each starts where the last assessed one ended
 // (Supabase rounds bounds to the minute, so aligned bounds stay exact). After a failure the next
 // good poll covers the failed span. A gap over 24 hours is cut to the newest 24 and flagged.
@@ -167,6 +172,33 @@ async function refreshOwnership(
   }
   await withTenant(deps.app, scope.tenantId, (tx) => repo.setOwnership(tx, scope.projectId, ownership, now));
   return { ownership, loaded: true };
+}
+
+// Reads the rollup for a window. A full answer (more than ROLLUP_LIMIT templates) has dropped its
+// quietest templates, so the window is halved, keeping its start, and read again: the run assesses
+// that shorter window and the next poll continues from its end. "rollup_saturated" when no window
+// fits within MAX_ROLLUP_QUERIES, or a one-minute window is full: the run is then unable to assess.
+async function queryRollup(
+  deps: PollDeps,
+  projectRef: string,
+  sql: string,
+  window: { start: Date; end: Date },
+  token: string,
+): Promise<{ rows: Record<string, unknown>[]; end: Date } | { errorCode: string }> {
+  const start = window.start.getTime();
+  let end = window.end.getTime();
+  for (let queries = 1; ; queries++) {
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await deps.queryLogs({ projectRef, sql, start: window.start, end: new Date(end) }, { token });
+    } catch (err) {
+      return { errorCode: errorCode(err) };
+    }
+    if (rows.length <= ROLLUP_LIMIT) return { rows, end: new Date(end) };
+    const half = floorToMinute((end - start) / 2);
+    if (half === 0 || queries >= MAX_ROLLUP_QUERIES) return { errorCode: "rollup_saturated" };
+    end = start + half;
+  }
 }
 
 // The status a failed posture source records. Error bodies never get this far: only statuses.
@@ -268,11 +300,15 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       return { skip: "claimed_elsewhere" as const };
     }
     const runId = await repo.startPollRun(tx, scope.projectId, window);
-    // Anon RPC calls are fetched only for the functions the stored posture shows as SECURITY DEFINER
-    // and anon-executable (#131). A scan later in this poll takes effect from the next poll: the
-    // SQL is audited here.
+    // Anon reads are fetched only for the tables the stored posture shows readable by anon (#132),
+    // and anon RPC calls only for the functions it shows as SECURITY DEFINER and anon-executable
+    // (#131). A scan that runs later in this poll takes effect from the next poll: the SQL is audited here.
+    const anonReadable = await postureRepo.postureAnonReadableTables(tx, scope.projectId);
     const anonDefiners = await postureRepo.postureAnonDefinerFunctions(tx, scope.projectId);
-    const sql = edgeRollupSql({ ...(deps.env ? { env: deps.env } : {}), anonRpcFunctions: anonDefiners.keys() });
+    const sql = edgeRollupSql({
+      limit: ROLLUP_LIMIT + 1, ...(deps.env ? { env: deps.env } : {}),
+      anonReadTables: anonReadable.keys(), anonRpcFunctions: anonDefiners.keys(),
+    });
     await repo.appendAudit(tx, {
       projectId: scope.projectId,
       action: "logs_query",
@@ -284,7 +320,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       },
     });
     return {
-      project, runId, window, sql, anonDefiners,
+      project, runId, window, sql, anonReadable, anonDefiners,
       networks: await repo.loadNetworks(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
       exposed: await postureRepo.postureExposedTables(tx, scope.projectId),
@@ -322,24 +358,49 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   const exposed = (await refreshPosture(scope, project, token, deps, now)) ?? loaded.exposed;
 
   // 2. Query Supabase outside any transaction. A failure is "unable to assess", never all-clear.
-  let rows: Record<string, unknown>[];
-  try {
-    rows = await deps.queryLogs({ projectRef: project.supabaseRef, sql, start: window.start, end: window.end }, { token });
-  } catch (err) {
-    const code = errorCode(err);
-    await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
+  // A saturated rollup (issue #129) would read as fewer findings, so it is unable to assess too. Its
+  // run records the cap plus one templates: the query cannot see how far past the cap it went.
+  const rollup = await queryRollup(deps, project.supabaseRef, sql, window, token);
+  if ("errorCode" in rollup) {
+    const code = rollup.errorCode;
+    const saturated = code === "rollup_saturated" ? { templates: ROLLUP_LIMIT + 1 } : {};
+    if (saturated.templates) console.log(JSON.stringify({ event: code, project_id: scope.projectId, ...saturated }));
+    await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code, ...saturated }));
     return { status: "unable_to_assess", errorCode: code };
   }
+  const rows = rollup.rows;
 
   // 3. Detect and group, in memory, for this project only.
   const networks = new ServiceRoleNetworks();
   if (loaded.networks.length > 0) networks.learn(scope, loaded.networks);
   const events = rows.map(normalizeRow);
   // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
-  const unassessedDetectors: ("cross_tenant")[] = owners.loaded ? [] : ["cross_tenant"];
+  const unassessedDetectors: Finding["detector"][] = owners.loaded ? [] : ["cross_tenant"];
+  // Every rollup row has an auth field filled, so only an empty rollup can hide empty fields (issue
+  // #130). Then REST traffic with no subject or role means neither detector could see anything.
+  if (rows.length === 0) {
+    const coverageSql = authCoverageSql(deps.env);
+    let counts: Record<string, unknown> | undefined;
+    try {
+      await withTenant(deps.app, scope.tenantId, (tx) => repo.appendAudit(tx, {
+        projectId: scope.projectId,
+        action: "logs_query",
+        detail: { purpose: "auth_coverage", sql_sha256: sha256(coverageSql), window_start: window.start.toISOString(), window_end: rollup.end.toISOString() },
+      }));
+      [counts] = await deps.queryLogs({ projectRef: project.supabaseRef, sql: coverageSql, start: window.start, end: rollup.end }, { token });
+    } catch (err) {
+      const code = errorCode(err);
+      await withTenant(deps.app, scope.tenantId, (tx) => repo.finishPollRun(tx, runId, { status: "unable_to_assess", errorCode: code }));
+      return { status: "unable_to_assess", errorCode: code };
+    }
+    if (Number(counts?.rest_requests ?? 0) > 0 && Number(counts?.rest_with_auth ?? 0) === 0) {
+      for (const d of ["cross_tenant", "service_role_misuse"] as const) if (!unassessedDetectors.includes(d)) unassessedDetectors.push(d);
+    }
+  }
   // A detection on a table that posture shows exposed is raised one step (decision 038).
   const findings = raiseForPosture(scan(events, {
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
+    anonReadable: loaded.anonReadable,
     anonDefiners: loaded.anonDefiners,
   }), exposed);
   const openIncidents: Incident[] = loaded.open.map((i) => ({
@@ -394,7 +455,9 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       }
     }
     await repo.saveNetworks(tx, scope.projectId, networks.known(scope));
-    await repo.finishPollRun(tx, runId, { status: "ok", templates: events.length, findings: findings.length, unassessedDetectors });
+    await repo.finishPollRun(tx, runId, {
+      status: "ok", templates: events.length, findings: findings.length, unassessedDetectors, windowEnd: rollup.end,
+    });
   });
 
   // 6. Email pending alerts, after the save, so an email never describes unsaved state.

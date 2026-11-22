@@ -7,8 +7,11 @@ import type { Severity } from "../detectors/finding.js";
 export type PostureSource = "catalog" | "advisor";
 
 // The catalog checks Supahound runs itself. Advisor findings use the lint name as their check.
-export type CatalogCheck = "rls_disabled" | "rls_no_policies" | "permissive_policy" | "view_not_invoker";
-export const CATALOG_CHECKS: readonly CatalogCheck[] = ["rls_disabled", "rls_no_policies", "permissive_policy", "view_not_invoker"];
+export type CatalogCheck =
+  | "rls_disabled" | "rls_no_policies" | "permissive_policy" | "view_not_invoker" | "function_definer_exposed" | "graphql_table_exposed";
+export const CATALOG_CHECKS: readonly CatalogCheck[] = [
+  "rls_disabled", "rls_no_policies", "permissive_policy", "view_not_invoker", "function_definer_exposed", "graphql_table_exposed",
+];
 
 // Who can reach the object through the Data API: anon (signed out), authenticated only, or neither.
 export type Exposure = "anon" | "authenticated" | "none";
