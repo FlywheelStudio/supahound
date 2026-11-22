@@ -10,6 +10,7 @@ Updated 2026-11-12. CI runs every tier below on each pull request
 | Unit | Pure logic: detectors, parser, ownership, engine, explainer, vault, OAuth, notices, web helpers | `packages/core/test/*.test.ts`, `apps/web/test/` | `pnpm -r test` | 820 core (unit + Postgres + detection UAT), 182 web |
 | Postgres | RLS, isolation, repositories, retention, purge and disconnect, the poller end to end | `packages/core/test/db/` | `pnpm -r test` | 289, within the 820 |
 | workerd | Core runs inside the Workers runtime (vault, detectors, AI SDK with ZDR); queue routing | `apps/poller/test/` | `pnpm -r test` | 15 |
+| Log guard | No personal data in logs (decision 047): only `opsLog` calls `console`, field checks, the log inventory lists every event (`packages/core/test/opsLog.test.ts`); the tail Worker writes no headers, query values, IPs, emails or tokens to R2 | `packages/core/test/opsLog.test.ts`, `apps/log-sink/test/` | `pnpm -r test` | 15 core, 18 log-sink |
 | UAT, detection | PRD outcomes over the full poll pipeline | `packages/core/test/uat/` | `pnpm -r test` | 9, within the 820 |
 | E2E, signed out | The built web Worker: redirects, CSRF, cache and security headers (CSP nonce, hydration with no violation), hook signature | `apps/web/e2e/specs/public.spec.ts` | `pnpm e2e` | 12 |
 | UAT, web journey | Sign-in → workspace → connect → incident → history → invites → posture → data controls → security scan → project billing → removal with a grace period → security log, in a real browser | `apps/web/e2e/specs/*.uat.spec.ts` | `pnpm e2e` | 62 |

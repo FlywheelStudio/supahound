@@ -53,6 +53,7 @@ message creates its own `pg` pool. Workers never share I/O across requests.
 | `packages/core` | Node and workerd | All logic: detectors, tenancy, vault, incidents, explainer, poller, OAuth, CLI |
 | `apps/poller` | Cloudflare Worker | Cron → queue → `pollProject`, through two Hyperdrive configs |
 | `apps/web` | Cloudflare Worker | Next.js App Router via vinext: sign-in, onboarding, overview, Supabase connect, Send Email Hook |
+| `apps/log-sink` | Cloudflare Worker | Tail consumer of web and poller: their own events to R2 for 90 days, personal data dropped (decision 047) |
 | `supabase/migrations` | Postgres 17 | Schema `supahound`, roles, forced RLS |
 
 `packages/core` exports its TypeScript source directly (`"./*": "./src/*.ts"`). The apps import it
@@ -232,7 +233,63 @@ tenant's row counts stay the same.
   project changes, closing and data deletion, with refusals by role, go to `security_events` in
   the transaction that makes the change; workspace owners read them on Settings → Security log.
   Events with no workspace (CSRF 403, bad hook signature, rejected OAuth state, non-member 404) go
-  to Workers logs as one line of JSON with an event enum and no personal data.
+  to Workers logs as one `security_event` line through `opsLog` (and on to R2, decision 047).
+- **Logs hold no personal data** (decision 047). See the log inventory below.
+
+## Log inventory
+
+ASVS 16.1.1. Supahound's own Workers write log lines only through `opsLog`
+(`packages/core/src/logging/opsLog.ts`). Each line is one JSON object: an event from the table below
+and only that event's fields. Field values are checked: UUIDs for `tenant_id` and `project_id`,
+lowercase words for `status`, `type` and `reason`, `evt_` IDs for `stripe_event`, numbers and
+booleans for the rest. A value that fails its check is left out and counted in `dropped`. No line
+holds an email, IP, user agent, token, query string, error text or row content.
+`packages/core/test/opsLog.test.ts` fails if any other file in `apps/` or `packages/core/src` calls
+`console`, or if an event is missing from this table.
+
+**Where the lines go**
+
+| Destination | What | Retention | Who reads it |
+| --- | --- | --- | --- |
+| Workers Logs (Cloudflare dashboard, `observability` in each `wrangler.jsonc`) | Every invocation of `supahound-web` and `supahound-poller` with its console lines, and Cloudflare's invocation record (method, URL, status) | 7 days (Workers Paid) | Flywheel staff with access to the Cloudflare account |
+| R2 bucket `supahound-logs`, through the tail Worker `supahound-log-sink` (`apps/log-sink`) | One NDJSON line per invocation that logged an event, threw, ended other than `ok` or answered 5xx: time, Worker, trigger, outcome, CPU and wall time, method, scrubbed path (no query; a segment that is not a plain word or UUID becomes `:x`), HTTP status, cron or queue name and batch size, the `opsLog` events (checked again by the sink), exception names with only the plain words of their message, and a count of other console lines, which are dropped. Never headers, bodies, query strings or the `cf` object (client IP, location) | 90 days (bucket lifecycle rule) | Private bucket; Flywheel staff with R2 access in the Cloudflare account |
+| Postgres `supahound.security_events` | Security events of a workspace (decision 044): actor, action, target, result; IDs and enums only | 90 days once the workspace stops paying | Workspace owners, through RLS |
+| Postgres `supahound.audit_log` | Audit rows per tenant: queries and model calls (structured, append-only) | Not expired; the data job and a purge keep it (decision 037), its retention is a separate decision | Through RLS, per tenant |
+
+Objects are keyed `logs/YYYY/MM/DD/HH/<ms>-<uuid>.ndjson` (UTC). Self-hosters may skip the sink
+(docs/self-hosting.md); Workers Logs still holds the lines for its retention.
+
+**Events**
+
+| Event | Worker | Fields | When |
+| --- | --- | --- | --- |
+| `polls_enqueued` | poller (cron) | `count` | Every minute: project polls put on the queue |
+| `usage_enqueued` | poller (cron) | `count` | 00:20 UTC with billing on: usage counts queued |
+| `data_jobs_enqueued` | poller (cron) | `count` | 00:40 UTC: data jobs queued |
+| `heartbeat` | poller and web (cron) | `status`, `sent`, `failed` | The staff heartbeat found a problem: email sent or throttled |
+| `heartbeat_crashed` | poller and web (cron) | none | The heartbeat check threw |
+| `poll_done` | poller (queue) | `project_id`, `status` | A project poll finished |
+| `poll_crashed` | poller (queue) | `project_id` | A poll threw; the message is retried |
+| `poll_message_invalid` | poller (queue) | none | A malformed queue message was dropped |
+| `rollup_saturated` | poller (queue) | `project_id`, `templates` | The rollup hit its row limit in every window |
+| `posture_scan_crashed` | poller (queue) | `project_id` | The posture scan threw; the poll goes on |
+| `alert_email_crashed` | poller (queue) | `project_id` | Sending incident alert emails threw |
+| `usage_counted` | poller (queue) | `tenant_id`, `counted`, `failed` | Daily usage count of one workspace |
+| `usage_done` | poller (queue) | `tenant_id` | Usage count and tier update finished |
+| `usage_crashed` | poller (queue) | `tenant_id` | Usage count threw; retried |
+| `data_job` | poller (queue) | `tenant_id`, `paying`, `purged`, `connections_deleted`, `projects_deleted`, `resolved`, `incidents`, `findings`, `pollRuns`, `oauthStates` | Daily data job: retention and purge counts |
+| `data_job_done` | poller (queue) | `tenant_id` | Data job finished |
+| `data_job_crashed` | poller (queue) | `tenant_id` | Data job threw; retried |
+| `close_workspace_failed` | web | `tenant_id` | Closing a workspace failed before anything closed |
+| `billing_return_failed` | web | `tenant_id` | The Stripe return page could not sync billing |
+| `billing_sync_failed` | web | `tenant_id` | A billing sync after a change failed |
+| `stripe_webhook_rejected` | web | `reason` (`missing_signature`, `invalid_signature`) | A Stripe webhook failed its signature check |
+| `stripe_webhook_failed` | web | `stripe_event`, `type` | A verified Stripe webhook failed to process |
+| `email_hook_rejected` | web | `reason` (`malformed_payload`, `unsupported_type`, `send_failed`), `http_status` | The Send Email Hook refused a signed call or could not send (a bad signature is a `security_event`) |
+| `security_event` | web | `kind` (one of `TENANTLESS_EVENTS`: `csrf_rejected`, `email_hook_bad_signature`, `oauth_state_rejected`, `non_member`, `no_project_role`, `sign_in_failed`, `invite_token_invalid`), `method`, `reason` | A security event with no workspace to file it under (decision 044); events of a workspace go to `security_events` instead |
+| `sign_in_record_failed` | web | none | A verified sign-in could not be written to `security_events` |
+
+To add an event: add it to `OPS_EVENTS` with its fields, then a row here; the test enforces both.
 
 ## Data model
 

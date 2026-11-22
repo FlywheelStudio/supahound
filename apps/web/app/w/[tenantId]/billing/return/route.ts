@@ -1,5 +1,6 @@
 import { billingPath, completeVerification } from "@supahound/core/billing/flow";
 import { NotAMemberError, withTenantForUser } from "@supahound/core/db/user";
+import { opsLog } from "@supahound/core/logging/opsLog";
 import { tenantId as parseTenantId, type TenantId } from "@supahound/core/tenancy/scope";
 import { NextResponse, type NextRequest } from "next/server";
 import { flowDeps } from "../../../../../lib/billing";
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return go(billingPath(tenant, result === "ignored" ? "error" : result));
   } catch (err) {
     if (err instanceof NotAMemberError) return go("/app");
-    console.log(JSON.stringify({ event: "billing_return_failed", tenant_id: tenant }));
+    opsLog("billing_return_failed", { tenant_id: tenant });
     return go(billingPath(tenant, "error"));
   }
 }

@@ -1,4 +1,5 @@
 import { logSecurityEvent, recordSignIn } from "@supahound/core/db/securityEvents";
+import { opsLog } from "@supahound/core/logging/opsLog";
 import { verifiedUserId } from "@supahound/core/tenancy/scope";
 import { NextResponse, type NextRequest } from "next/server";
 import { withPool } from "../../../lib/db";
@@ -39,6 +40,6 @@ async function recordSignInFrom(supabase: Awaited<ReturnType<typeof supabaseServ
     const user = verifiedUserId(sub);
     await withPool((pool) => recordSignIn(pool, user));
   } catch {
-    console.log(JSON.stringify({ event: "sign_in_record_failed" }));
+    opsLog("sign_in_record_failed");
   }
 }
