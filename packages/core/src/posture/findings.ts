@@ -68,6 +68,69 @@ export function exposedTables(findings: PostureFinding[]): Map<string, string> {
   return out;
 }
 
+// SECURITY DEFINER functions anon can execute (issue #131). Supahound's catalog check
+// (`function_definer_exposed`, #135) and the Advisor's lint report them; either may be absent.
+export const DEFINER_EXPOSED_CHECKS: ReadonlySet<string> = new Set([
+  "function_definer_exposed",
+  "anon_security_definer_function_executable",
+]);
+
+export interface DefinerExposure {
+  check: string;
+  severity: Severity;
+}
+
+export interface AnonReadable {
+  check: string;
+  severity: Severity;
+}
+
+// Functions in `public` (the schema PostgREST serves under /rpc) that posture shows as SECURITY
+// DEFINER and executable by anon: function → the worst such finding's check and severity. A catalog
+// finding whose stored exposure names another role (authenticated only) is left out.
+export function anonDefinerFunctions(findings: PostureFinding[]): Map<string, DefinerExposure> {
+  const out = new Map<string, DefinerExposure>();
+  // dedupePosture sorts worst first, so the first finding kept per function is the worst.
+  for (const f of dedupePosture(findings)) {
+    if (f.schema !== "public" || f.object === null || !DEFINER_EXPOSED_CHECKS.has(f.check)) continue;
+    if (typeof f.evidence.exposure === "string" && f.evidence.exposure !== "anon") continue;
+    if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
+  }
+  return out;
+}
+
+const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+// Does this finding say the anon key can read every row of the table? Only what posture stores:
+// rls_disabled with an anon SELECT grant; permissive_policy whose read exposure is anon (rows
+// saved before readExposure existed: SELECT open to anon or public and the stored exposure is
+// anon); the Advisor's rls_disabled_in_public when the catalog did not report the table (dedupe
+// drops it when it did: the catalog knows the grants).
+function anonCanRead(f: PostureFinding): boolean {
+  const e = f.evidence;
+  if (f.source === "catalog" && f.check === "rls_disabled") return listOf(e.anonPrivileges).includes("SELECT");
+  if (f.source === "catalog" && f.check === "permissive_policy") {
+    if (!listOf(e.openCommands).includes("SELECT")) return false;
+    if (typeof e.readExposure === "string") return e.readExposure === "anon";
+    const roles = listOf(e.roles);
+    return e.exposure === "anon" && (roles.includes("anon") || roles.includes("public"));
+  }
+  return f.source === "advisor" && f.check === "rls_disabled_in_public";
+}
+
+// Tables in `public` whose every row the anon key can read, by the stored posture findings
+// (issue #132): table → the worst such finding's check and severity. The poller watches anon
+// reads of exactly these tables.
+export function anonReadableTables(findings: PostureFinding[]): Map<string, AnonReadable> {
+  const out = new Map<string, AnonReadable>();
+  // dedupePosture sorts worst first, so the first finding kept per table is the worst.
+  for (const f of dedupePosture(findings)) {
+    if (f.schema !== "public" || f.object === null || f.objectType !== "table" || !anonCanRead(f)) continue;
+    if (!out.has(f.object)) out.set(f.object, { check: f.check, severity: f.severity });
+  }
+  return out;
+}
+
 const RAISED: Record<Severity, Severity> = { low: "medium", medium: "high", high: "critical", critical: "critical" };
 export const POSTURE_SIGNAL = "posture_exposed";
 

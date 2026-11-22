@@ -31,6 +31,42 @@ misuse) against one project.
 - Detector 4 classifies the caller (X-Client-Info first, then user agent) and the network (bundled
   hosting-ASN list plus org-name match).
 
+## Anon reads of exposed tables (#132)
+
+- The rollup adds one `WHERE` branch: anon GET/HEAD on `/rest/v1/<table>` for the tables the
+  stored posture shows anon-readable (`posture/findings.ts`, `anonReadableTables`). Only plain
+  identifiers, quoted, sorted, at most 200 (`logs/sql.ts`, `anonReadTables`). No exposed tables:
+  the SQL is unchanged.
+- `detectors/exposedRead.ts` groups by table, ASN and caller class. Evidence: table, posture
+  check and severity, summed rows (Content-Range × hits; null when no response said), outcome,
+  ASN, caller class, network type. Rejected requests raise nothing.
+- Severity: critical-posture table: rows → high, 1,000+ rows in a poll → critical, none → low.
+  Other anon-readable tables (an intended public-read policy is common): low, 1,000+ rows → medium.
+- Known gaps: the SQL is built and audited before the poll's posture scan, so a fresh scan's tables
+  are watched from the next poll. A project whose posture has never loaded watches no anon reads
+  and does not yet say so as "unable to assess". Public lookup tables with RLS off page on any read
+  (that is what posture rates critical); the bulk threshold is untuned until live data.
+- Migration `20261122010000_detector_names.sql` widens `findings.detector` (shared with #131).
+
+## Anon calls to exposed SECURITY DEFINER functions (#131, RPC part)
+
+- `postgrest/query.ts`, `rpcFunctionFromPath`: `/rest/v1/rpc/<fn>` → the function name
+  (`tableFromPath` still returns null for RPC, so detector 2 is unchanged).
+- Posture input (`posture/findings.ts`, `anonDefinerFunctions`): public functions with the catalog
+  check `function_definer_exposed` (#135, may not exist yet) or the Advisor lint
+  `anon_security_definer_function_executable`. Either may be absent. A catalog finding whose
+  stored `exposure` names another role is skipped.
+- The rollup adds one `WHERE` branch: anon calls (any method) to those paths. Only plain identifiers,
+  quoted, sorted, at most 200 (`logs/sql.ts`, `anonRpcFunctions`). None: the SQL is unchanged.
+- `detectors/rpcExposure.ts` groups by function, ASN and caller class. Evidence: function, posture
+  check and severity, method (or `mixed`), rows (when a Content-Range came back), ASN, caller class,
+  network type. Medium, or high at 100+ calls in one poll. Rejected calls raise nothing.
+- Known gaps: RPC arguments sent as a JSON body are invisible, so a finding says which function,
+  never with what. Authenticated calls to authenticated-executable definers are not watched yet.
+  A fresh scan's functions are watched from the next poll. GraphQL (`/graphql/v1`) call counts per
+  role and anon Storage listing (`/storage/v1/object/list/<bucket>`) are still to do (#131).
+- Migration `20261122010000_detector_names.sql` widens `findings.detector` (shared with #132; detector 12, rules SH-D12-*).
+
 ## Field paths
 
 | Field | Path | Source |

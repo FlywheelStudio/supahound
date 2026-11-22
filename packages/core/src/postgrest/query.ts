@@ -37,6 +37,14 @@ export function tableFromPath(path: string): string | null {
   return name === "rpc" ? null : name;
 }
 
+// `/rest/v1/rpc/<fn>` → the function name (decoded), else null. Attacker-controlled: callers keep it
+// only through safeIdentifier before it reaches evidence.
+export function rpcFunctionFromPath(path: string): string | null {
+  const m = /^\/rest\/v1\/rpc\/([^/?#]+)\/?$/.exec(path);
+  if (!m || m[1] === undefined) return null;
+  return safeDecode(m[1]);
+}
+
 function safeDecode(s: string): string {
   try {
     return decodeURIComponent(s);

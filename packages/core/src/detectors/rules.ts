@@ -1,5 +1,7 @@
 import { POSTURE_SIGNAL } from "../posture/findings.js";
 import { MISMATCH_KINDS, type MismatchKind } from "./crossTenant.js";
+import { EXPOSED_READ_SIGNALS, type ExposedReadSignal } from "./exposedRead.js";
+import { RPC_EXPOSURE_SIGNALS, type RpcExposureSignal } from "./rpcExposure.js";
 import type { Finding } from "./finding.js";
 import { SERVICE_ROLE_SIGNALS, type ServiceRoleSignal } from "./serviceRole.js";
 
@@ -17,6 +19,7 @@ import { SERVICE_ROLE_SIGNALS, type ServiceRoleSignal } from "./serviceRole.js";
 // 2026-11-22).
 // The tactic is the one that fits how the rule sees the technique; ATT&CK may list others.
 export const ATTACK_TECHNIQUES = {
+  T1190: { name: "Exploit Public-Facing Application", tactic: { uid: "TA0001", name: "Initial Access" } },
   T1078: { name: "Valid Accounts", tactic: { uid: "TA0001", name: "Initial Access" } },
   "T1078.004": { name: "Valid Accounts: Cloud Accounts", tactic: { uid: "TA0001", name: "Initial Access" } },
   T1213: { name: "Data from Information Repositories", tactic: { uid: "TA0009", name: "Collection" } },
@@ -60,11 +63,15 @@ export type Detector = Finding["detector"];
 export interface DetectorSignals {
   cross_tenant: MismatchKind | typeof POSTURE_SIGNAL;
   service_role_misuse: ServiceRoleSignal;
+  exposed_read: ExposedReadSignal;
+  rpc_exposure: RpcExposureSignal;
 }
 
 export const DETECTOR_SIGNALS: { readonly [D in Detector]: readonly DetectorSignals[D][] } = {
   cross_tenant: [...MISMATCH_KINDS, POSTURE_SIGNAL],
   service_role_misuse: SERVICE_ROLE_SIGNALS,
+  exposed_read: EXPOSED_READ_SIGNALS,
+  rpc_exposure: RPC_EXPOSURE_SIGNALS,
 };
 
 const RULES = {
@@ -168,6 +175,53 @@ const RULES = {
       owaspApi: ["API2:2023"],
       confidence: "low",
       falsePositives: "A deploy to a new cloud provider or region.",
+    },
+  },
+  // Detector 11: anon-key reads of a table the posture scan shows open to anon (issue #132).
+  // The PRD and roadmap number detectors 1 to 10, so the baseline-free additions start at 11.
+  exposed_read: {
+    exposed_table_read: {
+      id: "SH-D11-001",
+      title: "Anon key read a table that posture shows open to anon",
+      attack: ["T1190", "T1213"],
+      owaspApi: ["API8:2023", "API1:2023"],
+      confidence: "medium",
+      falsePositives: "A table meant to be public, such as a product catalog, with RLS off or a read-all policy.",
+    },
+    rows_returned: {
+      id: "SH-D11-002",
+      title: "Anon key got rows back from a table open to anon",
+      attack: ["T1190", "T1213"],
+      owaspApi: ["API8:2023", "API1:2023"],
+      confidence: "medium",
+      falsePositives: "Public lookup tables read by the app's own anonymous visitors.",
+    },
+    bulk_read: {
+      id: "SH-D11-003",
+      title: "Anon key read 1,000 or more rows from a table open to anon in one poll",
+      attack: ["T1190", "T1213"],
+      owaspApi: ["API8:2023", "API1:2023"],
+      confidence: "high",
+      falsePositives: "A public data export or a large public catalog fetched in one page.",
+    },
+  },
+  // Detector 12: anon calls to a SECURITY DEFINER function posture shows anon-executable (issue #131).
+  rpc_exposure: {
+    definer_rpc_call: {
+      id: "SH-D12-001",
+      title: "Anon key called a SECURITY DEFINER function that anon may execute",
+      attack: ["T1190"],
+      owaspApi: ["API5:2023", "API8:2023"],
+      confidence: "medium",
+      falsePositives: "A function deliberately exposed to signed-out users, such as a public counter or sign-up helper.",
+    },
+    rpc_burst: {
+      id: "SH-D12-002",
+      title: "Anon key called such a function 100 times or more in one poll",
+      attack: ["T1190"],
+      owaspApi: ["API5:2023", "API8:2023"],
+      confidence: "high",
+      falsePositives: "A busy public endpoint that is meant to run as its owner.",
     },
   },
 } as const satisfies { [D in Detector]: Record<DetectorSignals[D], RuleSpec> };
