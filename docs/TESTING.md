@@ -32,8 +32,9 @@ fails if any suite reports skipped tests.
 
 `pnpm e2e` runs `vite build`, then Playwright. The global setup (`apps/web/e2e/support/globalSetup.ts`) starts:
 
-1. **Postgres 17 on TCP.** The Worker reaches it through the local Hyperdrive binding
-   (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP`).
+1. **Postgres 17 on TCP.** The Worker reaches it through the local Hyperdrive bindings
+   (`CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP`, and `_HYPERDRIVE_SCHEDULER` for
+   the cron's heartbeat, which E2E does not fire; issue #159).
 2. **A fake Supabase Auth** (`support/fakeAuth.ts`). It issues ES256 tokens, and `getClaims()` verifies
    them against its JWKS endpoint, as with Supabase's asymmetric keys. On `/otp` it calls our Send
    Email Hook with a real Standard Webhooks signature and records the HTTP status.
@@ -73,17 +74,34 @@ each of the three byte alignments. On 2026-11-22, with `gitleaks dir` over nine 
 `service_role` keys only (the default `jwt` rule fired on all nine); with one alignment removed it
 missed one key; the real history had no findings.
 
+`supabase-personal-access-token` also matches scoped `sbp_fc` tokens (#161), with the same pattern
+as the scanner (`packages/core/src/scan/secrets.ts`). On 2026-11-22, with `gitleaks dir` over
+random planted tokens generated in a scratch directory (never committed): it fired on a scoped,
+a classic and an OAuth token, and not on a too-short `sbp_fc` body; with the previous rule a scoped
+token in a string literal had no finding at all (in a `TOKEN=` line only the default
+`generic-api-key` rule caught it); the real history had no findings.
+
 ### Workflow lint and dependency scan
 
 - `workflows` (zizmor 1.32.0, pinned by SHA-256) audits `.github/workflows` and fails on any
   high-severity finding. Run it locally with `zizmor --min-severity high .github/workflows`
   (`pipx install zizmor`). On 2026-11-22 it passed; removing the `ignore` comments in `cla.yml`
-  failed it with two `dangerous-triggers` errors.
+  failed it with two `dangerous-triggers` errors. It passed again after `cla.yml` moved from the
+  archived CLA Assistant Lite to `actions/github-script` (#161), with the same two errors when the
+  ignores are removed.
 - `osv` (osv-scanner 2.7.1, pinned by SHA-256) scans `pnpm-lock.yaml` and fails on any known
   vulnerability that `osv-scanner.toml` does not list with a reason and an expiry. Run it locally
   with `osv-scanner scan source --lockfile pnpm-lock.yaml`. On 2026-11-22 it found two (fflate via
-  satori, minimatch via ESLint), both unreachable and listed until 2027-01-31; without the config it
-  exits non-zero.
+  satori, minimatch via ESLint); #161 fixed both (ESLint 10.15 and typescript-eslint 8.73 take
+  minimatch 11, and a pnpm override in `package.json` moves fflate to 0.7.5), so the config has no
+  entries and the scan finds nothing; the previous lockfile still fails it with both.
+- `cla.yml`'s script has no test in the repo (it runs only on GitHub). On 2026-11-22 (#161) it ran
+  against a mocked `github` client: unsigned author fails and gets one comment (updated, never
+  duplicated); allowlisted and signed authors (by user ID) pass with no comment; a sign comment
+  from a non-author records nothing; an author's sign comment writes the old Lite record shape,
+  flips the comment and re-runs the failed PR run; a write conflict retries and keeps the other
+  signature; an unlinked commit email fails. Dropping the allowlist, the signature lookup or the
+  re-run each failed it.
 - `scorecard.yml` (OpenSSF Scorecard) is a grade, not a gate: it files code scanning alerts.
 
 ### Self-hosting checks
@@ -133,9 +151,11 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-D12 | REST traffic whose logs carry no user or key role reads both detectors as "unable to assess", not clean (#130) |
 | UAT-D13 | Anon-key reads of a table the posture scan shows open raise a paging incident from the next poll (#132) |
 | UAT-D14 | A burst of anon calls to a SECURITY DEFINER function anon may execute raises a paging incident from the next poll (#131) |
-| UAT-D15 | GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role, then show and count (#157) |
-| UAT-D16 | Anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed (#157) |
-| UAT-D17 | Signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page (#157) |
+| UAT-D15 | A table marked intentionally public is not watched and raises nothing; unmarking restores the alert (#160) |
+| UAT-D16 | The project's RPC burst threshold decides when anon calls to an exposed function page (#160) |
+| UAT-D17 | GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role, then show and count (#157) |
+| UAT-D18 | Anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed (#157) |
+| UAT-D19 | Signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page (#157) |
 
 ### Web journey (automated, `apps/web/e2e/specs/journey.uat.spec.ts`)
 
@@ -187,6 +207,8 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W48 | A project Viewer sees the plan and status but no portal button and no invoices; a replayed owner portal form is refused and opens no portal session |
 | UAT-W49 | The owner opens the Billing Portal from the plan page; the portal returns to that page |
 | UAT-W50 | Remove → the projects page, project dashboard, workspace billing and Plan & billing all say "stays active until <period end> and is deleted on <+7 days> unless you keep it"; Keep project on the plan page cancels the removal and resumes the same subscription (decision 042) |
+| UAT-W51 | An owner marks a table intentionally public on the Posture page: its read finding reads "Accepted (intentionally public)" and leaves the counts, the change is audited, a viewer gets no buttons and a replayed owner form is refused; Unmark restores the open finding (`posture.uat.spec.ts`, decision 045) |
+| UAT-W52 | The owner sets the RPC burst threshold next to email alerts; it is audited; an out-of-range value and a viewer's replayed form are refused by the server (`alerts.uat.spec.ts`, decision 045) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
@@ -253,6 +275,16 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | Mailgun needs its name (#140) | The Mailgun rule drops the `mailgun` context | 1 unit test fails |
 | Scoped Supabase tokens match (#140) | The access-token rule drops the `sbp_fc` branch | 2 unit tests fail |
 | Four in five env lines are KEY=VALUE (#74) | Ratio back to one in two | 1 unit test fails |
+| Only a Supabase project the site names is in scope (#139) | `supabaseHostInScope` drops the named-refs check | 3 unit tests fail |
+| Only the PostgREST root is requested (#139) | `supabaseRestRootUrl` drops the path and query check | 4 unit tests fail |
+| The root's redirect is never followed (#139) | `supabaseRestRootGet` keeps the caller's `maxRedirects` | 1 unit test fails |
+| The key is never stored (#139) | The finding's evidence holds the key | 1 unit test fails |
+| Names pass `safeName` (#139) | `exposedNames` keeps names unchecked | 1 unit test fails |
+| The key must be for the named project (#139) | The collector pairs an anon key with every URL, ignoring its `ref` | 3 unit tests fail |
+| At most two projects per scan (#139) | The probe drops the cap | 1 unit test fails |
+| An oversized document is not parsed (#139) | The probe parses a truncated body | 1 unit test fails |
+| Exposure names on the page are shape-checked (#139) | `evidenceItems` drops the name check | 1 web unit test fails |
+| Posture link only for the same ref (#139) | `exposureFollowUp` links to any project | 1 web unit test fails |
 | The billing gate (decision 028) | `withPaidTenantForUser` stops throwing for unpaid tenants | 10 Postgres billing tests fail |
 | The web app uses the gate (decision 028) | `paidTenant` passes billing "off" | UAT-B1 fails |
 | Staff exemption ends with the owners (decision 029) | The membership trigger never fires | 4 Postgres exemption tests fail |
@@ -416,15 +448,20 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | RPC: authenticated-only definers are not watched (#131) | `anonDefinerFunctions` ignores the stored exposure | 1 unit test fails |
 | RPC: the poller passes posture to the detector (#131) | `pollProject` drops `anonDefiners` from the scan | UAT-D14 fails |
 | RPC: findings may name the new detector (#131) | Migration `20261122010000` left out | UAT-D14 fails |
-| Storage: the rollup fetches anon list calls (#157) | `edgeRollupSql` drops the Storage branch | 1 unit test and UAT-D16 fail |
-| Storage: only posture-named buckets are named (#157) | `detectStorageListing` keeps the path's bucket | 2 unit tests and UAT-D16 fail |
-| Storage: the poller passes posture to the detector (#157) | `pollProject` drops `listableBuckets` from the scan | UAT-D16 fails |
-| Storage: findings may name the new detector (#157) | Migration `20261122160000` leaves out `storage_listing` | UAT-D16 fails |
-| Signed-in definer calls stay low (#157) | The authenticated branch rates medium | 2 unit tests and UAT-D17 fail |
-| Signed-in definer calls never stack (#157) | Actor `user:<subject>` instead of the function | 2 unit tests and UAT-D17 fail |
-| Signed-in definer calls: the poller passes posture (#157) | `pollProject` drops `authenticatedDefiners` from the scan | UAT-D17 fails |
-| GraphQL gate hides without traffic (#157) | `gateGraphql` shows every finding | 3 unit tests, 1 Postgres test and UAT-D15 fail |
-| GraphQL gate: the poll stores its counts (#157) | `pollProject` saves `graphqlCalls: null` | UAT-D15 fails |
-| GraphQL gate: the overview counts what the page shows (#157) | `postureSummaries` counts ungated findings | 1 Postgres test and UAT-D15 fail |
+| Marked tables are not watched (#160) | `pollProject` passes an empty set to `withoutPublicTables` | UAT-D15 fails |
+| The project's burst threshold reaches the detector (#160) | `pollProject` drops `rpcBurstHits` from the scan | UAT-D16 fails |
+| A mark accepts reads only (#160) | `acceptedAsPublic` accepts a policy with any open command | 1 unit test fails |
+| Only Owners and Admins mark, in RLS (#160) | The migration's INSERT/DELETE policies also allow `editor` | 1 Postgres test fails |
+| The server checks the role before a mark (#160) | `markPublicAction` skips `canMarkPublic` (RLS still refuses) | UAT-W51 fails (no role notice) |
+| Storage: the rollup fetches anon list calls (#157) | `edgeRollupSql` drops the Storage branch | 1 unit test and UAT-D18 fail |
+| Storage: only posture-named buckets are named (#157) | `detectStorageListing` keeps the path's bucket | 2 unit tests and UAT-D18 fail |
+| Storage: the poller passes posture to the detector (#157) | `pollProject` drops `listableBuckets` from the scan | UAT-D18 fails |
+| Storage: findings may name the new detector (#157) | Migration `20261122160000` leaves out `storage_listing` | UAT-D18 fails |
+| Signed-in definer calls stay low (#157) | The authenticated branch rates medium | 2 unit tests and UAT-D19 fail |
+| Signed-in definer calls never stack (#157) | Actor `user:<subject>` instead of the function | 2 unit tests and UAT-D19 fail |
+| Signed-in definer calls: the poller passes posture (#157) | `pollProject` drops `authenticatedDefiners` from the scan | UAT-D19 fails |
+| GraphQL gate hides without traffic (#157) | `gateGraphql` shows every finding | 3 unit tests, 1 Postgres test and UAT-D17 fail |
+| GraphQL gate: the poll stores its counts (#157) | `pollProject` saves `graphqlCalls: null` | UAT-D17 fails |
+| GraphQL gate: the overview counts what the page shows (#157) | `postureSummaries` counts ungated findings | 1 Postgres test and UAT-D17 fail |
 
 Older mutation checks (RLS, vault, OAuth, ZDR guard, windows) are listed in each WIP doc's build log.

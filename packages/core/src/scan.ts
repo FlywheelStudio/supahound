@@ -20,6 +20,8 @@ export interface ScanContext extends ServiceRoleContext {
   authenticatedDefiners?: ReadonlyMap<string, DefinerExposure>;
   // Buckets posture shows anyone may list (issue #157). Anon listings of other buckets stay low.
   listableBuckets?: ReadonlySet<string>;
+  // Detector 12's paging threshold for this project (decision 045). Absent: RPC_BURST_HITS.
+  rpcBurstHits?: number;
 }
 
 // Runs the baseline-free detectors over one poll. Scoring, deduplication across polls and
@@ -31,7 +33,7 @@ export function scan(events: EdgeEvent[], ctx: ScanContext): Finding[] {
     if (f) findings.push(f);
   }
   findings.push(...detectServiceRoleMisuse(events, ctx));
-  findings.push(...detectRpcExposure(events, ctx.anonDefiners ?? new Map(), ctx.authenticatedDefiners ?? new Map()));
+  findings.push(...detectRpcExposure(events, ctx.anonDefiners ?? new Map(), ctx.authenticatedDefiners ?? new Map(), ctx.rpcBurstHits));
   findings.push(...detectStorageListing(events, ctx.listableBuckets ?? new Set()));
   findings.push(...detectExposedReads(events, ctx.anonReadable ?? new Map()));
   return findings.sort(

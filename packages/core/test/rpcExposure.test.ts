@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { actorAlias, detectorLabel, signalLabel } from "../src/alerts/email.js";
-import { detectRpcExposure, RPC_BURST_HITS } from "../src/detectors/rpcExposure.js";
+import { detectRpcExposure, isRpcBurstHits, RPC_BURST_HITS, RPC_BURST_MAX, RPC_BURST_MIN } from "../src/detectors/rpcExposure.js";
 import { ServiceRoleNetworks } from "../src/detectors/serviceRole.js";
 import { buildFeatures } from "../src/explainer/features.js";
 import { templateExplanation } from "../src/explainer/template.js";
@@ -130,6 +130,37 @@ describe("detectRpcExposure", () => {
     const ctx = { scope: SCOPE, networks: new ServiceRoleNetworks(), ownership: {} };
     expect(scan([anonCall()], ctx)).toEqual([]);
     expect(scan([anonCall()], { ...ctx, anonDefiners: DEFINERS }).map((f) => f.detector)).toEqual(["rpc_exposure"]);
+  });
+});
+
+describe("the project's RPC burst threshold (issue #160, decision 045)", () => {
+  const burst = (hits: number, threshold?: number) => detectRpcExposure([anonCall({ hits })], DEFINERS, new Map(), threshold)[0]!;
+
+  it("defaults to RPC_BURST_HITS and records the threshold in the evidence", () => {
+    expect(RPC_BURST_HITS).toBe(100);
+    expect(burst(99)).toMatchObject({ severity: "medium", signals: ["definer_rpc_call"], evidence: { burstThreshold: 100 } });
+    expect(burst(100)).toMatchObject({ severity: "high", signals: ["definer_rpc_call", "rpc_burst"], evidence: { burstThreshold: 100 } });
+  });
+
+  it("pages at the project's own threshold, lower or higher", () => {
+    expect(burst(10, 10)).toMatchObject({ severity: "high", signals: ["definer_rpc_call", "rpc_burst"], evidence: { burstThreshold: 10 } });
+    expect(burst(9, 10)).toMatchObject({ severity: "medium", signals: ["definer_rpc_call"] });
+    expect(burst(250, 300)).toMatchObject({ severity: "medium", signals: ["definer_rpc_call"], evidence: { burstThreshold: 300 } });
+    expect(burst(10_000, 10_000)).toMatchObject({ severity: "high" });
+  });
+
+  it("falls back to the default for a value outside 10 to 10,000, never silencing the burst", () => {
+    for (const bad of [0, 9, 10_001, 1e9, 50.5, Number.NaN, Infinity]) {
+      expect(burst(100, bad), String(bad)).toMatchObject({ severity: "high", evidence: { burstThreshold: RPC_BURST_HITS } });
+    }
+    expect([isRpcBurstHits(RPC_BURST_MIN), isRpcBurstHits(RPC_BURST_MAX), isRpcBurstHits(9), isRpcBurstHits("100")]).toEqual([true, true, false, false]);
+  });
+
+  it("is passed through scan()", () => {
+    const ctx = { scope: SCOPE, networks: new ServiceRoleNetworks(), ownership: {}, anonDefiners: DEFINERS };
+    expect(scan([anonCall({ hits: 150 })], { ...ctx, rpcBurstHits: 200 })[0]).toMatchObject({ severity: "medium" });
+    expect(scan([anonCall({ hits: 150 })], { ...ctx, rpcBurstHits: 150 })[0]).toMatchObject({ severity: "high" });
+    expect(scan([anonCall({ hits: 150 })], ctx)[0]).toMatchObject({ severity: "high" });
   });
 });
 

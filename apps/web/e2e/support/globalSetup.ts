@@ -97,6 +97,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       env: {
         ...process.env,
         CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_APP: pg.appUrl,
+        CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE_SCHEDULER: pg.schedulerUrl,
         WRANGLER_SEND_METRICS: "false",
       },
       stdio: ["ignore", "pipe", "pipe"],

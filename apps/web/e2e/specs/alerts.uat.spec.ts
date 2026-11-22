@@ -92,4 +92,68 @@ test.describe("UAT: incident alert email", () => {
     expect(level).toEqual([{ email_alerts: "low" }]);
     await member.close();
   });
+
+  test("UAT-W52 the owner sets the RPC burst threshold next to email alerts; out-of-range values and a viewer's replayed form are refused", async ({ page, browser }) => {
+    const email = uniqueEmail("w52");
+    await signIn(page, email);
+    await page.getByLabel("Workspace name").fill("w52 Co");
+    await createPaidWorkspace(page);
+    const tenant = tenantFromUrl(page);
+    const token = `e2e-w52-${tenant}`;
+    await setSupabaseProjects(token, [{ ref: SHOP, name: "Shop" }]);
+    await seedConnection(tenant, token);
+    await page.goto(`/w/${tenant}/projects`);
+    await page.getByLabel(/Shop/).check();
+    await page.getByRole("button", { name: "Watch selected projects" }).click();
+    await expect(page.getByRole("status")).toHaveText(/Watching 1 new project/);
+    const shopId = (await adminQuery<{ id: string }>("SELECT id FROM supahound.projects WHERE tenant_id = $1", [tenant]))[0]!.id;
+    const settings = `/w/${tenant}/p/${shopId}/settings/notifications`;
+    const threshold = () => adminQuery<{ rpc_burst_hits: number }>("SELECT rpc_burst_hits FROM supahound.projects WHERE tenant_id = $1", [tenant]);
+
+    await page.goto(settings);
+    const input = page.getByLabel("RPC burst threshold for Shop");
+    await expect(input).toHaveValue("100");
+    const ownerForm = await page.locator("form", { has: input }).evaluate((f) => f.outerHTML);
+    await settled(page);
+    await input.fill("250");
+    await page.getByRole("button", { name: "Save threshold" }).click();
+    await expect(page.getByRole("status")).toHaveText("RPC burst threshold saved: 250 calls.");
+    await expect(page.getByLabel("RPC burst threshold for Shop")).toHaveValue("250");
+    expect(await threshold()).toEqual([{ rpc_burst_hits: 250 }]);
+    const audit = await adminQuery<{ detail: Record<string, unknown> }>(
+      "SELECT detail FROM supahound.audit_log WHERE tenant_id = $1 AND action = 'detection_setting'", [tenant]);
+    expect(audit.map((a) => a.detail)).toMatchObject([{ setting: "rpc_burst_hits", from: 100, to: 250 }]);
+
+    // The browser's min/max are a convenience: the server checks the range itself.
+    await settled(page);
+    await page.evaluate((html) => {
+      document.body.insertAdjacentHTML("beforeend", html);
+      const form = document.body.lastElementChild as HTMLFormElement;
+      form.querySelector<HTMLInputElement>("input[name=hits]")!.value = "5";
+      form.noValidate = true;
+      form.requestSubmit();
+    }, ownerForm);
+    await expect(page).toHaveURL(/error=burst_range/);
+    await expect(page.getByRole("status")).toHaveText(/Enter a whole number of calls from 10 to 10,000/);
+    expect(await threshold()).toEqual([{ rpc_burst_hits: 250 }]);
+
+    const member = await browser.newPage();
+    const memberEmail = uniqueEmail("w52-member");
+    await signIn(member, memberEmail);
+    await addViewer(tenant, await userIdFor(memberEmail));
+    await member.goto(settings);
+    await expect(member.getByText("RPC burst threshold: 250 calls.")).toBeVisible();
+    await expect(member.getByLabel("RPC burst threshold for Shop")).toHaveCount(0);
+    await settled(member);
+    await member.evaluate((html) => {
+      document.body.insertAdjacentHTML("beforeend", html);
+      const form = document.body.lastElementChild as HTMLFormElement;
+      form.querySelector<HTMLInputElement>("input[name=hits]")!.value = "10000";
+      form.requestSubmit();
+    }, ownerForm);
+    await expect(member).toHaveURL(/error=burst_role/);
+    await expect(member.getByRole("status")).toHaveText(/Only the project's owners, admins and editors can change the RPC burst threshold/);
+    expect(await threshold()).toEqual([{ rpc_burst_hits: 250 }]);
+    await member.close();
+  });
 });

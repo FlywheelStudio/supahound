@@ -19,8 +19,15 @@ import { safeIdentifier, type Finding, type Severity } from "./finding.js";
 // bodies, and so RPC arguments sent as JSON, are not in edge logs: the finding says which function,
 // never with what.
 
-// Calls in one poll from one network and caller class that read as automation, not an app.
+// Calls in one poll from one network and caller class that read as automation, not an app. The
+// default; each project sets its own between RPC_BURST_MIN and RPC_BURST_MAX (decision 045).
 export const RPC_BURST_HITS = 100;
+export const RPC_BURST_MIN = 10;
+export const RPC_BURST_MAX = 10_000;
+
+export function isRpcBurstHits(n: unknown): n is number {
+  return typeof n === "number" && Number.isInteger(n) && n >= RPC_BURST_MIN && n <= RPC_BURST_MAX;
+}
 
 // The signals this detector emits; each has a rule in rules.ts.
 export const RPC_EXPOSURE_SIGNALS = ["definer_rpc_call", "rpc_burst", "authenticated_definer_call"] as const;
@@ -47,13 +54,17 @@ interface Group {
 }
 
 // One finding per function, actor, network (ASN) and caller class in this poll. Rejected calls
-// (4xx/5xx) ran nothing and raise nothing.
+// (4xx/5xx) ran nothing and raise nothing. burstHits is the project's paging threshold for anon
+// calls (decision 045); an out-of-range value falls back to the default, so a bad setting never
+// silences the burst.
 export function detectRpcExposure(
   events: EdgeEvent[],
   definers: ReadonlyMap<string, DefinerExposure>,
   authenticatedDefiners: ReadonlyMap<string, DefinerExposure> = new Map(),
+  burstHits: number = RPC_BURST_HITS,
 ): Finding[] {
   if (definers.size === 0 && authenticatedDefiners.size === 0) return [];
+  const burst = isRpcBurstHits(burstHits) ? burstHits : RPC_BURST_HITS;
   const groups = new Map<string, Group>();
 
   for (const event of events) {
@@ -96,7 +107,7 @@ export function detectRpcExposure(
     } else {
       signals.push("definer_rpc_call");
       severity = "medium";
-      if (g.hits >= RPC_BURST_HITS) {
+      if (g.hits >= burst) {
         signals.push("rpc_burst");
         severity = "high";
       }
@@ -119,6 +130,8 @@ export function detectRpcExposure(
         rowsReturned: g.rows,
         // Signed-in calls: how many users made them. Null for anon calls.
         users: g.role === "authenticated" ? g.users.size : null,
+        // The project's paging threshold for this poll, a count (decision 045).
+        burstThreshold: burst,
         asn: g.asn,
         callerClass: g.callerClass,
         networkType: g.networkType,

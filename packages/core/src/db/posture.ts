@@ -6,6 +6,7 @@ import {
 } from "../posture/findings.js";
 import type { PostureFinding, PostureSource, SourceStatus } from "../posture/types.js";
 import { projectId, type ProjectId } from "../tenancy/scope.js";
+import { publicTablesByProject } from "./detectionSettings.js";
 import type { TenantTx } from "./tenant.js";
 
 // Posture scan storage (issue #11, decision 038). Every statement repeats tenant_id, as in
@@ -242,7 +243,8 @@ export async function postureAnonDefinerFunctions(tx: TenantTx, project: Project
   return anonDefinerFunctions(rows.map(toFinding));
 }
 
-// Tables whose every row the anon key can read, by the stored findings (issue #132).
+// Tables whose every row the anon key can read, by the stored findings (issue #132). Tables marked
+// intentionally public are still here: the poller drops them (withoutPublicTables, decision 045).
 export async function postureAnonReadableTables(tx: TenantTx, project: ProjectId): Promise<Map<string, AnonReadable>> {
   const rows = await tx.query<FindingRow>(
     `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type, evidence, found_at
@@ -268,21 +270,25 @@ export async function postureSummaries(tx: TenantTx): Promise<Map<ProjectId, Pos
   );
   const findings = await tx.query<FindingRow>(
     // Evidence: only the keys dedupePosture reads (a policy or a function's arguments) and the
-    // GraphQL gate reads (exposure, roles), so the overview counts what the Posture page shows.
+    // ones acceptedAsPublic reads (grants and open commands) and the GraphQL gate reads (exposure,
+    // roles), so the overview counts what the Posture page shows.
     `SELECT id, project_id, source, check_id, severity, schema_name, object_name, object_type,
-            jsonb_strip_nulls(jsonb_build_object('policy', evidence->'policy', 'arguments', evidence->'arguments',
-              'exposure', evidence->'exposure', 'roles', evidence->'roles')) AS evidence, found_at
+            jsonb_strip_nulls(jsonb_build_object(
+              'policy', evidence->'policy', 'arguments', evidence->'arguments',
+              'anonPrivileges', evidence->'anonPrivileges', 'authenticatedPrivileges', evidence->'authenticatedPrivileges',
+              'openCommands', evidence->'openCommands', 'exposure', evidence->'exposure', 'roles', evidence->'roles')) AS evidence, found_at
      FROM supahound.posture_findings WHERE tenant_id = $1`,
     [tx.tenantId],
   );
   const activity = await graphqlActivityByProject(tx);
+  const marks = await publicTablesByProject(tx);
   const byProject = new Map<string, StoredPostureFinding[]>();
   for (const r of findings) byProject.set(r.project_id, [...(byProject.get(r.project_id) ?? []), toFinding(r)]);
   const out = new Map<ProjectId, PostureSummary>();
   for (const s of scans) {
     const id = projectId(s.project_id);
     const shown = gateGraphql(byProject.get(s.project_id) ?? [], activity.get(s.project_id) ?? NO_GRAPHQL_ACTIVITY).shown;
-    out.set(id, { projectId: id, scan: toScan(s), counts: countBySeverity(shown) });
+    out.set(id, { projectId: id, scan: toScan(s), counts: countBySeverity(shown, marks.get(s.project_id)) });
   }
   return out;
 }

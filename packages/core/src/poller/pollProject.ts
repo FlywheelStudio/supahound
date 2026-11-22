@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { alertDue, renderIncidentEmail, type RenderedEmail } from "../alerts/email.js";
+import { alertDue, dashboardOnly, renderIncidentEmail, type RenderedEmail } from "../alerts/email.js";
 import type { Pool } from "pg";
 import * as repo from "../db/repo.js";
 import { withTenant } from "../db/tenant.js";
@@ -19,7 +19,8 @@ import { POSTURE_SQL } from "../config/posture.js";
 import * as postureRepo from "../db/posture.js";
 import { AdvisorApiError, advisorFindings, type AdvisorLint } from "../posture/advisor.js";
 import { CatalogError, catalogFindings, parseCatalogRows } from "../posture/catalog.js";
-import { raiseForPosture } from "../posture/findings.js";
+import { raiseForPosture, withoutPublicTables } from "../posture/findings.js";
+import { publicTableSet } from "../db/detectionSettings.js";
 import type { SourceStatus } from "../posture/types.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
@@ -307,7 +308,11 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     // Anon reads are fetched only for the tables the stored posture shows readable by anon (#132),
     // and anon RPC calls only for the functions it shows as SECURITY DEFINER and anon-executable
     // (#131). A scan that runs later in this poll takes effect from the next poll: the SQL is audited here.
-    const anonReadable = await postureRepo.postureAnonReadableTables(tx, scope.projectId);
+    // Tables an Owner or Admin marked intentionally public are not watched at all (decision 045).
+    const anonReadable = withoutPublicTables(
+      await postureRepo.postureAnonReadableTables(tx, scope.projectId),
+      await publicTableSet(tx, scope.projectId),
+    );
     const anonDefiners = await postureRepo.postureAnonDefinerFunctions(tx, scope.projectId);
     // Signed-in definer calls and anon Storage listings need no SQL of their own (#157): the
     // rollup already holds every REST call with a user subject, and every anon list call.
@@ -419,6 +424,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     anonDefiners: loaded.anonDefiners,
     authenticatedDefiners: loaded.authenticatedDefiners,
     listableBuckets: loaded.listableBuckets,
+    rpcBurstHits: project.rpcBurstHits,
   }), exposed);
   const openIncidents: Incident[] = loaded.open.map((i) => ({
     ...i, scope, status: "open", detectors: i.detectors as Incident["detectors"],
@@ -435,7 +441,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   for (const [i, u] of updates.entries()) {
     const prev = u.incident.id ? before.get(u.incident.id) : undefined;
     const changed = !prev || prev.severity !== u.incident.severity;
-    const willEmail = changed && alertDue(u.incident.severity, prev?.alertedSeverity ?? null, project.emailAlerts);
+    const willEmail = changed && !dashboardOnly(u.incident) && alertDue(u.incident.severity, prev?.alertedSeverity ?? null, project.emailAlerts);
     if (!u.notify && !willEmail) continue;
     const features = buildFeatures(u.incident, u.findings);
     try {
@@ -519,12 +525,15 @@ export async function sendPendingAlerts(scope: ProjectScope, deps: PollDeps): Pr
       if (!project) return null;
       return { project, pending: await repo.pendingAlerts(tx, scope.projectId), recipients: await repo.alertRecipients(tx, scope.projectId) };
     });
-    if (!loaded || loaded.pending.length === 0) return 0;
+    if (!loaded) return 0;
+    // Dashboard-only incidents (low signed-in definer calls, unflagged anon bucket listings) never email.
+    const pending = loaded.pending.filter((a) => !dashboardOnly(a));
+    if (pending.length === 0) return 0;
 
     const base = new URL(`/w/${scope.tenantId}`, alerts.appUrl).toString();
     const settingsUrl = new URL(`/w/${scope.tenantId}/projects`, alerts.appUrl).toString();
     let emailed = 0;
-    for (const a of loaded.pending.slice(0, MAX_ALERTS_PER_POLL)) {
+    for (const a of pending.slice(0, MAX_ALERTS_PER_POLL)) {
       const rendered = renderIncidentEmail({
         projectName: loaded.project.name,
         incident: a,

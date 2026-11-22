@@ -1,7 +1,8 @@
 import { needsEnterprise, PRICE_LABEL } from "@supahound/core/billing/policy";
 import { getPostureScan, listPostureFindings } from "@supahound/core/db/posture";
 import { listOpenIncidents } from "@supahound/core/db/repo";
-import { countBySeverity } from "@supahound/core/posture/findings";
+import { publicTableSet } from "@supahound/core/db/detectionSettings";
+import { acceptedAsPublic, countBySeverity } from "@supahound/core/posture/findings";
 import { checkTitle } from "@supahound/core/posture/fix";
 import Link from "../../../../../components/NavLink";
 import { Notice, SeverityBadge, Shell } from "../../../../../components/Shell";
@@ -37,8 +38,11 @@ export default async function ProjectDashboard({
     incidents: await listOpenIncidents(tx, 5, p.id),
     scan: await getPostureScan(tx, p.id),
     posture: await listPostureFindings(tx, p.id),
+    publicTables: await publicTableSet(tx, p.id),
   }));
   const posture = postureState(d.extra.scan);
+  // Findings accepted by an intentionally public mark (decision 045) are not open: not counted, not listed here.
+  const openPosture = d.extra.posture.filter((f) => !acceptedAsPublic(f, d.extra.publicTables));
   const joined = (await searchParams).joined === "1";
   const { tenant, project: p } = d;
   const billingOn = mode() !== "off";
@@ -100,12 +104,12 @@ export default async function ProjectDashboard({
         <div className="rounded-md border border-slate-200 bg-white">
           <p className={`px-4 py-3 text-sm ${posture.kind === "unable" ? "text-amber-900" : "text-slate-700"}`}>
             {stateText(posture)}
-            {posture.kind === "scanned" && ` ${countsText(countBySeverity(d.extra.posture))}.`}
+            {posture.kind === "scanned" && ` ${countsText(countBySeverity(d.extra.posture, d.extra.publicTables))}.`}
           </p>
           {sourceNotes(d.extra.scan).map((n) => <p key={n} className="px-4 pb-3 text-sm text-amber-900">{n}</p>)}
-          {d.extra.posture.length > 0 && (
+          {openPosture.length > 0 && (
             <ul className="divide-y divide-slate-200 border-t border-slate-200">
-              {d.extra.posture.slice(0, 3).map((f) => (
+              {openPosture.slice(0, 3).map((f) => (
                 <li key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <SeverityBadge severity={f.severity} />
                   <span className="text-sm font-medium">{checkTitle(f)}</span>

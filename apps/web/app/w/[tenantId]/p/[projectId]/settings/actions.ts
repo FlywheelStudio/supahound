@@ -1,11 +1,13 @@
 "use server";
 
+import { setRpcBurstHits } from "@supahound/core/db/detectionSettings";
 import { setEmailAlerts } from "@supahound/core/db/repo";
 import { linkDomain, unlinkDomain } from "@supahound/core/db/scanDomains";
 import type { ProjectId, TenantId } from "@supahound/core/tenancy/scope";
 import { redirect } from "next/navigation";
 import { handleAlertSetting } from "../../../../../../lib/alerts";
 import { withPool } from "../../../../../../lib/db";
+import { canSetBurst, handleBurstSetting } from "../../../../../../lib/detectionSettings";
 import { can } from "../../../../../../lib/people";
 import { paidProject, parseIds, projectActionError } from "../../../../../../lib/projectPage";
 import { canLinkDomains, handleLink, handleUnlink } from "../../../../../../lib/scanDomains";
@@ -26,6 +28,28 @@ export async function setEmailAlertsAction(formData: FormData): Promise<void> {
         paidProject(pool, user.id, tenant, project, async (tx, role) => {
           const allowed = can(role, "edit_settings");
           return { allowed, updated: allowed ? await setEmailAlerts(tx, project, level) : false };
+        }),
+    }),
+  ).catch(projectActionError);
+  redirect(path);
+}
+
+// Detector 12's RPC burst threshold (issue #160, decision 045): the project's owners, admins and
+// editors, as for email alerts. The role is checked in the same transaction as the write, RLS
+// refuses the update for any other role, and the change is audited. Logic and tests:
+// lib/detectionSettings.ts.
+export async function setRpcBurstAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const { tenant, project }: { tenant: TenantId; project: ProjectId } = parseIds(
+    String(formData.get("tenantId") ?? ""),
+    String(formData.get("projectId") ?? ""),
+  );
+  const path = await withPool((pool) =>
+    handleBurstSetting(tenant, project, formData.get("hits"), {
+      apply: (hits) =>
+        paidProject(pool, user.id, tenant, project, async (tx, role) => {
+          const allowed = canSetBurst(role);
+          return { allowed, updated: allowed ? await setRpcBurstHits(tx, project, hits, user.id) : false };
         }),
     }),
   ).catch(projectActionError);

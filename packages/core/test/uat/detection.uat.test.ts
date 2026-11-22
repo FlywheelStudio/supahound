@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as postureRepo from "../../src/db/posture.js";
+import * as settings from "../../src/db/detectionSettings.js";
 import * as repo from "../../src/db/repo.js";
 import { withTenant } from "../../src/db/tenant.js";
 import type { IncidentFeatures } from "../../src/explainer/features.js";
@@ -236,7 +237,7 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     expect(open[0]!.summary?.summary).toContain("`grant_credits`");
   });
 
-  it("UAT-D15 GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role", async () => {
+  it("UAT-D17 GraphQL posture findings stay hidden until a poll counts GraphQL calls from that role", async () => {
     const s = await watchProject("GraphQL app");
     // Posture: pg_graphql shows accounts to signed-in users (authenticated may SELECT it).
     const posture: PollDeps["posture"] = {
@@ -269,7 +270,7 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     expect(await overview()).toEqual({ critical: 0, high: 0, medium: 0, low: 1 });
   });
 
-  it("UAT-D16 anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed", async () => {
+  it("UAT-D18 anon listing of a bucket posture shows anyone may list pages in a burst; other buckets stay low and unnamed", async () => {
     const s = await watchProject("Gallery app");
     // Email from medium up, so `notified` counts pages (and medium+ emails) only, not low records.
     await withTenant(db.app, s.tenantId, (tx) => repo.setEmailAlerts(tx, s.projectId, "medium"));
@@ -317,7 +318,7 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     expect(JSON.stringify(stored)).not.toContain("private-docs");
   });
 
-  it("UAT-D17 signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page", async () => {
+  it("UAT-D19 signed-in calls to a SECURITY DEFINER function authenticated may execute are recorded low and never page", async () => {
     const s = await watchProject("Coupons app");
     // Email from medium up, so `notified` counts pages (and medium+ emails) only, not low records.
     await withTenant(db.app, s.tenantId, (tx) => repo.setEmailAlerts(tx, s.projectId, "medium"));
@@ -425,5 +426,72 @@ describe.skipIf(pgInfo === null)("UAT: detection", () => {
     logs = inWindow([scrape(at(-140), "1"), ...busyMinute(at(-400))]);
     expect(await poll(s, T0)).toEqual({ status: "unable_to_assess", errorCode: "rollup_saturated" });
     expect((await projects(s))[0]!.lastRunStatus).toBe("unable_to_assess");
+  });
+
+  it("UAT-D15 a table marked intentionally public is not watched and raises nothing; unmarking restores the alert", async () => {
+    const s = await watchProject("Catalog app");
+    // Posture: prices and customers both have RLS off and an anon SELECT grant.
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "prices", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+        { kind: "table", schema_name: "public", object_name: "customers", rls_enabled: false, policy_count: 0, grants: "anon:SELECT,authenticated:SELECT" },
+      ],
+      queryAdvisor: async () => [],
+    };
+    const sqls: string[] = [];
+    const read = (seen: Date) => row(seen, {
+      method: "GET", path: "/rest/v1/prices", search: "?select=*", userAgent: "curl/8.7.1", contentRange: "0-999/*",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "4",
+    });
+    const pollAt = (now: Date) => poll(s, now, {
+      posture, queryLogs: async (q) => { sqls.push(q.sql); return [read(new Date(now.getTime() - 130_000))]; },
+    });
+    // The owner marks prices intentionally public (decision 045).
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.markPublicTable(tx, s.projectId, "prices", null))).toBe("marked");
+
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    // Next poll: customers is watched, prices is never fetched, and the read of prices raises nothing.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 0, notified: 0 });
+    expect(sqls[1]).toContain("'/rest/v1/customers'");
+    expect(sqls[1]).not.toContain("prices");
+    expect(await dashboard(s)).toEqual([]);
+
+    // Unmarked: prices is watched again from the next poll, and the same read pages.
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.unmarkPublicTable(tx, s.projectId, "prices", null))).toBe(true);
+    expect(await pollAt(at(120))).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(sqls[2]).toContain("'/rest/v1/prices'");
+    expect((await dashboard(s))[0]).toMatchObject({ severity: "critical", detectors: ["exposed_read"] });
+  });
+
+  it("UAT-D16 the project's RPC burst threshold decides when anon calls to an exposed function page", async () => {
+    const s = await watchProject("Points app");
+    const posture: PollDeps["posture"] = {
+      querySql: async () => [
+        { kind: "table", schema_name: "public", object_name: "accounts", rls_enabled: true, policy_count: 0, grants: "" },
+      ],
+      queryAdvisor: async () => [
+        { name: "anon_security_definer_function_executable", level: "WARN", security: true, schema: "public", object: "grant_credits", type: "function", evidence: {} },
+      ],
+    };
+    const calls = (seen: Date) => [row(seen, {
+      method: "POST", path: "/rest/v1/rpc/grant_credits", search: "", userAgent: "curl/8.7.1", contentRange: "",
+      asn: "14061", asOrganization: "DigitalOcean, LLC", jwtRole: "anon", apiKeyRole: "anon", hits: "250",
+    })];
+    const pollAt = (now: Date) => poll(s, now, { posture, queryLogs: async () => calls(new Date(now.getTime() - 130_000)) });
+    // An editor raises the threshold to 300 for this project (decision 045).
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.setRpcBurstHits(tx, s.projectId, 300, null))).toBe(true);
+
+    expect(await pollAt(T0)).toMatchObject({ status: "ok", findings: 0 });
+    // 250 calls stay under 300: a finding, but no burst.
+    expect(await pollAt(at(60))).toMatchObject({ status: "ok", findings: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "medium", detectors: ["rpc_exposure"] }]);
+    const [stored] = await withTenant(db.app, s.tenantId, (tx) => tx.query<{ signals: string[]; evidence: { burstThreshold: number } }>(
+      "SELECT signals, evidence FROM supahound.findings"));
+    expect(stored).toMatchObject({ signals: ["definer_rpc_call"], evidence: { burstThreshold: 300 } });
+
+    // Lowered to 200: the same traffic is a burst and pages.
+    expect(await withTenant(db.app, s.tenantId, (tx) => settings.setRpcBurstHits(tx, s.projectId, 200, null))).toBe(true);
+    expect(await pollAt(at(120))).toMatchObject({ status: "ok", findings: 1, notified: 1 });
+    expect(await dashboard(s)).toMatchObject([{ severity: "high", detectors: ["rpc_exposure"] }]);
   });
 });

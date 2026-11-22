@@ -22,6 +22,15 @@ export function meetsThreshold(severity: Severity, level: AlertLevel): boolean {
 
 // True when the incident should email now: it meets the threshold and no email went out at this
 // severity or higher yet. A rise in severity emails again; a repeat at the same level does not.
+// Signals that show on the dashboard and in incident history but never email (Erik, 2026-11-22):
+// signed-in calls to SECURITY DEFINER functions (#157) and anon listings of buckets posture does
+// not flag. A flagged bucket adds `listable_bucket`, and any escalation above low emails as usual.
+export const DASHBOARD_ONLY_SIGNALS: ReadonlySet<string> = new Set(["authenticated_definer_call", "anon_bucket_list", "list_burst"]);
+
+export function dashboardOnly(incident: { severity: Severity; signals: readonly string[] }): boolean {
+  return incident.severity === "low" && incident.signals.length > 0 && incident.signals.every((s) => DASHBOARD_ONLY_SIGNALS.has(s));
+}
+
 export function alertDue(severity: Severity, alerted: Severity | null, level: AlertLevel): boolean {
   return meetsThreshold(severity, level) && (alerted === null || SEVERITY_RANK[severity] > SEVERITY_RANK[alerted]);
 }
