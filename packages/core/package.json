@@ -20,7 +20,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "ai": "^7.0.177",
+    "ai": "^7.0.178",
     "pg": "^8.23.1",
     "stripe": "23.2.0",
     "tldts": "^7.5.5",
