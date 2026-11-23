@@ -12,7 +12,7 @@ decisions listed as not verified live whether that role can read `pg_policies` a
 could not, a check would return no rows, and Supahound would show "no problems" where it could not
 look.
 
-We tested on 2026-11-23 against ULink (`cjgihassfsspxivjtgoi`, Postgres 15), a real project
+We tested on 2026-11-23 against ULink (Postgres 15), a real project
 connected to production through the registered OAuth app (client ID `b21c107f-…`, registered
 2026-11-11).
 
