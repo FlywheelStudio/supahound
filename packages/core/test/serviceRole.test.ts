@@ -47,9 +47,25 @@ describe("classifyNetwork", () => {
     expect(classifyNetwork(7922, "Comcast Cable Communications, LLC")).toBe("other");
     expect(classifyNetwork(null, null)).toBe("unknown");
   });
+
+  // Edge logs often carry the org name but no ASN. Amazon registers its EU ranges to
+  // "A100 ROW GmbH", which names no provider, so it fell through to "other".
+  it("knows Amazon's EU registrant when the ASN is missing", () => {
+    expect(classifyNetwork(null, "A100 ROW GmbH")).toBe("hosting");
+    expect(classifyNetwork(null, "Amazon Data Services UK")).toBe("hosting");
+  });
 });
 
 describe("detectServiceRoleMisuse", () => {
+  it("raises nothing for a server caller on Amazon's EU registrant with no ASN", () => {
+    const event = serviceEvent({
+      jwtRole: null, apiKeyRole: null, apiKeyKind: "secret", authorizationKind: "secret",
+      userAgent: "Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.79.1)", clientInfo: null,
+      asn: null, asOrganization: "A100 ROW GmbH",
+    });
+    expect(detectServiceRoleMisuse([event], ctx())).toEqual([]);
+  });
+
   // Issue #154: an sb_secret_ key is not a JWT, so its requests fill no role field.
   it("sees an sb_secret_ key used from a browser, and names the key kind in the evidence", () => {
     const secret = serviceEvent({

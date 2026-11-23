@@ -24,8 +24,10 @@ export const HOSTING_ASNS: ReadonlyMap<number, string> = new Map([
   [132203, "Tencent Cloud"],
 ]);
 
+// "A100 ROW GmbH" is the registrant of Amazon's EU address ranges. Its name names no
+// provider, and edge logs often omit the ASN, so match it by name.
 const HOSTING_ORG =
-  /\b(amazon|aws|google|microsoft|azure|digitalocean|hetzner|ovh|linode|akamai|vultr|oracle|cloudflare|fastly|scaleway|contabo|alibaba|tencent|hosting|datacenter|data center|colocation|server)/i;
+  /\b(amazon|aws|a100 row|google|microsoft|azure|digitalocean|hetzner|ovh|linode|akamai|vultr|oracle|cloudflare|fastly|scaleway|contabo|alibaba|tencent|hosting|datacenter|data center|colocation|server)/i;
 
 export function classifyNetwork(asn: number | null, asOrganization: string | null): NetworkType {
   if (asn === null && asOrganization === null) return "unknown";
