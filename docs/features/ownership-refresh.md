@@ -95,4 +95,5 @@ unchanged: it cannot read the new columns.
   not on `ownership_error`, so that state retries after an hour. Tested.
 - **Hand-set maps count as loaded.** `repo.setOwnership` sets `ownership_refreshed_at`, so CLI and
   test fixtures never trigger a read.
-- **Not verified live** that `supabase_read_only_user` can read `pg_policies`. Needs the OAuth app (#4).
+- **Verified live 2026-11-23:** `supabase_read_only_user` reads `pg_policies` (decision 049). The
+  role can read every row in the project, so this query stays fixed to the catalog.

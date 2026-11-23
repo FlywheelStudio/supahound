@@ -318,5 +318,4 @@ each domain, and for the law where you run them. The active-scan engine is not b
 The rehearsal (#67) checks these:
 
 - Whether a Supabase OAuth app in one org can authorize other orgs without a review step.
-- Whether `supabase_read_only_user` can read `pg_policies` through the read-only SQL endpoint (#4).
 - The JWT subject and role field names in live edge logs (#3).
