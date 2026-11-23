@@ -60,7 +60,7 @@ project for it.
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO` | Your Stripe account, only with `SUPAHOUND_BILLING=stripe` | web (all), poller (key and prices) | secret, var | no |
 | `SUPAHOUND_BILLING_EXEMPT_DOMAINS` | Your staff email domains, comma-separated; workspaces whose only owner uses one need no card (decision 029). Empty: none | web | var | no |
 | `SUPPORT_EMAIL`, `TERMS_URL`, `PRIVACY_URL` | Your own | web | var | no |
-| `SUPAHOUND_STAFF_ALERT_EMAIL` | Your operator address, or a comma-separated list. Emailed when polling stops or mostly fails (see [Heartbeat](#heartbeat)). Empty: off | both Workers, the same value | var | no |
+| `SUPAHOUND_STAFF_ALERT_EMAIL` | Your operator address, or a comma-separated list. Emailed when polling stops or mostly fails (see [Heartbeat](#heartbeat)). Empty: off | both Workers, the same value | var or secret | no |
 
 Without `AI_GATEWAY_API_KEY`, incident summaries use template text and no model is called. With
 it, every call asks for zero data retention (decision 005), which needs a Vercel Pro or
@@ -268,6 +268,17 @@ Without the sink, remove `tail_consumers` from `apps/web/wrangler.jsonc` and
 
 Set `SUPAHOUND_STAFF_ALERT_EMAIL` to the same value in `apps/web/wrangler.jsonc` and
 `apps/poller/wrangler.jsonc` to hear when Supahound itself stops watching (issues #133 and #159).
+
+To keep the address out of your config files, set it as a Worker secret instead, on both Workers:
+
+```bash
+printf '%s' 'ops@example.com' | pnpm --filter @supahound/web exec wrangler secret put SUPAHOUND_STAFF_ALERT_EMAIL
+printf '%s' 'ops@example.com' | pnpm --filter @supahound/poller exec wrangler secret put SUPAHOUND_STAFF_ALERT_EMAIL
+```
+
+Then delete the `SUPAHOUND_STAFF_ALERT_EMAIL` line from `vars` in both configs: a Worker binding
+name holds either a var or a secret, not both. Later deploys keep the secret.
+
 Both Workers have a cron that fires every minute and reads, across all workspaces, when poll runs
 finished and whether they could assess (two columns, through the scheduler role). Each Worker owns
 one check:
