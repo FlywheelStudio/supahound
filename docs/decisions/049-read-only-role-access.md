@@ -31,6 +31,13 @@ connected to production through the registered OAuth app (client ID `b21c107f-â€
    a member of `pg_read_all_data` and `pg_monitor`. `has_table_privilege` reports `SELECT` on
    `auth.users`, `auth.identities`, `storage.objects`, `pg_catalog.pg_authid` and
    `vault.decrypted_secrets`. We checked privileges only. We did not read those tables.
+4. **One token covers one whole organization.** Supabase's consent screen asks the user to pick
+   an organization. Its only related parameter, `organization_slug`, pre-selects one. No parameter
+   picks projects ([Build a Supabase
+   Integration](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration),
+   read 2026-11-23). Supahound's project picker sets which projects Supahound *monitors*, not
+   what the token *can reach*. This rests on the docs, not a live test. Supahound's logs hold no
+   connect or picker rows from 2026-11-11.
 
 How we tested: `postgres` is not a member of `supabase_read_only_user`, so `SET ROLE` was not
 possible. We used `has_*_privilege('supabase_read_only_user', â€¦)` for each catalog, function and
@@ -45,7 +52,8 @@ read-only.
    table rows. No code path builds SQL from user input or sends a customer's query. A new query
    against this endpoint needs a decision record.
 2. **We state the access honestly.** Connecting Supabase grants Supahound read access to every row
-   in every connected project, because that is what `database:read` gives. The connect page, the
+   in every project of the organization they pick, including projects they do not add to
+   Supahound, because that is what `database:read` gives. The connect page, the
    privacy page and sales material say so, and say what Supahound actually reads: the catalog,
    logs and the Security Advisor.
 3. **The token is sealed and never leaves the server** (decision 004 and 012, unchanged).
@@ -64,6 +72,7 @@ read-only.
   this record.
 - A leaked token is worth more than its scope name suggests. Token sealing and revocation on
   disconnect (decision 037) carry that weight.
-- Still open in #4: whether one token covers a whole organization or only chosen projects.
+- The `docs/wip/tenant-isolation.md` question (one organization or named projects) is settled by
+  finding 4.
 - The connect page and privacy-page wording (point 2) is follow-up work. The privacy page lives in
   `supahound-site`.

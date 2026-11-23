@@ -8,7 +8,7 @@ This file tracks only what is in progress and what is done.
 
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
-| Public release (fair source, FSL-1.1-ALv2) | #63–#68, #82 | Public since 2026-11-10 (#68); site live on supahound.com; app and poller deployed to app.supahound.com on 2026-11-10 (decision 027); the sign-in fix (#87) is live; OAuth app registered 2026-11-11; read-only role verified 2026-11-23 (decision 049) | Token scope, one org or chosen projects (#4). Legal review done 2026-11-11 (#81) | [wip/public-release.md](wip/public-release.md) |
+| Public release (fair source, FSL-1.1-ALv2) | #63–#68, #82 | Public since 2026-11-10 (#68); site live on supahound.com; app and poller deployed to app.supahound.com on 2026-11-10 (decision 027); the sign-in fix (#87) is live; OAuth app registered 2026-11-11; read-only role and token scope settled 2026-11-23 (decision 049, #4 closed) | Legal review done 2026-11-11 (#81) | [wip/public-release.md](wip/public-release.md) |
 | Scan funnel (hackme.si) | #51, #74 | Authorization backbone built; secrets scanner built (client code, source maps, leak paths, decision 026; 26 rules and inline or header source maps since #140); repositories + other passive checks + web funnel next | Legal review before any active-scan milestone and before the leak-path probe goes public | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Baseline-free detectors (2, 4, 11 and 12) | #3, #5 | Built. 2026-11-22: detector 11, anon reads of tables posture shows open (#132); detector 12, anon calls to exposed SECURITY DEFINER functions (#131); rollup row cap (#129); auth-field coverage marks detectors unassessed (#130); rule IDs with ATT&CK/OWASP tags and an OCSF export (#142); newer splinter lints (#134) and function/GraphQL catalog checks (#135). Live run next | Token with `analytics:read` and a project ref; `sb_secret_` key field (#154); GraphQL/Storage (#157) | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |
 | Incident engine + ZDR explainer | #6, #15 | Built (Haiku 5.5 + Grok fallback, pinned to Anthropic and xAI in the US, decision 043); live call next | AI Gateway key (Pro team) | [wip/incident-explainer.md](wip/incident-explainer.md) |
@@ -40,5 +40,5 @@ A feature moves here when its feature doc exists in `docs/features/`.
 
 ## Next up (Validate milestone, gate: log fields confirmed)
 
-#3 JWT fields in live logs · #4 OAuth token scope · #5 live detector run · #6 live gateway call ·
-#7 interviews. All five need something from Erik (`needs-erik`).
+#3 JWT fields in live logs · #5 live detector run · #6 live gateway call ·
+#7 interviews. All four need something from Erik (`needs-erik`).

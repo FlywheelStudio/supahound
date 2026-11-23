@@ -18,8 +18,7 @@ path may read, write, decrypt or mix one tenant's data with another's.
 
 - **Tenant** = one Supahound account (an agency or a builder).
 - **Connection** = one Supabase OAuth grant held by a tenant. Tokens live here, not per project:
-  the Supabase docs do not say whether a token covers one organization or named projects, and a
-  refresh may rotate it.
+  one token covers one whole Supabase organization (decision 049), and a refresh may rotate it.
 - **Project** = one Supabase project under a connection. The same Supabase ref may sit under two
   tenants (an agency and its client). Each gets separate rows, tokens and state.
 - Every row carries `tenant_id`. Every child references its parent through a composite key
