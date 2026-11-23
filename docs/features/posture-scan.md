@@ -151,5 +151,6 @@ Status codes in `catalog_status` and `advisor_status`: `ok`, `unauthorized` (401
   Since #157 these findings (and both Advisor lints) are shown and counted only for a role whose
   GraphQL calls the last 7 days of polls counted; otherwise the Posture page hides them with a
   note (decision 038, addendum of #157).
-- **Not verified live:** the Advisor's response shape, and `has_table_privilege` for other roles
-  as `supabase_read_only_user`. Needs the OAuth app (#4).
+- **Verified live 2026-11-23** (decision 049): the Advisor's response shape, and the privilege
+  functions for other roles as `supabase_read_only_user`. A live scan of a real project matched an
+  admin run of the same query. The Advisor endpoint is still experimental.

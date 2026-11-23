@@ -9,8 +9,8 @@
 //     200 body: { lints: [{ name, title, level, facing, categories, description, detail,
 //     remediation, metadata?: { schema, name, entity, type, ... }, cache_key, observed_at? }] }
 //   Catalog: POST /v1/projects/{ref}/database/query/read-only (decision 024), run by Supabase as
-//     supabase_read_only_user. Not verified live: that this role may call has_table_privilege for
-//     anon and authenticated (any role may, in stock Postgres).
+//     supabase_read_only_user. Verified live 2026-11-23 (decision 049): the role reads every
+//     catalog and calls every privilege function this query uses; a live scan matched an admin run.
 
 // Only `public` is checked: the schema PostgREST exposes by default, and the one ownership reads.
 export const POSTURE_SCHEMAS = ["public"] as const;
