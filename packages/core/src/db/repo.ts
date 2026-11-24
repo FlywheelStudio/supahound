@@ -196,6 +196,24 @@ export async function saveNetworks(tx: TenantTx, id: ProjectId, asns: number[]):
   );
 }
 
+// Decision 003's memory by name, for events without an ASN (decision 050).
+export async function loadNetworkNames(tx: TenantTx, id: ProjectId): Promise<string[]> {
+  const rows = await tx.query<{ network: string }>(
+    "SELECT network FROM supahound.service_role_network_names WHERE tenant_id = $1 AND project_id = $2 ORDER BY network",
+    [tx.tenantId, id],
+  );
+  return rows.map((r) => r.network);
+}
+
+export async function saveNetworkNames(tx: TenantTx, id: ProjectId, names: string[]): Promise<void> {
+  if (names.length === 0) return;
+  await tx.query(
+    `INSERT INTO supahound.service_role_network_names (tenant_id, project_id, network)
+     SELECT $1, $2, unnest($3::text[]) ON CONFLICT DO NOTHING`,
+    [tx.tenantId, id, names],
+  );
+}
+
 export async function startPollRun(tx: TenantTx, id: ProjectId, window: { start: Date; end: Date }): Promise<string> {
   const rows = await tx.query<{ id: string }>(
     `INSERT INTO supahound.poll_runs (tenant_id, project_id, window_start, window_end)

@@ -1,4 +1,4 @@
-import { publicTableName, type MarkOutcome } from "@supahound/core/db/detectionSettings";
+import { expectedNetworkName, publicTableName, type MarkOutcome } from "@supahound/core/db/detectionSettings";
 import type { ProjectRole } from "@supahound/core/db/people";
 import { isRpcBurstHits, RPC_BURST_MAX, RPC_BURST_MIN } from "@supahound/core/detectors/rpcExposure";
 import { acceptedAsPublic } from "@supahound/core/posture/findings";
@@ -114,4 +114,66 @@ export async function handleBurstSetting(tenant: TenantId, project: ProjectId, v
 // The saved notice reads the number back from the URL; only a value in range is shown.
 export function savedBurstFrom(query: Record<string, string | undefined>): number | null {
   return parseBurstHits(query.burst);
+}
+
+// --- Expected networks (Notifications page and service-role incidents, issue #185, decision 050) ----
+
+// Owners and admins mark and unmark: a mark silences detector 4's network signals for the network.
+export const canMarkExpected = (role: ProjectRole | null): boolean => can(role, "mark_expected");
+
+// The signals a mark silences. An incident without one of them has nothing to mark.
+export const NETWORK_SIGNALS: ReadonlySet<string> = new Set(["non_hosting_network", "new_network"]);
+
+export type ExpectedNotice = PublicNotice;
+
+export const EXPECTED_NOTICES: Record<ExpectedNotice, { tone: "ok" | "error"; text: string }> = {
+  marked: { tone: "ok", text: "Marked as expected. Supahound stops alerting on the service-role key from this network from the next poll. A browser or app holding the key still alerts." },
+  already: { tone: "ok", text: "That network is already marked as expected." },
+  unmarked: { tone: "ok", text: "Mark removed. Supahound alerts on the service-role key from this network again from the next poll." },
+  not_marked: { tone: "error", text: "That network is not marked as expected." },
+  role: { tone: "error", text: "Only the project's owners and admins can mark a network as expected." },
+  invalid: { tone: "error", text: "That is not a network name Supahound can mark." },
+};
+
+export function expectedNetworksPath(tenant: TenantId, project: ProjectId, notice?: ExpectedNotice): string {
+  return `${projectPath(tenant, project, "notifications")}${notice ? `?expected=${notice}` : ""}#expected-networks`;
+}
+
+export function expectedNoticeFrom(query: Record<string, string | undefined>): { tone: "ok" | "error"; text: string } | null {
+  const n = query.expected;
+  return n && Object.hasOwn(EXPECTED_NOTICES, n) ? EXPECTED_NOTICES[n as ExpectedNotice] : null;
+}
+
+export interface MarkExpectedDeps {
+  // Inside the project transaction: whether the role may mark and, only then, the outcome.
+  mark: (network: string) => Promise<{ allowed: boolean; outcome: MarkOutcome | null }>;
+}
+
+export async function handleMarkExpected(tenant: TenantId, project: ProjectId, raw: unknown, deps: MarkExpectedDeps): Promise<string> {
+  const network = expectedNetworkName(raw);
+  if (network === null) return expectedNetworksPath(tenant, project, "invalid");
+  const { allowed, outcome } = await deps.mark(network);
+  if (!allowed || outcome === null) return expectedNetworksPath(tenant, project, "role");
+  return expectedNetworksPath(tenant, project, outcome === "invalid" ? "invalid" : outcome);
+}
+
+export interface UnmarkExpectedDeps {
+  unmark: (network: string) => Promise<{ allowed: boolean; removed: boolean }>;
+}
+
+export async function handleUnmarkExpected(tenant: TenantId, project: ProjectId, raw: unknown, deps: UnmarkExpectedDeps): Promise<string> {
+  const network = expectedNetworkName(raw);
+  if (network === null) return expectedNetworksPath(tenant, project, "invalid");
+  const { allowed, removed } = await deps.unmark(network);
+  if (!allowed) return expectedNetworksPath(tenant, project, "role");
+  return expectedNetworksPath(tenant, project, removed ? "unmarked" : "not_marked");
+}
+
+// The networks an incident's page offers to mark: those its findings name, minus the marked ones,
+// and only when the incident carries a network signal.
+export function markableNetworks(
+  incident: { signals: readonly string[] }, networks: readonly string[], marked: ReadonlySet<string>,
+): string[] {
+  if (!incident.signals.some((s) => NETWORK_SIGNALS.has(s))) return [];
+  return networks.filter((n) => !marked.has(n));
 }

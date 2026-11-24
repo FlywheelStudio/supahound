@@ -19,7 +19,7 @@ export const ROLE_HELP: Record<ProjectRole, string> = {
 
 // The role matrix (decision 036). Workspace-level actions (connect Supabase, add projects,
 // billing) keep the workspace role and are not here.
-export type ProjectAction = "view" | "edit_settings" | "manage_people" | "manage_owners" | "link_domains" | "mark_public";
+export type ProjectAction = "view" | "edit_settings" | "manage_people" | "manage_owners" | "link_domains" | "mark_public" | "mark_expected";
 
 const MATRIX: Record<ProjectAction, readonly ProjectRole[]> = {
   view: ["owner", "admin", "editor", "viewer"],
@@ -30,6 +30,9 @@ const MATRIX: Record<ProjectAction, readonly ProjectRole[]> = {
   link_domains: ["owner", "admin"],
   // Mark a table intentionally public, which silences detector 11 for it (issue #160, decision 045).
   mark_public: ["owner", "admin"],
+  // Mark a network as expected, which silences detector 4's network signals for it (issue #185,
+  // decision 050).
+  mark_expected: ["owner", "admin"],
 };
 
 export function can(role: ProjectRole | null, action: ProjectAction): boolean {

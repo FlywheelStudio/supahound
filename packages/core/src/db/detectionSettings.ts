@@ -1,5 +1,6 @@
 import { safeIdentifier } from "../detectors/finding.js";
 import { isRpcBurstHits } from "../detectors/rpcExposure.js";
+import { networkName } from "../network/classify.js";
 import { safeName } from "../posture/catalog.js";
 import type { ProjectId } from "../tenancy/scope.js";
 import { appendAudit } from "./repo.js";
@@ -91,4 +92,73 @@ export async function setRpcBurstHits(tx: TenantTx, project: ProjectId, hits: nu
     await appendAudit(tx, { projectId: project, action: "detection_setting", detail: { setting: "rpc_burst_hits", from: previous, to: hits, by } });
   }
   return true;
+}
+
+// --- Expected networks (issue #185, decision 050) ---------------------------------------------------
+
+// A network name the mark may hold: already in the normalized form detector 4 stores in the
+// evidence (`networkName`). Anything else is null, so a mark can never hold free text.
+export function expectedNetworkName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return networkName(value) === value ? value : null;
+}
+
+export interface ExpectedNetworkMark {
+  network: string;
+  markedAt: Date;
+}
+
+// The networks this project's Owners or Admins marked as expected, by name.
+export async function listExpectedNetworks(tx: TenantTx, project: ProjectId): Promise<ExpectedNetworkMark[]> {
+  const rows = await tx.query<{ network: string; marked_at: Date }>(
+    `SELECT network, marked_at FROM supahound.expected_networks
+     WHERE tenant_id = $1 AND project_id = $2 ORDER BY network`,
+    [tx.tenantId, project],
+  );
+  return rows.map((r) => ({ network: r.network, markedAt: r.marked_at }));
+}
+
+export async function expectedNetworkSet(tx: TenantTx, project: ProjectId): Promise<Set<string>> {
+  return new Set((await listExpectedNetworks(tx, project)).map((m) => m.network));
+}
+
+// Marks a network as expected. by: the signed-in user (null for a system write).
+export async function markExpectedNetwork(tx: TenantTx, project: ProjectId, network: string, by: string | null): Promise<MarkOutcome> {
+  const name = expectedNetworkName(network);
+  if (name === null) return "invalid";
+  const rows = await tx.query<{ id: string }>(
+    `INSERT INTO supahound.expected_networks (tenant_id, project_id, network, marked_by) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (tenant_id, project_id, network) DO NOTHING RETURNING id`,
+    [tx.tenantId, project, name, by],
+  );
+  if (rows.length === 0) return "already";
+  await appendAudit(tx, { projectId: project, action: "detection_setting", detail: { setting: "expected_network", change: "mark", network: name, by } });
+  return "marked";
+}
+
+// Removes the mark. False when the network was not marked.
+export async function unmarkExpectedNetwork(tx: TenantTx, project: ProjectId, network: string, by: string | null): Promise<boolean> {
+  const name = expectedNetworkName(network);
+  if (name === null) return false;
+  const rows = await tx.query(
+    "DELETE FROM supahound.expected_networks WHERE tenant_id = $1 AND project_id = $2 AND network = $3 RETURNING id",
+    [tx.tenantId, project, name],
+  );
+  if (rows.length === 0) return false;
+  await appendAudit(tx, { projectId: project, action: "detection_setting", detail: { setting: "expected_network", change: "unmark", network: name, by } });
+  return true;
+}
+
+// The normalized network names detector 4's findings of one incident carry in their evidence, for
+// the incident page's "Mark as expected" button. Only names in the stored form come back.
+export async function incidentNetworkNames(tx: TenantTx, project: ProjectId, incidentId: string): Promise<string[]> {
+  const rows = await tx.query<{ network: string }>(
+    `SELECT DISTINCT f.evidence->>'network' AS network
+     FROM supahound.findings f
+     WHERE f.tenant_id = $1 AND f.project_id = $2 AND f.incident_id = $3
+       AND f.detector = 'service_role_misuse' AND f.evidence->>'network' IS NOT NULL
+     ORDER BY 1 LIMIT 20`,
+    [tx.tenantId, project, incidentId],
+  );
+  return rows.map((r) => r.network).filter((n) => expectedNetworkName(n) !== null);
 }

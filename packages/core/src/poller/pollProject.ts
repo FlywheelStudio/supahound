@@ -20,7 +20,7 @@ import * as postureRepo from "../db/posture.js";
 import { AdvisorApiError, advisorFindings, type AdvisorLint } from "../posture/advisor.js";
 import { CatalogError, catalogFindings, parseCatalogRows } from "../posture/catalog.js";
 import { raiseForPosture, withoutPublicTables } from "../posture/findings.js";
-import { publicTableSet } from "../db/detectionSettings.js";
+import { expectedNetworkSet, publicTableSet } from "../db/detectionSettings.js";
 import type { SourceStatus } from "../posture/types.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
@@ -337,6 +337,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     return {
       project, runId, window, sql, anonReadable, anonDefiners, authenticatedDefiners, listableBuckets,
       networks: await repo.loadNetworks(tx, scope.projectId),
+      networkNames: await repo.loadNetworkNames(tx, scope.projectId),
+      expectedNetworks: await expectedNetworkSet(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
       exposed: await postureRepo.postureExposedTables(tx, scope.projectId),
     };
@@ -394,6 +396,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   // 3. Detect and group, in memory, for this project only.
   const networks = new ServiceRoleNetworks();
   if (loaded.networks.length > 0) networks.learn(scope, loaded.networks);
+  if (loaded.networkNames.length > 0) networks.learnNames(scope, loaded.networkNames);
   const events = rows.map(normalizeRow);
   // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
   const unassessedDetectors: Finding["detector"][] = owners.loaded ? [] : ["cross_tenant"];
@@ -427,6 +430,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   // A detection on a table that posture shows exposed is raised one step (decision 038).
   const findings = raiseForPosture(scan(events, {
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
+    expectedNetworks: loaded.expectedNetworks,
     anonReadable: loaded.anonReadable,
     anonDefiners: loaded.anonDefiners,
     authenticatedDefiners: loaded.authenticatedDefiners,
@@ -485,6 +489,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       }
     }
     await repo.saveNetworks(tx, scope.projectId, networks.known(scope));
+    await repo.saveNetworkNames(tx, scope.projectId, networks.knownNames(scope));
     await repo.finishPollRun(tx, runId, {
       status: "ok", templates: events.length, findings: findings.length, unassessedDetectors,
       edgeRequests: counts?.requests ?? null, graphqlCalls: counts?.graphql ?? null, windowEnd: rollup.end,

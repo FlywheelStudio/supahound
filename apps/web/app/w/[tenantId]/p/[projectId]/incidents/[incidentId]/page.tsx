@@ -1,14 +1,17 @@
 import { actorAlias, detectorLabel, signalLabel } from "@supahound/core/alerts/email";
 import { historyWindow } from "@supahound/core/db/billing";
+import { expectedNetworkSet, incidentNetworkNames } from "@supahound/core/db/detectionSettings";
 import { getIncident } from "@supahound/core/db/repo";
 import Link from "../../../../../../../components/NavLink";
 import { notFound } from "next/navigation";
 import { SeverityBadge, Shell } from "../../../../../../../components/Shell";
 import { StatusBadge } from "../../../../../../../components/StatusBadge";
 import { mode } from "../../../../../../../lib/billing";
+import { canMarkExpected, markableNetworks } from "../../../../../../../lib/detectionSettings";
 import { codeSegments, durationLabel, explanationOf, fallbackSummary, parseIncidentId } from "../../../../../../../lib/incidents";
 import { projectPath, utc } from "../../../../../../../lib/nav";
 import { loadProjectPage } from "../../../../../../../lib/projectPage";
+import { markExpectedNetworkAction } from "../../settings/actions";
 
 // One incident (issue #44, decision 035). The incident is read in the same paid-gate transaction
 // as the project list, filtered by tenant, project and the 30-day window. Anything else (another
@@ -37,10 +40,20 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 export default async function IncidentDetail({ params }: { params: Promise<{ tenantId: string; projectId: string; incidentId: string }> }) {
   const id = parseIncidentId((await params).incidentId);
   if (!id) notFound();
-  const d = await loadProjectPage(params, async (tx, p) =>
-    getIncident(tx, p.id, id, { now: new Date(), days: (await historyWindow(tx)).incidentDays }));
-  const i = d.extra;
+  const d = await loadProjectPage(params, async (tx, p) => {
+    const incident = await getIncident(tx, p.id, id, { now: new Date(), days: (await historyWindow(tx)).incidentDays });
+    // The service-role detector's network names (decision 050), for "Mark as expected".
+    const service = incident?.detectors.includes("service_role_misuse") ?? false;
+    return {
+      incident,
+      networks: service ? await incidentNetworkNames(tx, p.id, id) : [],
+      expected: service ? await expectedNetworkSet(tx, p.id) : new Set<string>(),
+    };
+  });
+  const i = d.extra.incident;
   if (!i) notFound();
+  const networks = d.extra.networks;
+  const markable = canMarkExpected(d.projectRole) ? markableNetworks(i, networks, d.extra.expected) : [];
   const { tenant, project: p } = d;
   const e = explanationOf(i.summary);
   const what = i.detectors.map(detectorLabel).join(" and ") || "Unusual activity";
@@ -65,6 +78,7 @@ export default async function IncidentDetail({ params }: { params: Promise<{ ten
           <Fact label="First seen">{utc(i.openedAt)}</Fact>
           <Fact label="Last seen">{utc(i.lastSeenAt)}</Fact>
           <Fact label="Duration">{durationLabel(i.openedAt, i.lastSeenAt)}</Fact>
+          {networks.length > 0 && <Fact label={networks.length === 1 ? "Network" : "Networks"}>{networks.join(", ")}</Fact>}
         </dl>
       </section>
 
@@ -75,6 +89,31 @@ export default async function IncidentDetail({ params }: { params: Promise<{ ten
           {i.signals.map((x) => <li key={`s-${x}`}>{signalLabel(x)}</li>)}
         </ul>
       </section>
+
+      {markable.length > 0 && (
+        <section aria-labelledby="expected-heading" className="mb-6 rounded-md border border-slate-200 bg-white p-4">
+          <h2 id="expected-heading" className="mb-1 font-semibold">Is this your own server?</h2>
+          <p className="mb-3 text-sm text-slate-700">
+            If your own servers use this network, mark it as expected. Supahound then stops alerting on the service-role key from
+            it, from the next poll. A browser or mobile app holding the key still alerts. Remove the mark on the Notifications page.
+          </p>
+          <ul className="space-y-2">
+            {markable.map((n) => (
+              <li key={n}>
+                <form action={markExpectedNetworkAction} className="flex flex-wrap items-center gap-3 text-sm">
+                  <input type="hidden" name="tenantId" value={d.tenant} />
+                  <input type="hidden" name="projectId" value={p.id} />
+                  <input type="hidden" name="network" value={n} />
+                  <span className="font-mono">{n}</span>
+                  <button aria-label={`Mark ${n} as expected`} className="rounded-md bg-slate-950 px-3 py-1 font-medium text-white hover:bg-slate-800">
+                    Mark as expected
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section aria-label="Summary" className="mb-6">
         <h2 className="mb-2 font-semibold">Summary</h2>
