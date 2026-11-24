@@ -1,6 +1,6 @@
 # State
 
-Updated 2026-11-22 (release #176 live on app.supahound.com). The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
+Updated 2026-11-24 (#184 in progress; release #176 live on app.supahound.com). The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
 grouped by [milestone](https://github.com/FlywheelStudio/supahound/milestones) (decision 019).
 This file tracks only what is in progress and what is done.
 
@@ -8,6 +8,7 @@ This file tracks only what is in progress and what is done.
 
 | Feature | Issue | Current step | Blocker | WIP doc |
 | --- | --- | --- | --- | --- |
+| Service-role alerts without an ASN: network names, repeat suppression, expected networks | #184 | PR 1 built (platform names, network actor, 7-day repeat suppression; replay of 24 h of dogfood logs gives 0 High findings). Expected networks and name-keyed memory next (migration) | Release to production needs Erik | [wip/expected-callers.md](wip/expected-callers.md) |
 | Public release (fair source, FSL-1.1-ALv2) | #63–#68, #82 | Public since 2026-11-10 (#68); site live on supahound.com; app and poller deployed to app.supahound.com on 2026-11-10 (decision 027); the sign-in fix (#87) is live; OAuth app next | OAuth app (#4). Legal review done 2026-11-11 (#81) | [wip/public-release.md](wip/public-release.md) |
 | Scan funnel (hackme.si) | #51, #74 | Authorization backbone built; secrets scanner built (client code, source maps, leak paths, decision 026; 26 rules and inline or header source maps since #140); repositories + other passive checks + web funnel next | Legal review before any active-scan milestone and before the leak-path probe goes public | [wip/scan-funnel.md](wip/scan-funnel.md) |
 | Baseline-free detectors (2, 4, 11 and 12) | #3, #5 | Built. 2026-11-22: detector 11, anon reads of tables posture shows open (#132); detector 12, anon calls to exposed SECURITY DEFINER functions (#131); rollup row cap (#129); auth-field coverage marks detectors unassessed (#130); rule IDs with ATT&CK/OWASP tags and an OCSF export (#142); newer splinter lints (#134) and function/GraphQL catalog checks (#135). Live run next | Token with `analytics:read` and a project ref; `sb_secret_` key field (#154); GraphQL/Storage (#157) | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) |

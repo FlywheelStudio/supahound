@@ -730,6 +730,32 @@ export async function pendingAlerts(tx: TenantTx, id: ProjectId): Promise<Pendin
   }));
 }
 
+// True when another incident of this project, with the same actor and the same signal set, had
+// an alert email sent (outcome `sent` or `partial`) at this severity or higher in the last `days`
+// days (#184, decision 050). Counted from the audit row, so from the last email actually sent.
+export async function repeatAlertSent(
+  tx: TenantTx, id: ProjectId,
+  incident: { id: string; actor: string; signals: readonly string[]; severity: Severity },
+  days: number,
+): Promise<boolean> {
+  const rows = await tx.query<{ repeat: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM supahound.audit_log l
+       JOIN supahound.incidents j
+         ON j.tenant_id = l.tenant_id AND j.project_id = l.project_id AND j.id::text = l.detail->>'incident_id'
+       WHERE l.tenant_id = $1 AND l.project_id = $2 AND l.action = 'alert_email'
+         AND l.detail->>'outcome' IN ('sent', 'partial')
+         AND l.created_at > now() - make_interval(days => $7)
+         AND j.id <> $3 AND j.actor = $4
+         AND j.signals @> $5::text[] AND j.signals <@ $5::text[]
+         AND ${RANK_SQL("l.detail->>'severity'")} >= ${RANK_SQL("$6::text")}
+     ) AS repeat`,
+    [tx.tenantId, id, incident.id, incident.actor, [...incident.signals], incident.severity, days],
+  );
+  return rows[0]?.repeat ?? false;
+}
+
 // Records that an email went out at this severity. Never lowers a recorded severity.
 export async function markAlerted(tx: TenantTx, incidentId: string, severity: Severity): Promise<void> {
   await tx.query(

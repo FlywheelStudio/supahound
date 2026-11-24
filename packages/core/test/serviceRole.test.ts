@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { detectServiceRoleMisuse, ServiceRoleNetworks } from "../src/detectors/serviceRole.js";
-import { classifyCaller, classifyNetwork } from "../src/network/classify.js";
+import { detectServiceRoleMisuse, serviceRoleActor, ServiceRoleNetworks } from "../src/detectors/serviceRole.js";
+import { classifyCaller, classifyNetwork, networkName } from "../src/network/classify.js";
 import { projectScope } from "../src/tenancy/scope.js";
 import { CHROME_UA, event, serviceEvent } from "./helpers.js";
 
@@ -54,6 +54,52 @@ describe("classifyNetwork", () => {
     expect(classifyNetwork(null, "A100 ROW GmbH")).toBe("hosting");
     expect(classifyNetwork(null, "Amazon Data Services UK")).toBe("hosting");
   });
+
+  // #184: application platforms run customers' servers; without an ASN only the name decides.
+  it.each(["Railway", "Render", "Fly.io, Inc.", "Vercel Inc", "Heroku", "Netlify", "Supabase Inc"])(
+    "knows the platform %s by name with no ASN",
+    (org) => {
+      expect(classifyNetwork(null, org)).toBe("hosting");
+    },
+  );
+
+  it("does not take a home network for a platform", () => {
+    expect(classifyNetwork(null, "Deutsche Telekom AG")).toBe("other");
+    expect(classifyNetwork(null, "Flying Fiber Broadband")).toBe("other");
+  });
+});
+
+describe("networkName", () => {
+  it("lowercases, keeps letters and digits, and joins the rest with single spaces", () => {
+    expect(networkName("Amazon.com, Inc.")).toBe("amazon com inc");
+    expect(networkName("  A100 ROW   GmbH ")).toBe("a100 row gmbh");
+    expect(networkName("<script>alert(1)</script>")).toBe("script alert 1 script");
+  });
+
+  it("is null for nothing usable and caps the length at 80", () => {
+    expect(networkName(null)).toBeNull();
+    expect(networkName("...")).toBeNull();
+    expect(networkName("x".repeat(200))).toHaveLength(80);
+  });
+});
+
+describe("serviceRoleActor", () => {
+  it("uses the ASN when the log has one", () => {
+    expect(serviceRoleActor(16509, "Amazon.com, Inc.")).toBe("service_role:asn:16509");
+  });
+
+  // #184: one shared `unknown` actor grouped a cloud server and a home connection.
+  it("keys on the network name when the ASN is missing", () => {
+    const home = serviceRoleActor(null, "Comcast Cable Communications, LLC");
+    const cloud = serviceRoleActor(null, "Railway");
+    expect(home).toMatch(/^service_role:net:[0-9a-f]{12}$/);
+    expect(home).not.toBe(cloud);
+    expect(serviceRoleActor(null, "comcast cable communications llc")).toBe(home);
+  });
+
+  it("falls back to unknown with neither", () => {
+    expect(serviceRoleActor(null, null)).toBe("service_role:asn:unknown");
+  });
 });
 
 describe("detectServiceRoleMisuse", () => {
@@ -64,6 +110,34 @@ describe("detectServiceRoleMisuse", () => {
       asn: null, asOrganization: "A100 ROW GmbH",
     });
     expect(detectServiceRoleMisuse([event], ctx())).toEqual([]);
+  });
+
+  // #184: a server on an application platform, no ASN in the log.
+  it("raises nothing for a server caller on a platform with no ASN", () => {
+    const event = serviceEvent({
+      jwtRole: null, apiKeyRole: null, apiKeyKind: "secret", authorizationKind: "secret",
+      userAgent: "node", clientInfo: "supabase-js-node/2.80.0", asn: null, asOrganization: "Railway",
+    });
+    expect(detectServiceRoleMisuse([event], ctx())).toEqual([]);
+  });
+
+  it("still flags a server caller on a home network with no ASN, keyed by the network and named in the evidence", () => {
+    const event = serviceEvent({
+      jwtRole: null, apiKeyRole: null, apiKeyKind: "secret", authorizationKind: "secret",
+      userAgent: "node", clientInfo: "supabase-js-node/2.80.0", asn: null, asOrganization: "Comcast Cable Communications, LLC",
+    });
+    const [f] = detectServiceRoleMisuse([event], ctx());
+    expect(f?.signals).toEqual(["non_hosting_network"]);
+    expect(f?.severity).toBe("high");
+    expect(f?.actor).toBe(serviceRoleActor(null, "Comcast Cable Communications, LLC"));
+    expect(f?.evidence.network).toBe("comcast cable communications llc");
+  });
+
+  it("still flags a browser holding the key on a platform network", () => {
+    const event = serviceEvent({ userAgent: CHROME_UA, clientInfo: null, asn: null, asOrganization: "Vercel Inc" });
+    const [f] = detectServiceRoleMisuse([event], ctx());
+    expect(f?.signals).toEqual(["browser_caller"]);
+    expect(f?.severity).toBe("critical");
   });
 
   // Issue #154: an sb_secret_ key is not a JWT, so its requests fill no role field.

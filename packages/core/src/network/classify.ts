@@ -24,10 +24,21 @@ export const HOSTING_ASNS: ReadonlyMap<number, string> = new Map([
   [132203, "Tencent Cloud"],
 ]);
 
-// "A100 ROW GmbH" is the registrant of Amazon's EU address ranges. Its name names no
-// provider, and edge logs often omit the ASN, so match it by name.
+// Edge logs carry the network's org name but, in practice, no ASN (#184), so the name decides.
+// "A100 ROW GmbH" is the registrant of Amazon's EU address ranges; its name names no provider.
+// The application platforms (Railway, Render, Fly.io, Vercel, Heroku, Netlify, Supabase) run
+// customers' servers and edge functions.
 const HOSTING_ORG =
-  /\b(amazon|aws|a100 row|google|microsoft|azure|digitalocean|hetzner|ovh|linode|akamai|vultr|oracle|cloudflare|fastly|scaleway|contabo|alibaba|tencent|hosting|datacenter|data center|colocation|server)/i;
+  /\b(amazon|aws|a100 row|google|microsoft|azure|digitalocean|hetzner|ovh|linode|akamai|vultr|oracle|cloudflare|fastly|scaleway|contabo|alibaba|tencent|railway|render|fly\.io|vercel|heroku|netlify|supabase|hosting|datacenter|data center|colocation|server)/i;
+
+// A network's org name, reduced to lowercase letters, digits and single spaces, at most 80
+// characters. Cloudflare sets it from the caller's IP; the caller does not choose it. Null when
+// nothing is left.
+export function networkName(asOrganization: string | null): string | null {
+  if (asOrganization === null) return null;
+  const name = asOrganization.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80).trim();
+  return name === "" ? null : name;
+}
 
 export function classifyNetwork(asn: number | null, asOrganization: string | null): NetworkType {
   if (asn === null && asOrganization === null) return "unknown";

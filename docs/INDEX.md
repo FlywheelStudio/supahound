@@ -21,6 +21,7 @@
 | [features/incident-alert-email.md](features/incident-alert-email.md) | Incident alert email (#16): threshold per project, the incident row as outbox, tests; recipients per project since #24 |
 | [features/ownership-refresh.md](features/ownership-refresh.md) | Ownership refresh (#10): RLS policies read in the poll, detector 2 coverage states, tests |
 | [features/project-picker.md](features/project-picker.md) | Project picker (#9): pick and remove watched projects, Management API client, tests |
+| [wip/expected-callers.md](wip/expected-callers.md) | Service-role alerts without an ASN (#184): network names, repeat suppression built; expected networks next |
 | [wip/public-release.md](wip/public-release.md) | Public release: what PR #69 did, the rehearsal and the publish steps left |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone and secrets scanner built, other passive checks + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |
@@ -76,3 +77,4 @@
 | [decisions/046-scan-anon-key-exposure.md](decisions/046-scan-anon-key-exposure.md) | The scan lists what a site's anon key exposes: one GET to the PostgREST root of the Supabase project the verified site names, names and counts only, separate entry point until legal review (amends 016, 026; #139) |
 | [decisions/047-workers-log-retention.md](decisions/047-workers-log-retention.md) | The web and poller Workers' own events go to a private R2 bucket for 90 days through a tail Worker (`apps/log-sink`) that keeps only `opsLog` events; one typed logger, guard test, log inventory in ARCHITECTURE (#144) |
 | [decisions/048-enterprise-history.md](decisions/048-enterprise-history.md) | Enterprise history: an operator-set workspace flag (`billing_accounts.enterprise_at`) or a staff exemption gives a year of incidents, findings and security events; pages and the data job read the window from the plan; nothing deleted while paying; a downgrade hides at once (amends 035, 037, 044; #170) |
+| [decisions/050-expected-callers.md](decisions/050-expected-callers.md) | Service-role alerts without an ASN: platform names are hosting, the actor keys on the network name, a repeat within 7 days of a sent email does not email again, Owners and Admins mark expected networks (#184) |

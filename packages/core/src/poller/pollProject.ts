@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { alertDue, dashboardOnly, renderIncidentEmail, type RenderedEmail } from "../alerts/email.js";
+import { alertDue, dashboardOnly, renderIncidentEmail, REPEAT_WINDOW_DAYS, repeatSuppressible, type RenderedEmail } from "../alerts/email.js";
 import type { Pool } from "pg";
 import * as repo from "../db/repo.js";
 import { withTenant } from "../db/tenant.js";
@@ -541,6 +541,24 @@ export async function sendPendingAlerts(scope: ProjectScope, deps: PollDeps): Pr
     const settingsUrl = new URL(`/w/${scope.tenantId}/projects`, alerts.appUrl).toString();
     let emailed = 0;
     for (const a of pending.slice(0, MAX_ALERTS_PER_POLL)) {
+      // A repeat of an incident that emailed in the last 7 days (#184, decision 050): no email.
+      // Its severity is recorded as alerted so it stops being pending; a later rise still emails.
+      if (a.alertedSeverity === null && repeatSuppressible(a)) {
+        const suppressed = await withTenant(deps.app, scope.tenantId, async (tx) => {
+          if (!(await repo.repeatAlertSent(tx, scope.projectId, a, REPEAT_WINDOW_DAYS))) return false;
+          await repo.markAlerted(tx, a.id, a.severity);
+          await repo.appendAudit(tx, {
+            projectId: scope.projectId,
+            action: "alert_email",
+            detail: {
+              incident_id: a.id, severity: a.severity, escalated: false,
+              recipients: loaded.recipients.length, sent: 0, failed: 0, outcome: "repeat_suppressed",
+            },
+          });
+          return true;
+        });
+        if (suppressed) continue;
+      }
       const rendered = renderIncidentEmail({
         projectName: loaded.project.name,
         incident: a,
