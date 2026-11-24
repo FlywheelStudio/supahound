@@ -1,6 +1,6 @@
 # State
 
-Updated 2026-11-24 (#184 and #185 built, not yet released; release #176 live on app.supahound.com). The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
+Updated 2026-11-24 (release #188 live on app.supahound.com: #181, #184 and #185). The backlog lives in [GitHub issues](https://github.com/FlywheelStudio/supahound/issues),
 grouped by [milestone](https://github.com/FlywheelStudio/supahound/milestones) (decision 019).
 This file tracks only what is in progress and what is done.
 
@@ -21,7 +21,7 @@ This file tracks only what is in progress and what is done.
 
 | Item | Issue | Shipped | Docs |
 | --- | --- | --- | --- |
-| Service-role alerts without an ASN: platform names, one incident per network, no repeat email within 7 days, expected networks, network memory by name | #184, #185 | 2026-11-24, PRs #186 and the expected-networks PR into `develop`; production release waits for Erik | [features/expected-networks.md](features/expected-networks.md), decision 050 |
+| Service-role alerts without an ASN: platform names, one incident per network, no repeat email within 7 days, expected networks, network memory by provider | #184, #185 | **Live** 2026-11-24: PRs #186 and #187, release #188 (main @ 83a5ecf); production migration `20261124000000_expected_networks` applied | [features/expected-networks.md](features/expected-networks.md), decision 050 |
 | Project removal with a grace period: a removed project stays active until its paid period ends and is deleted 7 days later unless an Owner or Admin keeps it; Keep project, re-pick and portal cancel | #118 | 2026-11-12, live (release #120) | [features/project-removal-grace.md](features/project-removal-grace.md), decision 042 |
 | Web latency: Worker placed next to Postgres, one round trip to open a transaction, pending bar on links | #115 | 2026-11-12, into `develop` | [features/web-latency.md](features/web-latency.md), decision 039 |
 | Security scan domains per project: a verified domain belongs to one project; Owners and Admins attach it; the Security scan tab lists the newest finished scan's findings with the fix | #100 | 2026-11-12, PR #111; live 2026-11-12 | [features/scan-domains.md](features/scan-domains.md), decision 040 |
