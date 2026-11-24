@@ -17,6 +17,7 @@ const TABLES = [
   "account_closures",
   "security_events",
   "public_tables",
+  "expected_networks", "service_role_network_names",
 ] as const;
 
 describe.skipIf(pgInfo === null)("tenant isolation in Postgres", () => {

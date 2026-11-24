@@ -1,6 +1,6 @@
 # Incident alert email
 
-Issue #16. Decisions 014 and 030.
+Issue #16. Decisions 014 and 030. Repeat suppression: issue #184, decision 050.
 
 ## What it does
 
@@ -34,6 +34,11 @@ above, high and above, critical only, or off. Members see the setting.
      to each recipient separately;
    - one more transaction marks the incident (`repo.markAlerted`) when at least one send worked or
      there was nobody to send to, and appends an `alert_email` audit row with counts only.
+   - before the first email of an incident, `repo.repeatAlertSent` checks the audit log. If
+     another incident of this project with the same actor and signal set had an email sent at the
+     same or a higher severity in the last 7 days, no email goes out. The incident is marked
+     alerted and audited with outcome `repeat_suppressed` (decision 050). Critical incidents and
+     browser or mobile-app callers are never suppressed.
    It never throws: a failure here cannot fail a poll whose results are saved.
 4. **Rendering** (`packages/core/src/alerts/email.ts`). Table layout with inline styles, 600 px
    wide, no images, no external CSS, no scripts. Every untrusted string goes through `cleanText`
@@ -70,7 +75,10 @@ Hosted: `alerts@email.supahound.com`, set in the private deploy repo's `poller/w
 - `packages/core/test/db/alerts.test.ts` (Postgres): a full poll emails each member once; no repeat
   (UAT-D4); no cross-tenant recipient; default and changed thresholds; escalation; failed sends
   stay pending and retry; audit counts hold no address; no recipients; one model call per severity
-  while sends fail; address writes stay in their tenant; the database CHECK.
+  while sends fail; address writes stay in their tenant; the database CHECK. Repeat suppression:
+  a repeat within 7 days skips the email; after 7 days it emails; the window counts from the last
+  email sent; another actor, signal set or a higher severity emails; browser, mobile-app and
+  critical incidents always email; a failed send does not count; projects and tenants stay apart.
 - `apps/web/test/alerts.test.ts`: the threshold action's role and input checks.
 - E2E: UAT-W17 (owner address on file, default level, owner changes it), UAT-W18 (member sees but
   cannot change it, even by replaying the owner's form; visiting records the member's address).
@@ -83,3 +91,6 @@ Hosted: `alerts@email.supahound.com`, set in the private deploy repo's `poller/w
   fallback, so a replayed copy does nothing (UAT-W18 captures the form after `page.goto`).
 - **A member with no address gets nothing.** Invites (#24) must store the address.
 - **Model text is untrusted even after validation.** `stripLinks` runs again in the email.
+- **An incident resolves after one quiet poll.** Without repeat suppression the same caller opened
+  a new incident, and a new email, several times a day (#184). The window counts from the
+  `alert_email` audit row of the last email sent, not from the incident.

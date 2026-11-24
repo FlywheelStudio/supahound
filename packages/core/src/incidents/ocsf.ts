@@ -126,7 +126,8 @@ function attacksOf(rules: DetectionRule[]): OcsfAttack[] {
 
 const RANK: Record<RuleConfidence, number> = { low: 1, medium: 2, high: 3 };
 
-// The service-role actor is `service_role:asn:<n>`; the ASN is a structured feature.
+// The service-role actor is `service_role:asn:<n>`, or `service_role:net:<fingerprint>` when the
+// log has no ASN (#184); only the ASN form carries a structured feature.
 function asnOf(actor: string): number | null {
   const m = /^service_role:asn:(\d{1,10})$/.exec(actor);
   return m ? Number(m[1]) : null;

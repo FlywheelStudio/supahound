@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { alertDue, dashboardOnly, renderIncidentEmail, type RenderedEmail } from "../alerts/email.js";
+import { alertDue, dashboardOnly, renderIncidentEmail, REPEAT_WINDOW_DAYS, repeatSuppressible, type RenderedEmail } from "../alerts/email.js";
 import type { Pool } from "pg";
 import * as repo from "../db/repo.js";
 import { withTenant } from "../db/tenant.js";
@@ -20,7 +20,7 @@ import * as postureRepo from "../db/posture.js";
 import { AdvisorApiError, advisorFindings, type AdvisorLint } from "../posture/advisor.js";
 import { CatalogError, catalogFindings, parseCatalogRows } from "../posture/catalog.js";
 import { raiseForPosture, withoutPublicTables } from "../posture/findings.js";
-import { publicTableSet } from "../db/detectionSettings.js";
+import { expectedNetworkSet, publicTableSet } from "../db/detectionSettings.js";
 import type { SourceStatus } from "../posture/types.js";
 import { scan } from "../scan.js";
 import type { EnvVars } from "../config/fields.js";
@@ -337,6 +337,8 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
     return {
       project, runId, window, sql, anonReadable, anonDefiners, authenticatedDefiners, listableBuckets,
       networks: await repo.loadNetworks(tx, scope.projectId),
+      networkNames: await repo.loadNetworkNames(tx, scope.projectId),
+      expectedNetworks: await expectedNetworkSet(tx, scope.projectId),
       open: await repo.openIncidents(tx, scope.projectId),
       exposed: await postureRepo.postureExposedTables(tx, scope.projectId),
     };
@@ -394,6 +396,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   // 3. Detect and group, in memory, for this project only.
   const networks = new ServiceRoleNetworks();
   if (loaded.networks.length > 0) networks.learn(scope, loaded.networks);
+  if (loaded.networkNames.length > 0) networks.learnNames(scope, loaded.networkNames);
   const events = rows.map(normalizeRow);
   // Never-loaded ownership is "unable to assess" for detector 2, not an empty (clean) map.
   const unassessedDetectors: Finding["detector"][] = owners.loaded ? [] : ["cross_tenant"];
@@ -427,6 +430,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
   // A detection on a table that posture shows exposed is raised one step (decision 038).
   const findings = raiseForPosture(scan(events, {
     scope, networks, ownership: owners.loaded ? owners.ownership : {}, expectedAsns: new Set(project.expectedAsns),
+    expectedNetworks: loaded.expectedNetworks,
     anonReadable: loaded.anonReadable,
     anonDefiners: loaded.anonDefiners,
     authenticatedDefiners: loaded.authenticatedDefiners,
@@ -485,6 +489,7 @@ export async function pollProject(scope: ProjectScope, deps: PollDeps): Promise<
       }
     }
     await repo.saveNetworks(tx, scope.projectId, networks.known(scope));
+    await repo.saveNetworkNames(tx, scope.projectId, networks.knownNames(scope));
     await repo.finishPollRun(tx, runId, {
       status: "ok", templates: events.length, findings: findings.length, unassessedDetectors,
       edgeRequests: counts?.requests ?? null, graphqlCalls: counts?.graphql ?? null, windowEnd: rollup.end,
@@ -541,6 +546,24 @@ export async function sendPendingAlerts(scope: ProjectScope, deps: PollDeps): Pr
     const settingsUrl = new URL(`/w/${scope.tenantId}/projects`, alerts.appUrl).toString();
     let emailed = 0;
     for (const a of pending.slice(0, MAX_ALERTS_PER_POLL)) {
+      // A repeat of an incident that emailed in the last 7 days (#184, decision 050): no email.
+      // Its severity is recorded as alerted so it stops being pending; a later rise still emails.
+      if (a.alertedSeverity === null && repeatSuppressible(a)) {
+        const suppressed = await withTenant(deps.app, scope.tenantId, async (tx) => {
+          if (!(await repo.repeatAlertSent(tx, scope.projectId, a, REPEAT_WINDOW_DAYS))) return false;
+          await repo.markAlerted(tx, a.id, a.severity);
+          await repo.appendAudit(tx, {
+            projectId: scope.projectId,
+            action: "alert_email",
+            detail: {
+              incident_id: a.id, severity: a.severity, escalated: false,
+              recipients: loaded.recipients.length, sent: 0, failed: 0, outcome: "repeat_suppressed",
+            },
+          });
+          return true;
+        });
+        if (suppressed) continue;
+      }
       const rendered = renderIncidentEmail({
         projectName: loaded.project.name,
         incident: a,

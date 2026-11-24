@@ -318,12 +318,14 @@ All tables live in schema `supahound` and carry `tenant_id`.
 | `findings` | Detector output: structured evidence only |
 | `incidents` | Grouped findings per actor; severity, hits, summary and its source |
 | `service_role_networks` | Learned server ASNs per project (decision 003) |
+| `service_role_network_names` | Learned server network names per project, for logs without an ASN; seeded on its own (decision 050) |
 | `oauth_states` | Hashed OAuth state + PKCE verifier, 10-minute TTL, single use |
 | `posture_scans` | One per project: Scan now request, last attempt, status and time per source (decision 038) |
 | `posture_findings` | Latest posture findings per source: check, severity, object, structured evidence |
 | `scan_domains`, `scan_authorizations`, `scans`, `scan_findings`, `scan_jobs` | Scan funnel: verified domains, accepted scope, scan runs, findings, the queue (decision 016) |
 | `scan_domain_links` | A verified scan domain → the one project it belongs to (decision 040) |
 | `public_tables` | Tables in `public` a project's Owners or Admins marked intentionally public: detector 11 skips them, the Posture page shows their read findings as accepted (decision 045) |
+| `expected_networks` | Networks a project's Owners or Admins marked as expected, by normalized name: detector 4 raises no network signal for them; a browser, app or manual tool still alerts (decision 050) |
 | `audit_log` | Every query and model call, append-only |
 | `security_events` | Supahound's own security events: sign-ins, invites, role changes, connections, project changes, closing, data deletion; actor, action, target, result; IDs and enums only. Workspace owners read it (RLS); append-only for signed-in users; 90 days (a year on Enterprise, decision 048) once the workspace stops paying (decision 044) |
 | `billing_accounts`, `stripe_events`, `project_usage` | Billing per workspace: Stripe customer, validated card, trial, standing, billing model (seats or per project), Enterprise flag (decision 048); processed Stripe events; requests per project per day (decisions 028, 041) |
