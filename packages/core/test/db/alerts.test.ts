@@ -217,6 +217,111 @@ describe.skipIf(pgInfo === null)("incident alert email", () => {
     expect(calls).toBe(1);
   });
 
+  // #184, decision 050: an incident resolves after one quiet poll, so the same caller opened a
+  // new incident, and a new email, several times a day.
+  describe("repeat suppression", () => {
+    const SR = { detectors: ["service_role_misuse"], signals: ["non_hosting_network"] };
+    async function incidentFor(actor: string, severity: Severity, kind = SR, s = scope): Promise<string> {
+      return withTenant(db.app, s.tenantId, (tx) => repo.upsertIncident(tx, s.projectId, {
+        id: null, actor, status: "open", severity, detectors: kind.detectors as never, signals: kind.signals,
+        findingCount: 1, hits: 5, openedAt: NOW, lastSeenAt: NOW,
+      }));
+    }
+    const resolve = (id: string, s = scope) =>
+      withTenant(db.app, s.tenantId, (tx) => tx.query("UPDATE supahound.incidents SET status = 'resolved' WHERE id = $1", [id]));
+    // Moves this project's alert audit rows back in time, as if the email went out `days` ago.
+    const age = (days: number, s = scope) =>
+      db.admin.query(
+        "UPDATE supahound.audit_log SET created_at = now() - make_interval(days => $2) WHERE tenant_id = $1 AND action = 'alert_email'",
+        [s.tenantId, days],
+      );
+
+    it("emails the first incident, then skips a repeat by the same actor and signals within 7 days", async () => {
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+      await resolve(first);
+      sent = [];
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(0);
+      expect(sent).toEqual([]);
+      expect(await pending(scope)).toEqual([]);
+      expect((await audits(scope)).map((a) => a.detail.outcome)).toEqual(["sent", "repeat_suppressed"]);
+    });
+
+    it("emails the repeat once the last sent email is older than 7 days", async () => {
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      await sendPendingAlerts(scope, deps());
+      await resolve(first);
+      await age(8);
+      sent = [];
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+    });
+
+    it("counts from the last email sent, not from a suppressed repeat", async () => {
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      await sendPendingAlerts(scope, deps());
+      await resolve(first);
+      await age(5);
+      const second = await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(0);
+      await resolve(second);
+      await age(8); // the sent email and the suppressed one are both 8 days old now
+      sent = [];
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+    });
+
+    it("emails a different actor, a different signal set, or a higher severity", async () => {
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "medium");
+      await sendPendingAlerts(scope, deps());
+      await resolve(first);
+      sent = [];
+      await incidentFor("service_role:net:bbbbbbbbbbbb", "medium");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+      const mixed = await incidentFor("service_role:net:aaaaaaaaaaaa", "medium", { detectors: SR.detectors, signals: ["non_hosting_network", "manual_tool"] });
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+      await resolve(mixed);
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+    });
+
+    it("never suppresses a browser or mobile caller, or a critical incident", async () => {
+      const browser = { detectors: SR.detectors, signals: ["browser_caller"] };
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "critical", browser);
+      await sendPendingAlerts(scope, deps());
+      await resolve(first);
+      sent = [];
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "critical", browser);
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+      const mobile = { detectors: SR.detectors, signals: ["mobile_app_caller"] };
+      const m1 = await incidentFor("service_role:net:cccccccccccc", "high", mobile);
+      await sendPendingAlerts(scope, deps());
+      await resolve(m1);
+      await incidentFor("service_role:net:cccccccccccc", "high", mobile);
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+    });
+
+    it("does not count a failed send as an email", async () => {
+      failFor = new Set(["a@acme.test", "b@acme.test"]);
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      await sendPendingAlerts(scope, deps());
+      await resolve(first);
+      failFor = new Set();
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+    });
+
+    it("keeps projects and tenants apart", async () => {
+      const first = await incidentFor("service_role:net:aaaaaaaaaaaa", "high", SR, other);
+      await sendPendingAlerts(other, deps());
+      await resolve(first, other);
+      sent = [];
+      await incidentFor("service_role:net:aaaaaaaaaaaa", "high");
+      expect(await sendPendingAlerts(scope, deps())).toBe(1);
+    });
+  });
+
   it("sends nothing without alert deps, and the alert stays pending", async () => {
     await openIncident(scope, "high");
     expect(await sendPendingAlerts(scope, deps({ alerts: null }))).toBe(0);

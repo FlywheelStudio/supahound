@@ -31,6 +31,19 @@ export function dashboardOnly(incident: { severity: Severity; signals: readonly 
   return incident.severity === "low" && incident.signals.length > 0 && incident.signals.every((s) => DASHBOARD_ONLY_SIGNALS.has(s));
 }
 
+// Repeat suppression (#184, decision 050). An incident resolves when its actor is quiet for one
+// poll, so the same caller opens a new incident, and a new email, many times a day. A new
+// incident does not email when the same project, actor and signal set emailed at the same or a
+// higher severity in the last REPEAT_WINDOW_DAYS, counted from the last email actually sent. The
+// dashboard still lists it. Never suppressed: critical incidents, and a key in a browser or a
+// mobile app, which is a leak every time it shows.
+export const REPEAT_WINDOW_DAYS = 7;
+const NEVER_SUPPRESS_SIGNALS: ReadonlySet<string> = new Set(["browser_caller", "mobile_app_caller"]);
+
+export function repeatSuppressible(incident: { severity: Severity; signals: readonly string[] }): boolean {
+  return incident.severity !== "critical" && !incident.signals.some((s) => NEVER_SUPPRESS_SIGNALS.has(s));
+}
+
 export function alertDue(severity: Severity, alerted: Severity | null, level: AlertLevel): boolean {
   return meetsThreshold(severity, level) && (alerted === null || SEVERITY_RANK[severity] > SEVERITY_RANK[alerted]);
 }

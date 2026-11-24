@@ -1,8 +1,8 @@
 import { effectiveRole, type EdgeEvent } from "../logs/event.js";
 import { tableFromPath } from "../postgrest/query.js";
-import { classifyCaller, classifyNetwork } from "../network/classify.js";
+import { classifyCaller, classifyNetwork, networkName } from "../network/classify.js";
 import { scopeKey, type ProjectScope } from "../tenancy/scope.js";
-import { maxSeverity, safeIdentifier, type Finding, type Severity } from "./finding.js";
+import { fingerprint, maxSeverity, safeIdentifier, type Finding, type Severity } from "./finding.js";
 
 // Detector 4: the service-role key used from a browser, a mobile app, a non-hosting network,
 // or a hosting network the project has not used before.
@@ -55,6 +55,15 @@ const SIGNAL_SEVERITY = {
 export type ServiceRoleSignal = keyof typeof SIGNAL_SEVERITY;
 export const SERVICE_ROLE_SIGNALS = Object.keys(SIGNAL_SEVERITY) as ServiceRoleSignal[];
 
+// The incident key for a service-role caller: the ASN when the log has one, else a fingerprint of
+// the network's name, else `unknown`. Edge logs mostly omit the ASN (#184); one shared `unknown`
+// actor would group a cloud server and a home connection into one incident.
+export function serviceRoleActor(asn: number | null, asOrganization: string | null): string {
+  if (asn !== null) return `service_role:asn:${asn}`;
+  const name = networkName(asOrganization);
+  return name === null ? "service_role:asn:unknown" : `service_role:net:${fingerprint(name)}`;
+}
+
 // Processes one poll's events. On a project's first poll, hosting networks are learned
 // without a `new_network` signal; every other signal fires from the first poll.
 export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleContext): Finding[] {
@@ -88,7 +97,7 @@ export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleCon
     findings.push({
       detector: "service_role_misuse",
       severity: maxSeverity(signals.map((s) => SIGNAL_SEVERITY[s])),
-      actor: `service_role:asn:${event.asn ?? "unknown"}`,
+      actor: serviceRoleActor(event.asn, event.asOrganization),
       signals,
       firstSeen: event.firstSeen,
       lastSeen: event.lastSeen,
@@ -98,6 +107,9 @@ export function detectServiceRoleMisuse(events: EdgeEvent[], ctx: ServiceRoleCon
         sdk: caller.sdk,
         networkType: network,
         asn: event.asn,
+        // The network's org name, normalized (#184): what an Owner marks as expected. Cloudflare
+        // sets it from the IP, so the caller does not choose it.
+        network: networkName(event.asOrganization),
         expectedNetwork: expected,
         // The kind of key used (#154), an enum: `secret` (sb_secret_) or `jwt` (the legacy key).
         apiKeyKind: event.apiKeyKind,
