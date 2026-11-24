@@ -204,6 +204,66 @@ describe("detectServiceRoleMisuse", () => {
     expect(f!.signals).toEqual(["browser_caller"]);
   });
 
+  // #185, decision 050: edge logs mostly omit the ASN, so the memory and the marks work by name.
+  describe("by network name, without an ASN", () => {
+    const server = (org: string) => serviceEvent({
+      jwtRole: null, apiKeyRole: null, apiKeyKind: "secret", authorizationKind: "secret",
+      userAgent: "node", clientInfo: "supabase-js-node/2.80.0", asn: null, asOrganization: org,
+    });
+
+    it("learns names silently on the first poll, then flags a new one once", () => {
+      const c = ctx();
+      expect(detectServiceRoleMisuse([server("Railway")], c)).toEqual([]);
+      expect(c.networks.knownNames(c.scope)).toEqual(["railway"]);
+      const [f] = detectServiceRoleMisuse([server("Railway"), server("Render")], c);
+      expect(f?.signals).toEqual(["new_network"]);
+      expect(f?.severity).toBe("medium");
+      expect(detectServiceRoleMisuse([server("Render")], c)).toEqual([]);
+    });
+
+    // The trap: a project seeded by ASN must not flag every provider name on the first poll
+    // after the deploy.
+    it("learns names silently even when the ASN memory is already seeded", () => {
+      const c = ctx();
+      c.networks.learn(c.scope, [16509]);
+      expect(detectServiceRoleMisuse([server("Railway"), server("Vercel Inc")], c)).toEqual([]);
+      expect(c.networks.knownNames(c.scope)).toEqual(["railway", "vercel"]);
+    });
+
+    // One provider registers its ranges under many names, and each region shows up hours apart.
+    it("keys the memory on the provider, so another region of a known provider is not new", () => {
+      const c = ctx();
+      detectServiceRoleMisuse([server("Amazon.com, Inc.")], c);
+      expect(c.networks.knownNames(c.scope)).toEqual(["amazon"]);
+      for (const region of ["Amazon Data Services UK", "A100 ROW GmbH", "A100 ROW Inc", "Amazon Data Services India"]) {
+        expect(detectServiceRoleMisuse([server(region)], c), region).toEqual([]);
+      }
+      expect(c.networks.knownNames(c.scope)).toEqual(["amazon"]);
+    });
+
+    it("keys a generic host by its full name, and flags a different one", () => {
+      const c = ctx();
+      detectServiceRoleMisuse([server("Example Hosting GmbH")], c);
+      expect(c.networks.knownNames(c.scope)).toEqual(["example hosting gmbh"]);
+      const [f] = detectServiceRoleMisuse([server("Other Datacenter Ltd")], c);
+      expect(f?.signals).toEqual(["new_network"]);
+    });
+
+    it("does not learn a name from a browser or manual caller", () => {
+      const c = ctx();
+      detectServiceRoleMisuse([serviceEvent({ userAgent: "curl/8.7.1", clientInfo: null, asn: null, asOrganization: "Railway" })], c);
+      expect(c.networks.knownNames(c.scope)).toEqual([]);
+    });
+
+    it("silences network signals for a marked name, never a browser", () => {
+      const c = { ...ctx(), expectedNetworks: new Set(["example telecom ag"]) };
+      expect(detectServiceRoleMisuse([server("Example Telecom AG")], c)).toEqual([]);
+      const [f] = detectServiceRoleMisuse([serviceEvent({ userAgent: CHROME_UA, clientInfo: null, asn: null, asOrganization: "Example Telecom AG" })], c);
+      expect(f?.signals).toEqual(["browser_caller"]);
+      expect(f?.evidence.expectedNetwork).toBe(true);
+    });
+  });
+
   describe("new_network", () => {
     it("learns hosting networks silently on the first poll, then flags a new one", () => {
       const c = ctx();

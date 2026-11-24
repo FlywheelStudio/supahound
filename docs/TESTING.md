@@ -214,6 +214,7 @@ Scenario IDs are stable. Add new ones at the end. Use the "UAT scenario" issue t
 | UAT-W52 | The owner sets the RPC burst threshold next to email alerts; it is audited; an out-of-range value and a viewer's replayed form are refused by the server (`alerts.uat.spec.ts`, decision 045) |
 | UAT-W53 | The owner reads a member's sign-in and an invite on Settings → Security log; the member gets no log and no link; the rows hold no address (`securityLog.uat.spec.ts`, decision 044) |
 | UAT-W54 | An Enterprise workspace sees a 200-day-old incident (list and detail) and security event, not a 370-day-old one; the plan page says "1-year history"; clearing the flag hides them on the next request without deleting them (`incidents.uat.spec.ts`, decision 048) |
+| UAT-W55 | An owner marks a service-role incident's network as expected from the incident page and lands on Notifications with the mark listed and audited; the incident stops offering it; a viewer sees the network but no button, and a replayed owner form is refused; Remove clears the mark (`expectedNetworks.uat.spec.ts`, decision 050) |
 
 ### Billing (automated, `apps/web/e2e/specs/billing.uat.spec.ts` and `projectBilling.uat.spec.ts`, decisions 028 and 041)
 
@@ -458,6 +459,9 @@ Stripe is the fake in `apps/web/e2e/support/fakeStripe.ts`, reached through the 
 | A mark accepts reads only (#160) | `acceptedAsPublic` accepts a policy with any open command | 1 unit test fails |
 | Only Owners and Admins mark, in RLS (#160) | The migration's INSERT/DELETE policies also allow `editor` | 1 Postgres test fails |
 | The server checks the role before a mark (#160) | `markPublicAction` skips `canMarkPublic` (RLS still refuses) | UAT-W51 fails (no role notice) |
+| The server checks the role before an expected-network mark (#185) | `markExpectedNetworkAction` skips `canMarkExpected` (RLS still refuses) | UAT-W55 fails (no role notice); checked 2026-11-24 |
+| Repeat suppression in the poller (#184) | `sendPendingAlerts` skips the `repeatAlertSent` check | 2 Postgres tests in `test/db/alerts.test.ts` fail |
+| Expected networks reach detector 4 (#185) | The detector ignores `expectedNetworks` | 2 poll tests in `test/db/expectedNetworks.test.ts` fail |
 | Storage: the rollup fetches anon list calls (#157) | `edgeRollupSql` drops the Storage branch | 1 unit test and UAT-D18 fail |
 | Storage: only posture-named buckets are named (#157) | `detectStorageListing` keeps the path's bucket | 2 unit tests and UAT-D18 fail |
 | Storage: the poller passes posture to the detector (#157) | `pollProject` drops `listableBuckets` from the scan | UAT-D18 fails |

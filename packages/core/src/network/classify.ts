@@ -25,11 +25,41 @@ export const HOSTING_ASNS: ReadonlyMap<number, string> = new Map([
 ]);
 
 // Edge logs carry the network's org name but, in practice, no ASN (#184), so the name decides.
-// "A100 ROW GmbH" is the registrant of Amazon's EU address ranges; its name names no provider.
-// The application platforms (Railway, Render, Fly.io, Vercel, Heroku, Netlify, Supabase) run
-// customers' servers and edge functions.
-const HOSTING_ORG =
-  /\b(amazon|aws|a100 row|google|microsoft|azure|digitalocean|hetzner|ovh|linode|akamai|vultr|oracle|cloudflare|fastly|scaleway|contabo|alibaba|tencent|railway|render|fly\.io|vercel|heroku|netlify|supabase|hosting|datacenter|data center|colocation|server)/i;
+// Each provider is one memory key: one provider registers its ranges under many names (Amazon:
+// "Amazon.com, Inc.", "Amazon Data Services UK", "A100 ROW GmbH", ...), and each region shows up
+// hours apart. "A100 ROW" is the registrant of Amazon's EU address ranges; its name names no
+// provider. The application platforms run customers' servers and edge functions.
+const PROVIDERS: readonly (readonly [key: string, pattern: RegExp])[] = [
+  ["amazon", /\b(amazon|aws|a100 row)/i],
+  ["google", /\bgoogle/i],
+  ["microsoft", /\b(microsoft|azure)/i],
+  ["digitalocean", /\bdigitalocean/i],
+  ["hetzner", /\bhetzner/i],
+  ["ovh", /\bovh/i],
+  ["akamai", /\b(linode|akamai)/i],
+  ["vultr", /\bvultr/i],
+  ["oracle", /\boracle/i],
+  ["cloudflare", /\bcloudflare/i],
+  ["fastly", /\bfastly/i],
+  ["scaleway", /\bscaleway/i],
+  ["contabo", /\bcontabo/i],
+  ["alibaba", /\balibaba/i],
+  ["tencent", /\btencent/i],
+  ["railway", /\brailway/i],
+  ["render", /\brender/i],
+  ["fly", /\bfly\W?io\b/i],
+  ["vercel", /\bvercel/i],
+  ["heroku", /\bheroku/i],
+  ["netlify", /\bnetlify/i],
+  ["supabase", /\bsupabase/i],
+];
+// Generic words: hosting, but no provider to key on.
+const HOSTING_WORDS = /\b(hosting|datacenter|data center|colocation|server)/i;
+
+function providerOf(asOrganization: string): string | null {
+  for (const [key, pattern] of PROVIDERS) if (pattern.test(asOrganization)) return key;
+  return null;
+}
 
 // A network's org name, reduced to lowercase letters, digits and single spaces, at most 80
 // characters. Cloudflare sets it from the caller's IP; the caller does not choose it. Null when
@@ -43,8 +73,15 @@ export function networkName(asOrganization: string | null): string | null {
 export function classifyNetwork(asn: number | null, asOrganization: string | null): NetworkType {
   if (asn === null && asOrganization === null) return "unknown";
   if (asn !== null && HOSTING_ASNS.has(asn)) return "hosting";
-  if (asOrganization !== null && HOSTING_ORG.test(asOrganization)) return "hosting";
+  if (asOrganization !== null && (providerOf(asOrganization) !== null || HOSTING_WORDS.test(asOrganization))) return "hosting";
   return "other";
+}
+
+// The key decision 003's memory uses when the log has no ASN (decision 050): the provider for a
+// known one, else the normalized name. Two Amazon regions are one network to the memory.
+export function networkMemoryKey(asOrganization: string | null): string | null {
+  if (asOrganization === null) return null;
+  return providerOf(asOrganization) ?? networkName(asOrganization);
 }
 
 export type CallerClass = "browser" | "mobile_app" | "manual_tool" | "server" | "unknown";

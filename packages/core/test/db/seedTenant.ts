@@ -40,6 +40,9 @@ export async function seedFullTenant(db: Db, name: string, token: string): Promi
       evidence: { table: "notes" }, incidentId: incident,
     }]);
     await repo.saveNetworks(tx, project, [16509]);
+    // Decision 050: network memory by name and an expected network.
+    await repo.saveNetworkNames(tx, project, ["railway"]);
+    await tx.query("INSERT INTO supahound.expected_networks (tenant_id, project_id, network) VALUES ($1, $2, 'example isp')", [tenant, project]);
     await repo.appendAudit(tx, { projectId: project, action: "logs_query", detail: { rows: 1 } });
     const owner = randomUUID();
     await tx.query("INSERT INTO supahound.memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner')", [tenant, owner]);

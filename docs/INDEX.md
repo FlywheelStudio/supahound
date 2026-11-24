@@ -9,6 +9,7 @@
 | [TESTING.md](TESTING.md) | Test tiers, commands, E2E stack, UAT catalogue, mutation checks |
 | [self-hosting.md](self-hosting.md) | Run Supahound on your own Supabase and Cloudflare accounts: every key, step and limit (alpha) |
 | [WORKFLOW.md](WORKFLOW.md) | Issue → branch → PR → develop → main; labels, automation, rules |
+| [features/expected-networks.md](features/expected-networks.md) | Detector 4 without an ASN (#184, #185): platform names, one incident per network, no repeat email within 7 days, Owners and Admins mark expected networks, network memory by name, tests |
 | [features/scan-domains.md](features/scan-domains.md) | Security scan domains per project (#100): one project per verified domain, attach and detach by Owners and Admins, the Security scan tab, RLS on the scan tables, tests |
 | [features/project-removal-grace.md](features/project-removal-grace.md) | Project removal with a grace period (decision 042): active until the period ends, deleted 7 days later unless kept; Keep project, re-pick, portal cancel by webhook, the data job, tests |
 | [features/project-subscriptions.md](features/project-subscriptions.md) | One Stripe subscription per project (#99): shared workspace trial, reconcile, removal at the period end, Plan & billing, conversion CLI, rollout steps, tests |
@@ -21,7 +22,6 @@
 | [features/incident-alert-email.md](features/incident-alert-email.md) | Incident alert email (#16): threshold per project, the incident row as outbox, tests; recipients per project since #24 |
 | [features/ownership-refresh.md](features/ownership-refresh.md) | Ownership refresh (#10): RLS policies read in the poll, detector 2 coverage states, tests |
 | [features/project-picker.md](features/project-picker.md) | Project picker (#9): pick and remove watched projects, Management API client, tests |
-| [wip/expected-callers.md](wip/expected-callers.md) | Service-role alerts without an ASN (#184): network names, repeat suppression built; expected networks next |
 | [wip/public-release.md](wip/public-release.md) | Public release: what PR #69 did, the rehearsal and the publish steps left |
 | [wip/scan-funnel.md](wip/scan-funnel.md) | Scan funnel (hackme.si): authorization backbone and secrets scanner built, other passive checks + web funnel next |
 | [wip/baseline-free-detectors.md](wip/baseline-free-detectors.md) | Detectors 2 and 4 prototype: status, field paths, known gaps |

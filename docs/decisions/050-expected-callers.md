@@ -46,10 +46,15 @@ Erik asked on 2026-11-24 for a way to tell real problems from noise and to white
    a browser, a mobile app or a manual tool. Stored like decision 045's public tables: its own
    table with `tenant_id`, forced RLS, RESTRICTIVE insert and delete for Owners and Admins, and a
    `detection_setting` audit row for each mark and unmark.
-5. **Network memory by name (#185, with point 4).** When the ASN is missing, decision 003's memory keys
-   on the network name. Names have their own seeded state: the first poll that sees names learns
-   them silently, even for a project that already has ASN rows. Without that, every known provider
-   would raise `new_network` once on the first poll after the deploy.
+5. **Network memory by provider (#185, with point 4).** When the ASN is missing, decision 003's
+   memory keys on the provider (`networkMemoryKey`: `amazon` for every Amazon name, including
+   "A100 ROW"; one key per listed platform), or on the normalized name for a generic host matched
+   only by a word such as "hosting". One provider registers its ranges under many names, and each
+   region first shows up hours apart: a dogfood project's edge functions used 9 Amazon names in one
+   day. Keyed on the raw name, a replay of that day raised 8 `new_network` alerts; keyed on the
+   provider, none. The memory has its own seeded state: the first poll that learns a key learns it
+   silently, even for a project already seeded by ASN. Expected-network marks (point 4) stay on the
+   exact name.
 
 ## Alternatives considered
 
